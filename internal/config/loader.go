@@ -10,8 +10,9 @@ import (
 
 // Loader handles config file operations.
 type Loader struct {
-	v          *viper.Viper
-	configPath string // override for testing, empty uses Path()
+	v            *viper.Viper
+	configPath   string // override for testing, empty uses Path()
+	skipDefaults bool   // skip merging with defaults (for test isolation)
 }
 
 // NewLoader creates a new config loader.
@@ -24,6 +25,11 @@ func (l *Loader) SetConfigPath(path string) {
 	l.configPath = path
 }
 
+// SkipDefaults disables merging with defaults (for test isolation).
+func (l *Loader) SkipDefaults() {
+	l.skipDefaults = true
+}
+
 func (l *Loader) path() (string, error) {
 	if l.configPath != "" {
 		return l.configPath, nil
@@ -31,8 +37,15 @@ func (l *Loader) path() (string, error) {
 	return Path()
 }
 
-// Load reads and validates config from disk.
+// Load reads config from disk and merges with defaults.
 func (l *Loader) Load() (*Config, error) {
+	var cfg *Config
+	if l.skipDefaults {
+		cfg = &Config{Version: "1", Providers: make(map[string]Provider)}
+	} else {
+		cfg = DefaultConfig()
+	}
+
 	configPath, err := l.path()
 	if err != nil {
 		return nil, err
@@ -42,39 +55,32 @@ func (l *Loader) Load() (*Config, error) {
 	l.v.SetConfigType("yaml")
 
 	if err := l.v.ReadInConfig(); err != nil {
+		if os.IsNotExist(err) {
+			return cfg, nil
+		}
 		return nil, fmt.Errorf("read config: %w", err)
 	}
 
-	var cfg Config
-	if err := l.v.Unmarshal(&cfg); err != nil {
+	var userCfg Config
+	if err := l.v.Unmarshal(&userCfg); err != nil {
 		return nil, fmt.Errorf("unmarshal config: %w", err)
 	}
 
-	if err := cfg.Validate(); err != nil {
-		return nil, fmt.Errorf("validate config: %w", err)
+	// Merge user overrides on top of defaults.
+	// User providers fully replace defaults (not field-by-field merge).
+	for name, p := range userCfg.Providers {
+		cfg.Providers[name] = p
 	}
 
-	return &cfg, nil
+	return cfg, nil
 }
 
-// LoadOrCreate loads config or creates default. Returns (config, created, error).
+// LoadOrCreate loads config (always merges with defaults). Returns (config, created, error).
+//
+// Deprecated: Use Load() instead. The created return value is always false.
 func (l *Loader) LoadOrCreate() (*Config, bool, error) {
-	exists, err := l.Exists()
-	if err != nil {
-		return nil, false, err
-	}
-
-	if exists {
-		cfg, err := l.Load()
-		return cfg, false, err
-	}
-
-	cfg := DefaultConfig()
-	if err := l.Save(cfg); err != nil {
-		return nil, false, fmt.Errorf("create default config: %w", err)
-	}
-
-	return cfg, true, nil
+	cfg, err := l.Load()
+	return cfg, false, err
 }
 
 // Save writes config to disk.

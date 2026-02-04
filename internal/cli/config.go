@@ -46,7 +46,7 @@ func runConfigShow(_ *cobra.Command, _ []string) error {
 }
 
 func runConfigShowWithLoader(loader *config.Loader) error {
-	cfg, _, err := loader.LoadOrCreate()
+	cfg, err := loader.Load()
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
 	}

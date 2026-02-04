@@ -84,19 +84,16 @@ func TestLoader_Exists(t *testing.T) {
 }
 
 func TestLoader_LoadOrCreate(t *testing.T) {
-	t.Run("creates default when missing", func(t *testing.T) {
+	t.Run("returns defaults when config missing", func(t *testing.T) {
 		tmpDir := t.TempDir()
 		configPath := filepath.Join(tmpDir, "config.yaml")
 
 		loader := NewLoader()
 		loader.SetConfigPath(configPath)
 
-		cfg, created, err := loader.LoadOrCreate()
+		cfg, _, err := loader.LoadOrCreate()
 		if err != nil {
 			t.Fatalf("LoadOrCreate() error = %v", err)
-		}
-		if !created {
-			t.Error("LoadOrCreate() created = false, want true")
 		}
 		if cfg == nil {
 			t.Fatal("LoadOrCreate() config = nil")
@@ -104,42 +101,76 @@ func TestLoader_LoadOrCreate(t *testing.T) {
 		if cfg.Version != "1" {
 			t.Errorf("config.Version = %s, want 1", cfg.Version)
 		}
-
-		if _, err := os.Stat(configPath); os.IsNotExist(err) {
-			t.Error("config file not created on disk")
+		// Should have default providers
+		if _, ok := cfg.Providers["go-build"]; !ok {
+			t.Error("LoadOrCreate() missing default go-build provider")
 		}
 	})
 
-	t.Run("loads existing config", func(t *testing.T) {
+	t.Run("merges user config with defaults", func(t *testing.T) {
 		tmpDir := t.TempDir()
 		configPath := filepath.Join(tmpDir, "config.yaml")
+
+		// Write partial config with only one override
+		content := `version: "1"
+providers:
+  custom:
+    enabled: true
+    paths:
+      - /custom/path
+    max_size: 5G
+`
+		if err := os.WriteFile(configPath, []byte(content), 0o600); err != nil {
+			t.Fatalf("write config: %v", err)
+		}
 
 		loader := NewLoader()
 		loader.SetConfigPath(configPath)
 
-		original := DefaultConfig()
-		original.Providers["test"] = Provider{
-			Enabled:  true,
-			Paths:    []string{"/test"},
-			MaxSize:  "5G",
-			CleanCmd: "rm -rf /test",
-		}
-		if err := loader.Save(original); err != nil {
-			t.Fatalf("Save() error = %v", err)
-		}
-
-		loader2 := NewLoader()
-		loader2.SetConfigPath(configPath)
-
-		cfg, created, err := loader2.LoadOrCreate()
+		cfg, _, err := loader.LoadOrCreate()
 		if err != nil {
 			t.Fatalf("LoadOrCreate() error = %v", err)
 		}
-		if created {
-			t.Error("LoadOrCreate() created = true, want false for existing")
+		// Should have custom provider
+		if _, ok := cfg.Providers["custom"]; !ok {
+			t.Error("LoadOrCreate() missing custom provider from user config")
 		}
-		if _, ok := cfg.Providers["test"]; !ok {
-			t.Error("loaded config missing test provider")
+		// Should have default providers merged in
+		if _, ok := cfg.Providers["go-build"]; !ok {
+			t.Error("LoadOrCreate() missing default go-build provider after merge")
+		}
+	})
+
+	t.Run("user can disable default provider", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		configPath := filepath.Join(tmpDir, "config.yaml")
+
+		content := `version: "1"
+providers:
+  go-build:
+    enabled: false
+    paths:
+      - ~/Library/Caches/go-build
+    max_size: 10G
+`
+		if err := os.WriteFile(configPath, []byte(content), 0o600); err != nil {
+			t.Fatalf("write config: %v", err)
+		}
+
+		loader := NewLoader()
+		loader.SetConfigPath(configPath)
+
+		cfg, _, err := loader.LoadOrCreate()
+		if err != nil {
+			t.Fatalf("LoadOrCreate() error = %v", err)
+		}
+
+		goBuild, ok := cfg.Providers["go-build"]
+		if !ok {
+			t.Fatal("go-build provider missing")
+		}
+		if goBuild.Enabled {
+			t.Error("user override enabled=false not applied")
 		}
 	})
 }
@@ -194,8 +225,10 @@ func TestLoader_Save_ValidatesConfig(t *testing.T) {
 	loader.SetConfigPath(configPath)
 
 	cfg := &Config{
-		Version:   "", // invalid version
-		Providers: map[string]Provider{},
+		Version: "1",
+		Providers: map[string]Provider{
+			"test": {Enabled: true, Paths: []string{}, MaxSize: "1G"}, // invalid: no paths
+		},
 	}
 
 	err := loader.Save(cfg)

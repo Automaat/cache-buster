@@ -20,9 +20,9 @@ func TestConfigShow(t *testing.T) {
 		t.Fatalf("runConfigShowWithLoader failed: %v", err)
 	}
 
-	// Verify config was created
-	if _, err := os.Stat(configPath); os.IsNotExist(err) {
-		t.Error("config file not created")
+	// Config file should NOT be auto-created (uses defaults in memory)
+	if _, err := os.Stat(configPath); !os.IsNotExist(err) {
+		t.Error("config file should not be auto-created")
 	}
 }
 

@@ -22,14 +22,6 @@ type Provider struct {
 
 // Validate checks config for required fields.
 func (c *Config) Validate() error {
-	if c.Version == "" {
-		return fmt.Errorf("version is required")
-	}
-
-	if len(c.Providers) == 0 {
-		return fmt.Errorf("at least one provider is required")
-	}
-
 	for name, p := range c.Providers {
 		if len(p.Paths) == 0 {
 			return fmt.Errorf("provider %q: at least one path is required", name)
@@ -38,7 +30,6 @@ func (c *Config) Validate() error {
 			return fmt.Errorf("provider %q: max_size is required", name)
 		}
 	}
-
 	return nil
 }
 
@@ -48,8 +39,20 @@ func (c *Config) GetProvider(name string) (Provider, bool) {
 	return p, ok
 }
 
-// EnabledProviders returns sorted list of enabled provider names.
+// EnabledProviders returns sorted list of enabled provider names with existing paths.
 func (c *Config) EnabledProviders() []string {
+	var enabled []string
+	for name, p := range c.Providers {
+		if p.Enabled && PathsExist(p.Paths) {
+			enabled = append(enabled, name)
+		}
+	}
+	sort.Strings(enabled)
+	return enabled
+}
+
+// AllEnabledProviders returns all enabled providers regardless of path existence.
+func (c *Config) AllEnabledProviders() []string {
 	var enabled []string
 	for name, p := range c.Providers {
 		if p.Enabled {
