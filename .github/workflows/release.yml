@@ -1,0 +1,86 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to release (e.g., v0.2.0). Leave empty for auto minor bump"
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+
+      - name: Setup Go
+        uses: actions/setup-go@7a3fe6cf4cb3a834922a1244abfce67bcef6a0c5 # v6.2.0
+        with:
+          go-version: "1.25.6"
+
+      - name: Determine version
+        id: version
+        run: |
+          INPUT_VERSION="${{ github.event.inputs.version }}"
+
+          if [ -n "$INPUT_VERSION" ]; then
+            # Validate format
+            if ! echo "$INPUT_VERSION" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
+              echo "Error: Version must match format v<major>.<minor>.<patch> (e.g., v0.2.0)"
+              exit 1
+            fi
+            # Validate version > latest tag
+            LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+            if [ -n "$LATEST_TAG" ]; then
+              INPUT_NO_V=${INPUT_VERSION#v}
+              LATEST_NO_V=${LATEST_TAG#v}
+              if [ "$(printf '%s\n' "$INPUT_NO_V" "$LATEST_NO_V" | sort -V | tail -n1)" != "$INPUT_NO_V" ]; then
+                echo "Error: Version $INPUT_VERSION must be > $LATEST_TAG"
+                exit 1
+              fi
+            fi
+            VERSION="$INPUT_VERSION"
+          elif ! git describe --tags --abbrev=0 2>/dev/null; then
+            VERSION="v0.1.0"
+          else
+            LATEST=$(git describe --tags --abbrev=0)
+            # v0.1.3 -> v0.2.0 (bump minor, reset patch)
+            VERSION=$(echo "$LATEST" | awk -F. '{print $1"."$2+1".0"}')
+          fi
+
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Releasing version: $VERSION"
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Create and push tag
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+
+          if git rev-parse "$VERSION" >/dev/null 2>&1; then
+            echo "Error: Git tag '$VERSION' already exists"
+            exit 1
+          fi
+
+          git tag -a "$VERSION" -m "Release $VERSION"
+          git push origin "$VERSION"
+
+      - name: Run GoReleaser
+        uses: goreleaser/goreleaser-action@9c156ee8a17a598857849441385a2041ef570552 # v6.3.0
+        with:
+          distribution: goreleaser
+          version: latest
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
