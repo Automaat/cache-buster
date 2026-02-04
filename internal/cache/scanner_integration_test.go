@@ -6,11 +6,12 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Automaat/cache-buster/internal/config"
 	"github.com/Automaat/cache-buster/pkg/size"
 )
 
 func TestCalculateSizeAgainstDu(t *testing.T) {
-	paths, err := ExpandPaths([]string{"~/.npm"})
+	paths, err := config.ExpandPaths([]string{"~/.npm"})
 	if err != nil {
 		t.Skipf("expand paths: %v", err)
 	}
@@ -44,6 +45,15 @@ func TestCalculateSizeAgainstDu(t *testing.T) {
 	diff := ourSize - duSize
 	if diff < 0 {
 		diff = -diff
+	}
+
+	if duSize == 0 {
+		if ourSize == 0 {
+			t.Log("Both report 0 bytes")
+			return
+		}
+		t.Errorf("du reports 0 bytes but CalculateSize reports %d", ourSize)
+		return
 	}
 
 	pct := float64(diff) / float64(duSize) * 100

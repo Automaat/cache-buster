@@ -2,6 +2,7 @@ package size
 
 import (
 	"fmt"
+	"math"
 	"regexp"
 	"strconv"
 	"strings"
@@ -12,7 +13,7 @@ import (
 var sizeRegex = regexp.MustCompile(`(?i)^(\d+(?:\.\d+)?)\s*([KMGT]?I?B?)$`)
 
 // ParseSize parses human-readable size string to bytes.
-// Supports: B, K/KB, M/MB, G/GB, T/TB (case insensitive).
+// Supports: B, K/KB/KiB, M/MB/MiB, G/GB/GiB, T/TB/TiB (case insensitive).
 func ParseSize(s string) (int64, error) {
 	s = strings.TrimSpace(s)
 	if s == "" {
@@ -47,7 +48,11 @@ func ParseSize(s string) (int64, error) {
 		return 0, fmt.Errorf("unknown size unit: %q", unit)
 	}
 
-	return int64(value * multiplier), nil
+	result := value * multiplier
+	if result > math.MaxInt64 {
+		return 0, fmt.Errorf("size exceeds maximum: %q", s)
+	}
+	return int64(result), nil
 }
 
 // FormatSize formats bytes as human-readable string.

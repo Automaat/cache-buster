@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/Automaat/cache-buster/internal/config"
 )
 
 func TestExpandPaths(t *testing.T) {
@@ -41,7 +43,7 @@ func TestExpandPaths(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := ExpandPaths(tt.patterns)
+			got, err := config.ExpandPaths(tt.patterns)
 			if err != nil {
 				t.Fatalf("ExpandPaths() error = %v", err)
 			}
@@ -63,7 +65,7 @@ func TestExpandPathsGlob(t *testing.T) {
 		}
 	}
 
-	got, err := ExpandPaths([]string{filepath.Join(tmpDir, "*.txt")})
+	got, err := config.ExpandPaths([]string{filepath.Join(tmpDir, "*.txt")})
 	if err != nil {
 		t.Fatalf("ExpandPaths() error = %v", err)
 	}

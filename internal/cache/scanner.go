@@ -3,9 +3,7 @@ package cache
 import (
 	"fmt"
 	"io/fs"
-	"os"
 	"path/filepath"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -18,32 +16,8 @@ type FileInfo struct {
 	Size    int64
 }
 
-// ExpandPaths expands ~ and globs in path patterns.
-func ExpandPaths(patterns []string) ([]string, error) {
-	var result []string
-
-	for _, pattern := range patterns {
-		expanded, err := expandTilde(pattern)
-		if err != nil {
-			return nil, err
-		}
-
-		if strings.ContainsAny(expanded, "*?[") {
-			matches, err := filepath.Glob(expanded)
-			if err != nil {
-				return nil, fmt.Errorf("glob %q: %w", pattern, err)
-			}
-			result = append(result, matches...)
-		} else {
-			result = append(result, expanded)
-		}
-	}
-
-	return result, nil
-}
-
 // CalculateSize calculates total size of all files under given paths.
-// Walks directories in parallel.
+// Walks directories in parallel. Returns 0 if paths is empty.
 func CalculateSize(paths []string) (int64, error) {
 	var total atomic.Int64
 	var firstErr atomic.Value
@@ -81,7 +55,7 @@ func CalculateSize(paths []string) (int64, error) {
 }
 
 // ListFiles returns file info for all files under given paths.
-// Walks directories in parallel.
+// Walks directories in parallel. Returns empty slice if paths is empty.
 func ListFiles(paths []string) ([]FileInfo, error) {
 	var mu sync.Mutex
 	var files []FileInfo
@@ -124,25 +98,4 @@ func ListFiles(paths []string) ([]FileInfo, error) {
 		return files, fmt.Errorf("list files: %w", err)
 	}
 	return files, nil
-}
-
-func expandTilde(path string) (string, error) {
-	if !strings.HasPrefix(path, "~") {
-		return path, nil
-	}
-
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", fmt.Errorf("get home dir: %w", err)
-	}
-
-	if path == "~" {
-		return home, nil
-	}
-
-	if strings.HasPrefix(path, "~/") {
-		return filepath.Join(home, path[2:]), nil
-	}
-
-	return path, nil
 }
