@@ -15,6 +15,7 @@ import (
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/mattn/go-runewidth"
 	"github.com/spf13/cobra"
 )
 
@@ -404,6 +405,13 @@ func (m model) View() string {
 		startY := (len(bgLines) - popupHeight) / 2
 		startX := (m.width - popupWidth) / 2
 
+		if startX < 0 {
+			startX = 0
+		}
+		if startY < 0 {
+			startY = 0
+		}
+
 		for i, pLine := range popupLines {
 			bgIdx := startY + i
 			if bgIdx >= 0 && bgIdx < len(bgLines) {
@@ -635,6 +643,8 @@ func (m model) selectedNames() []string {
 	return names
 }
 
+// truncateLeft/truncateRight handle lipgloss CSI sequences (colors, styles).
+// Assumes escape sequences end with a letter (a-z/A-Z).
 func truncateLeft(s string, skip int) string {
 	var result strings.Builder
 	width := 0
@@ -659,7 +669,7 @@ func truncateLeft(s string, skip int) string {
 		if width >= skip {
 			result.WriteRune(r)
 		}
-		width++
+		width += runewidth.RuneWidth(r)
 	}
 	return result.String()
 }
@@ -681,11 +691,12 @@ func truncateRight(s string, keep int) string {
 			}
 			continue
 		}
-		if width >= keep {
+		rw := runewidth.RuneWidth(r)
+		if width+rw > keep {
 			break
 		}
 		result.WriteRune(r)
-		width++
+		width += rw
 	}
 	return result.String()
 }
