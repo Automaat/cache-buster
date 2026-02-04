@@ -161,7 +161,7 @@ func TestTrim_ContextCancellation(t *testing.T) {
 		DryRun:  false,
 	})
 
-	assert.Error(t, err)
+	assert.ErrorIs(t, err, context.Canceled)
 	assert.Contains(t, result.Output, "interrupted")
 }
 

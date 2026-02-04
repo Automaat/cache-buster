@@ -21,10 +21,11 @@ type TrimOptions struct {
 // TrimResult contains trimming operation results.
 type TrimResult struct {
 	Output       string
-	Errors       []error
 	FreedBytes   int64
 	DeletedCount int64
 }
+
+const trimBufferFactor = 0.9 // Keep 10% headroom below max_size
 
 // Trim deletes files that are:
 // - older than MaxAge, OR
@@ -39,6 +40,8 @@ func Trim(ctx context.Context, paths []string, opts TrimOptions) (TrimResult, er
 		return TrimResult{Output: "no files found"}, nil
 	}
 
+	// Sort by ModTime (oldest first). ModTime is appropriate for dev caches
+	// where content-addressable storage updates mtime on access.
 	sort.Slice(files, func(i, j int) bool {
 		return files[i].ModTime.Before(files[j].ModTime)
 	})
@@ -49,7 +52,7 @@ func Trim(ctx context.Context, paths []string, opts TrimOptions) (TrimResult, er
 		deleteErrors  []string
 		output        strings.Builder
 		cutoff        = time.Now().Add(-opts.MaxAge)
-		targetSize    = int64(float64(opts.MaxSize) * 0.9) // 10% buffer
+		targetSize    = int64(float64(opts.MaxSize) * trimBufferFactor)
 		toDelete      []FileInfo
 		remainingSize int64
 	)
@@ -105,7 +108,6 @@ func Trim(ctx context.Context, paths []string, opts TrimOptions) (TrimResult, er
 
 		if err := os.Remove(f.Path); err != nil {
 			deleteErrors = append(deleteErrors, fmt.Sprintf("%s: %v", f.Path, err))
-			result.Errors = append(result.Errors, err)
 			continue
 		}
 

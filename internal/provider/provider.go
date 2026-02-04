@@ -11,7 +11,7 @@ type CleanMode int
 // CleanMode constants.
 const (
 	CleanModeFull  CleanMode = iota // Delete everything (via command or all files)
-	CleanModeSmart                  // LRU clean until under max_size
+	CleanModeSmart                  // Smart clean: delete files older than max_age, then LRU until under max_size
 )
 
 // Provider defines the interface for cache providers.

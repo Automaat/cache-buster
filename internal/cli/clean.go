@@ -31,7 +31,7 @@ func init() {
 	CleanCmd.Flags().Bool("dry-run", false, "Preview without deleting")
 	CleanCmd.Flags().Bool("force", false, "Skip confirmation prompt")
 	CleanCmd.Flags().Bool("quiet", false, "Minimal output")
-	CleanCmd.Flags().Bool("smart", false, "LRU clean: delete old files until under max_size")
+	CleanCmd.Flags().Bool("smart", false, "Smart clean: removes files older than max_age, then LRU-trims to stay under max_size")
 }
 
 func runClean(cmd *cobra.Command, args []string) error {
