@@ -49,11 +49,11 @@ macOS developer cache manager with size limits.
 
 ## Phase 3: Cache Scanner
 
-- [ ] Implement `internal/cache/scanner.go`:
+- [x] Implement `internal/cache/scanner.go`:
   - `CalculateSize(paths []string) (int64, error)` - parallel walk
   - `ListFiles(paths []string) ([]FileInfo, error)` - with mtime
   - `ExpandPaths(patterns []string) ([]string, error)`
-- [ ] Implement `pkg/size/size.go`:
+- [x] Implement `pkg/size/size.go`:
   - `ParseSize("10G") int64`
   - `FormatSize(int64) string`
 
