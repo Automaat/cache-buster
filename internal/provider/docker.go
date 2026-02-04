@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/Automaat/cache-buster/internal/config"
+	"github.com/Automaat/cache-buster/pkg/size"
 	"github.com/kballard/go-shellquote"
 )
 
@@ -48,6 +49,49 @@ func (p *DockerProvider) Clean(ctx context.Context, opts CleanOptions) (CleanRes
 		}, nil
 	}
 
+	if opts.Mode == CleanModeSmart {
+		return p.smartClean(ctx, opts)
+	}
+	return p.fullClean(ctx, opts)
+}
+
+func (p *DockerProvider) smartClean(ctx context.Context, opts CleanOptions) (CleanResult, error) {
+	keepStorage := size.FormatSize(p.maxSize)
+	smartCmd := fmt.Sprintf("docker buildx prune -af --keep-storage=%s", keepStorage)
+
+	if opts.DryRun {
+		return CleanResult{
+			Output: "would run: " + smartCmd,
+		}, nil
+	}
+
+	sizeBefore, _ := p.CurrentSize()
+
+	cmd := exec.CommandContext(ctx, "docker", "buildx", "prune", "-af", "--keep-storage="+keepStorage)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	err := cmd.Run()
+	output := strings.TrimSpace(stdout.String() + stderr.String())
+
+	if err != nil {
+		return CleanResult{Output: output}, err
+	}
+
+	sizeAfter, _ := p.CurrentSize()
+	bytesCleaned := sizeBefore - sizeAfter
+	if bytesCleaned < 0 {
+		bytesCleaned = 0
+	}
+
+	return CleanResult{
+		BytesCleaned: bytesCleaned,
+		Output:       output,
+	}, nil
+}
+
+func (p *DockerProvider) fullClean(ctx context.Context, opts CleanOptions) (CleanResult, error) {
 	if opts.DryRun {
 		return CleanResult{
 			Output: "would run: " + p.cleanCmd,

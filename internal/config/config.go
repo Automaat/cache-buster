@@ -14,6 +14,7 @@ type Config struct {
 // Provider defines a cache provider's settings.
 type Provider struct {
 	MaxSize  string   `mapstructure:"max_size" yaml:"max_size"`
+	MaxAge   string   `mapstructure:"max_age" yaml:"max_age,omitempty"`
 	CleanCmd string   `mapstructure:"clean_cmd" yaml:"clean_cmd,omitempty"`
 	Paths    []string `mapstructure:"paths" yaml:"paths"`
 	Enabled  bool     `mapstructure:"enabled" yaml:"enabled"`

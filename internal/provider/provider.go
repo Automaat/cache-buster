@@ -2,6 +2,16 @@ package provider
 
 import (
 	"context"
+	"time"
+)
+
+// CleanMode determines cleaning strategy.
+type CleanMode int
+
+// CleanMode constants.
+const (
+	CleanModeFull  CleanMode = iota // Delete everything (via command or all files)
+	CleanModeSmart                  // LRU clean until under max_size
 )
 
 // Provider defines the interface for cache providers.
@@ -18,6 +28,9 @@ type Provider interface {
 	// MaxSize returns the configured maximum size in bytes.
 	MaxSize() int64
 
+	// MaxAge returns the configured maximum file age.
+	MaxAge() time.Duration
+
 	// Clean removes cached files to bring size under limit.
 	Clean(ctx context.Context, opts CleanOptions) (CleanResult, error)
 
@@ -29,6 +42,7 @@ type Provider interface {
 // CleanOptions configures cleaning behavior.
 type CleanOptions struct {
 	DryRun bool
+	Mode   CleanMode
 }
 
 // CleanResult contains cleaning operation results.
