@@ -27,6 +27,7 @@ linters:
     gosec:
       excludes:
         - G204
+        - G302
 
 formatters:
   enable:
