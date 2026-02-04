@@ -133,19 +133,19 @@ macOS developer cache manager with size limits.
 
 ## Phase 9: Interactive Mode (Optional)
 
-- [ ] Add `github.com/charmbracelet/bubbletea`
-- [ ] Provider selection with checkboxes
-- [ ] Confirmation before cleaning
-- [ ] Progress bar during clean
+- [x] Add `github.com/charmbracelet/bubbletea`
+- [x] Provider selection with checkboxes
+- [x] Confirmation before cleaning
+- [x] Progress bar during clean
 
 ---
 
 ## Phase 10: Polish
 
-- [ ] Makefile with build/install/test targets
-- [ ] goreleaser config for releases
-- [ ] README with usage examples
-- [ ] Error handling for permission issues, locked files
+- [x] Makefile with build/install/test targets
+- [x] goreleaser config for releases
+- [x] README with usage examples
+- [x] Error handling for permission issues, locked files
 
 ---
 

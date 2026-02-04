@@ -182,3 +182,57 @@ func TestTrim_MultiplePaths(t *testing.T) {
 	assert.Equal(t, int64(1000), result.FreedBytes)
 	assert.Equal(t, int64(2), result.DeletedCount)
 }
+
+func TestTrim_DeleteError(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("skipping permission test as root")
+	}
+
+	dir := t.TempDir()
+
+	// Create old file
+	oldFile := filepath.Join(dir, "old.txt")
+	createTestFile(t, oldFile, 1000, 40*24*time.Hour)
+
+	// Make directory read-only so delete fails
+	require.NoError(t, os.Chmod(dir, 0o500))
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o750) })
+
+	result, err := Trim(context.Background(), []string{dir}, TrimOptions{
+		MaxSize: 10000,
+		MaxAge:  30 * 24 * time.Hour,
+		DryRun:  false,
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, int64(0), result.FreedBytes)
+	assert.Equal(t, int64(0), result.DeletedCount)
+	assert.Len(t, result.Errors, 1)
+	assert.Equal(t, ReasonPermissionDenied, result.Errors[0].Reason)
+}
+
+func TestTrim_CarriesForwardScanWarnings(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("skipping permission test as root")
+	}
+
+	dir := t.TempDir()
+
+	// Create accessible file
+	createTestFile(t, filepath.Join(dir, "accessible.txt"), 100, 1*24*time.Hour)
+
+	// Create inaccessible subdirectory
+	inaccessible := filepath.Join(dir, "noaccess")
+	require.NoError(t, os.Mkdir(inaccessible, 0o000))
+	t.Cleanup(func() { _ = os.Chmod(inaccessible, 0o750) })
+
+	result, err := Trim(context.Background(), []string{dir}, TrimOptions{
+		MaxSize: 10000,
+		MaxAge:  30 * 24 * time.Hour,
+		DryRun:  false,
+	})
+
+	require.NoError(t, err)
+	// Should have warning from scan
+	assert.NotEmpty(t, result.Errors)
+}

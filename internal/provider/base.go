@@ -53,7 +53,8 @@ func (b *BaseProvider) Paths() []string {
 
 // CurrentSize implements Provider.
 func (b *BaseProvider) CurrentSize() (int64, error) {
-	return cache.CalculateSize(b.paths)
+	result, err := cache.CalculateSize(b.paths)
+	return result.Size, err
 }
 
 // MaxSize implements Provider.

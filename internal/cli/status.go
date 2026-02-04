@@ -105,15 +105,15 @@ func scanProvider(cfg *config.Config, name string) ProviderStatus {
 		return status
 	}
 
-	current, err := cache.CalculateSize(paths)
+	result, err := cache.CalculateSize(paths)
 	if err != nil {
 		status.Error = fmt.Sprintf("calculate size: %v", err)
 		return status
 	}
 
-	status.Current = current
-	status.CurrentFmt = size.FormatSize(current)
-	status.OverLimit = current > maxBytes
+	status.Current = result.Size
+	status.CurrentFmt = size.FormatSize(result.Size)
+	status.OverLimit = result.Size > maxBytes
 	return status
 }
 

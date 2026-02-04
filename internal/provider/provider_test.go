@@ -743,8 +743,8 @@ func TestFileProvider_DeleteError(t *testing.T) {
 		t.Errorf("files deleted = %d, want 0", result.FilesDeleted)
 	}
 
-	if !strings.Contains(result.Output, "error") {
-		t.Errorf("output should contain error info, got %q", result.Output)
+	if !strings.Contains(result.Output, "permission denied") {
+		t.Errorf("output should contain 'permission denied', got %q", result.Output)
 	}
 }
 
@@ -885,6 +885,59 @@ func TestFileProvider_SmartClean_DryRun(t *testing.T) {
 
 	if _, err := os.Stat(oldFile); err != nil {
 		t.Error("file should still exist after dry run")
+	}
+}
+
+func TestFileProvider_SmartClean_WithErrors(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("skipping permission test as root")
+	}
+
+	tmpDir := t.TempDir()
+
+	// Create old file that should be deleted
+	oldFile := filepath.Join(tmpDir, "old.txt")
+	if err := os.WriteFile(oldFile, make([]byte, 1000), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	oldTime := time.Now().Add(-40 * 24 * time.Hour)
+	if err := os.Chtimes(oldFile, oldTime, oldTime); err != nil {
+		t.Fatal(err)
+	}
+
+	// Make directory read-only to cause delete error
+	if err := os.Chmod(tmpDir, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(tmpDir, 0o750) })
+
+	cfg := config.Provider{
+		Paths:   []string{tmpDir},
+		MaxSize: "10G",
+		MaxAge:  "30d",
+		Enabled: true,
+	}
+
+	p, err := provider.NewFileProvider("test", cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := p.Clean(context.Background(), provider.CleanOptions{
+		Mode: provider.CleanModeSmart,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Delete failed, so no files actually deleted
+	if result.FilesDeleted != 0 {
+		t.Errorf("files deleted = %d, want 0", result.FilesDeleted)
+	}
+
+	// Output should include error info
+	if !strings.Contains(result.Output, "permission denied") {
+		t.Errorf("output should contain 'permission denied', got %q", result.Output)
 	}
 }
 

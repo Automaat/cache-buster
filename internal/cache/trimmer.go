@@ -21,8 +21,9 @@ type TrimOptions struct {
 // TrimResult contains trimming operation results.
 type TrimResult struct {
 	Output       string
-	FreedBytes   int64
+	Errors       []AccessError
 	DeletedCount int64
+	FreedBytes   int64
 }
 
 const trimBufferFactor = 0.9 // Keep 10% headroom below max_size
@@ -31,13 +32,14 @@ const trimBufferFactor = 0.9 // Keep 10% headroom below max_size
 // - older than MaxAge, OR
 // - oldest files until total ≤ MaxSize (with 10% buffer).
 func Trim(ctx context.Context, paths []string, opts TrimOptions) (TrimResult, error) {
-	files, err := ListFiles(paths)
+	listResult, err := ListFiles(paths)
 	if err != nil {
 		return TrimResult{}, err
 	}
 
+	files := listResult.Files
 	if len(files) == 0 {
-		return TrimResult{Output: "no files found"}, nil
+		return TrimResult{Output: "no files found", Errors: listResult.Warnings}, nil
 	}
 
 	// Sort by ModTime (oldest first). ModTime is appropriate for dev caches
@@ -49,13 +51,16 @@ func Trim(ctx context.Context, paths []string, opts TrimOptions) (TrimResult, er
 	var (
 		totalSize     int64
 		result        TrimResult
-		deleteErrors  []string
+		deleteErrors  []AccessError
 		output        strings.Builder
 		cutoff        = time.Now().Add(-opts.MaxAge)
 		targetSize    = int64(float64(opts.MaxSize) * trimBufferFactor)
 		toDelete      []FileInfo
 		remainingSize int64
 	)
+
+	// Carry forward scan warnings
+	deleteErrors = append(deleteErrors, listResult.Warnings...)
 
 	for _, f := range files {
 		totalSize += f.Size
@@ -107,7 +112,7 @@ func Trim(ctx context.Context, paths []string, opts TrimOptions) (TrimResult, er
 		}
 
 		if err := os.Remove(f.Path); err != nil {
-			deleteErrors = append(deleteErrors, fmt.Sprintf("%s: %v", f.Path, err))
+			deleteErrors = append(deleteErrors, ClassifyError(f.Path, err))
 			continue
 		}
 
@@ -121,9 +126,7 @@ func Trim(ctx context.Context, paths []string, opts TrimOptions) (TrimResult, er
 	}
 
 	result.Output = fmt.Sprintf("deleted %d files", result.DeletedCount)
-	if len(deleteErrors) > 0 {
-		result.Output += fmt.Sprintf(" (%d errors: %s)", len(deleteErrors), strings.Join(deleteErrors, "; "))
-	}
+	result.Errors = deleteErrors
 
 	return result, nil
 }

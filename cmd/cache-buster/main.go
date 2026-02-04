@@ -9,12 +9,15 @@ import (
 	"github.com/spf13/cobra"
 )
 
+var version = "dev"
+
 var rootCmd = &cobra.Command{
-	Use:   "cache-buster",
-	Short: "macOS developer cache manager with size limits",
-	Long:  `A CLI tool to manage developer caches on macOS with configurable size limits.`,
-	Args:  cobra.NoArgs,
-	RunE:  runRoot,
+	Use:     "cache-buster",
+	Version: version,
+	Short:   "macOS developer cache manager with size limits",
+	Long:    `A CLI tool to manage developer caches on macOS with configurable size limits.`,
+	Args:    cobra.NoArgs,
+	RunE:    runRoot,
 }
 
 func runRoot(_ *cobra.Command, _ []string) error {
