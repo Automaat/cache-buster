@@ -20,7 +20,7 @@ func TestNewModel(t *testing.T) {
 		},
 	}
 
-	m := newModel(cfg, []string{"test"}, false, false)
+	m := newModel(cfg, []string{"test"}, false, false, nil)
 
 	assert.Equal(t, stateSelection, m.state)
 	assert.Len(t, m.providers, 1)
@@ -40,7 +40,7 @@ func TestModelSelectionKeyBindings(t *testing.T) {
 	}
 
 	t.Run("cursor movement", func(t *testing.T) {
-		m := newModel(cfg, []string{"p1", "p2", "p3"}, false, false)
+		m := newModel(cfg, []string{"p1", "p2", "p3"}, false, false, nil)
 		m.providers[0].available = true
 		m.providers[1].available = true
 		m.providers[2].available = true
@@ -73,7 +73,7 @@ func TestModelSelectionKeyBindings(t *testing.T) {
 	})
 
 	t.Run("toggle selection", func(t *testing.T) {
-		m := newModel(cfg, []string{"p1", "p2"}, false, false)
+		m := newModel(cfg, []string{"p1", "p2"}, false, false, nil)
 		m.providers[0].available = true
 		m.providers[1].available = true
 
@@ -87,7 +87,7 @@ func TestModelSelectionKeyBindings(t *testing.T) {
 	})
 
 	t.Run("select all", func(t *testing.T) {
-		m := newModel(cfg, []string{"p1", "p2", "p3"}, false, false)
+		m := newModel(cfg, []string{"p1", "p2", "p3"}, false, false, nil)
 		m.providers[0].available = true
 		m.providers[1].available = false
 		m.providers[2].available = true
@@ -101,7 +101,7 @@ func TestModelSelectionKeyBindings(t *testing.T) {
 	})
 
 	t.Run("deselect all", func(t *testing.T) {
-		m := newModel(cfg, []string{"p1", "p2"}, false, false)
+		m := newModel(cfg, []string{"p1", "p2"}, false, false, nil)
 		m.providers[0].available = true
 		m.providers[1].available = true
 		m.selected[0] = struct{}{}
@@ -114,7 +114,7 @@ func TestModelSelectionKeyBindings(t *testing.T) {
 	})
 
 	t.Run("select over-limit only", func(t *testing.T) {
-		m := newModel(cfg, []string{"p1", "p2", "p3"}, false, false)
+		m := newModel(cfg, []string{"p1", "p2", "p3"}, false, false, nil)
 		m.providers[0].available = true
 		m.providers[0].overLimit = true
 		m.providers[1].available = true
@@ -131,7 +131,7 @@ func TestModelSelectionKeyBindings(t *testing.T) {
 	})
 
 	t.Run("cannot toggle unavailable", func(t *testing.T) {
-		m := newModel(cfg, []string{"p1"}, false, false)
+		m := newModel(cfg, []string{"p1"}, false, false, nil)
 		m.providers[0].available = false
 
 		m2, _ := m.Update(tea.KeyMsg{Type: tea.KeySpace})
@@ -149,7 +149,7 @@ func TestModelStateTransitions(t *testing.T) {
 	}
 
 	t.Run("selection to confirmation", func(t *testing.T) {
-		m := newModel(cfg, []string{"p1"}, false, false)
+		m := newModel(cfg, []string{"p1"}, false, false, nil)
 		m.providers[0].available = true
 		m.selected[0] = struct{}{}
 
@@ -160,7 +160,7 @@ func TestModelStateTransitions(t *testing.T) {
 	})
 
 	t.Run("no selection prevents confirmation", func(t *testing.T) {
-		m := newModel(cfg, []string{"p1"}, false, false)
+		m := newModel(cfg, []string{"p1"}, false, false, nil)
 		m.providers[0].available = true
 
 		m2, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
@@ -170,7 +170,7 @@ func TestModelStateTransitions(t *testing.T) {
 	})
 
 	t.Run("confirmation back to selection", func(t *testing.T) {
-		m := newModel(cfg, []string{"p1"}, false, false)
+		m := newModel(cfg, []string{"p1"}, false, false, nil)
 		m.state = stateConfirmation
 
 		m2, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
@@ -180,7 +180,7 @@ func TestModelStateTransitions(t *testing.T) {
 	})
 
 	t.Run("confirmation with esc", func(t *testing.T) {
-		m := newModel(cfg, []string{"p1"}, false, false)
+		m := newModel(cfg, []string{"p1"}, false, false, nil)
 		m.state = stateConfirmation
 
 		m2, _ := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
@@ -198,7 +198,7 @@ func TestModelQuit(t *testing.T) {
 	}
 
 	t.Run("quit from selection", func(t *testing.T) {
-		m := newModel(cfg, []string{"p1"}, false, false)
+		m := newModel(cfg, []string{"p1"}, false, false, nil)
 
 		m2, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}})
 		m = m2.(model)
@@ -208,7 +208,7 @@ func TestModelQuit(t *testing.T) {
 	})
 
 	t.Run("esc from selection", func(t *testing.T) {
-		m := newModel(cfg, []string{"p1"}, false, false)
+		m := newModel(cfg, []string{"p1"}, false, false, nil)
 
 		m2, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
 		m = m2.(model)
@@ -218,7 +218,7 @@ func TestModelQuit(t *testing.T) {
 	})
 
 	t.Run("quit from done", func(t *testing.T) {
-		m := newModel(cfg, []string{"p1"}, false, false)
+		m := newModel(cfg, []string{"p1"}, false, false, nil)
 		m.state = stateDone
 
 		m2, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
@@ -237,7 +237,7 @@ func TestModelView(t *testing.T) {
 	}
 
 	t.Run("selection view contains title", func(t *testing.T) {
-		m := newModel(cfg, []string{"p1"}, false, false)
+		m := newModel(cfg, []string{"p1"}, false, false, nil)
 		view := m.View()
 
 		assert.Contains(t, view, "Cache Buster")
@@ -245,7 +245,7 @@ func TestModelView(t *testing.T) {
 	})
 
 	t.Run("confirmation view shows provider count", func(t *testing.T) {
-		m := newModel(cfg, []string{"p1"}, false, false)
+		m := newModel(cfg, []string{"p1"}, false, false, nil)
 		m.state = stateConfirmation
 		m.selected[0] = struct{}{}
 		view := m.View()
@@ -255,7 +255,7 @@ func TestModelView(t *testing.T) {
 	})
 
 	t.Run("done view shows results", func(t *testing.T) {
-		m := newModel(cfg, []string{"p1"}, false, false)
+		m := newModel(cfg, []string{"p1"}, false, false, nil)
 		m.state = stateDone
 		m.selected[0] = struct{}{}
 		m.totalFreed = 1024 * 1024 * 100
@@ -266,7 +266,7 @@ func TestModelView(t *testing.T) {
 	})
 
 	t.Run("quitting returns empty", func(t *testing.T) {
-		m := newModel(cfg, []string{"p1"}, false, false)
+		m := newModel(cfg, []string{"p1"}, false, false, nil)
 		m.quitting = true
 		view := m.View()
 
@@ -283,7 +283,7 @@ func TestSelectedNames(t *testing.T) {
 		},
 	}
 
-	m := newModel(cfg, []string{"p1", "p2", "p3"}, false, false)
+	m := newModel(cfg, []string{"p1", "p2", "p3"}, false, false, nil)
 	m.selected[0] = struct{}{}
 	m.selected[2] = struct{}{}
 
@@ -303,19 +303,19 @@ func TestModelDryRunAndSmart(t *testing.T) {
 	}
 
 	t.Run("dry-run mode", func(t *testing.T) {
-		m := newModel(cfg, []string{"p1"}, true, false)
+		m := newModel(cfg, []string{"p1"}, true, false, nil)
 		assert.True(t, m.dryRun)
 		assert.False(t, m.smartMode)
 	})
 
 	t.Run("smart mode", func(t *testing.T) {
-		m := newModel(cfg, []string{"p1"}, false, true)
+		m := newModel(cfg, []string{"p1"}, false, true, nil)
 		assert.False(t, m.dryRun)
 		assert.True(t, m.smartMode)
 	})
 
 	t.Run("confirmation view shows mode", func(t *testing.T) {
-		m := newModel(cfg, []string{"p1"}, true, true)
+		m := newModel(cfg, []string{"p1"}, true, true, nil)
 		m.state = stateConfirmation
 		m.selected[0] = struct{}{}
 		view := m.View()
@@ -332,7 +332,7 @@ func TestModelInit(t *testing.T) {
 		},
 	}
 
-	m := newModel(cfg, []string{"p1"}, false, false)
+	m := newModel(cfg, []string{"p1"}, false, false, nil)
 	cmd := m.Init()
 
 	assert.NotNil(t, cmd)
@@ -345,13 +345,35 @@ func TestModelUpdateWindowSize(t *testing.T) {
 		},
 	}
 
-	m := newModel(cfg, []string{"p1"}, false, false)
-	m2, cmd := m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
-	m = m2.(model)
+	t.Run("normal window size", func(t *testing.T) {
+		m := newModel(cfg, []string{"p1"}, false, false, nil)
+		m2, cmd := m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
+		m = m2.(model)
 
-	assert.Equal(t, 120, m.width)
-	assert.Equal(t, 40, m.height)
-	assert.Nil(t, cmd)
+		assert.Equal(t, 120, m.width)
+		assert.Equal(t, 40, m.height)
+		assert.Equal(t, 110, m.progress.Width)
+		assert.Nil(t, cmd)
+	})
+
+	t.Run("small window clamps progress width", func(t *testing.T) {
+		m := newModel(cfg, []string{"p1"}, false, false, nil)
+		m2, cmd := m.Update(tea.WindowSizeMsg{Width: 5, Height: 10})
+		m = m2.(model)
+
+		assert.Equal(t, 5, m.width)
+		assert.Equal(t, 10, m.height)
+		assert.Equal(t, 1, m.progress.Width) // clamped to 1
+		assert.Nil(t, cmd)
+	})
+
+	t.Run("zero width clamps progress width", func(t *testing.T) {
+		m := newModel(cfg, []string{"p1"}, false, false, nil)
+		m2, _ := m.Update(tea.WindowSizeMsg{Width: 0, Height: 10})
+		m = m2.(model)
+
+		assert.Equal(t, 1, m.progress.Width) // clamped to 1
+	})
 }
 
 func TestModelUpdateScanResult(t *testing.T) {
@@ -361,7 +383,7 @@ func TestModelUpdateScanResult(t *testing.T) {
 		},
 	}
 
-	m := newModel(cfg, []string{"p1"}, false, false)
+	m := newModel(cfg, []string{"p1"}, false, false, nil)
 	item := providerItem{
 		name:       "p1",
 		current:    1024,
@@ -388,7 +410,7 @@ func TestModelUpdateCleanResult(t *testing.T) {
 	}
 
 	t.Run("successful clean", func(t *testing.T) {
-		m := newModel(cfg, []string{"p1"}, false, false)
+		m := newModel(cfg, []string{"p1"}, false, false, nil)
 		m.state = stateCleaning
 		m.selected[0] = struct{}{}
 		m.cleanIdx = 0
@@ -404,7 +426,7 @@ func TestModelUpdateCleanResult(t *testing.T) {
 	})
 
 	t.Run("clean with error", func(t *testing.T) {
-		m := newModel(cfg, []string{"p1"}, false, false)
+		m := newModel(cfg, []string{"p1"}, false, false, nil)
 		m.state = stateCleaning
 		m.selected[0] = struct{}{}
 		m.cleanIdx = 0
@@ -419,6 +441,52 @@ func TestModelUpdateCleanResult(t *testing.T) {
 	})
 }
 
+func TestModelCleanResultPartialFailures(t *testing.T) {
+	cfg := &config.Config{
+		Providers: map[string]config.Provider{
+			"p1": {Enabled: true, Paths: []string{"/tmp/p1"}, MaxSize: "1G"},
+			"p2": {Enabled: true, Paths: []string{"/tmp/p2"}, MaxSize: "1G"},
+			"p3": {Enabled: true, Paths: []string{"/tmp/p3"}, MaxSize: "1G"},
+		},
+	}
+
+	m := newModel(cfg, []string{"p1", "p2", "p3"}, false, false, nil)
+	m.state = stateCleaning
+	m.selected[0] = struct{}{}
+	m.selected[1] = struct{}{}
+	m.selected[2] = struct{}{}
+	m.cleanIdx = -1
+
+	// Start cleaning - advances to p1
+	m2, _ := m.cleanNext()
+	m = m2.(model)
+	assert.Equal(t, 0, m.cleanIdx)
+
+	// p1 succeeds with 1024 bytes
+	m2, _ = m.Update(cleanResultMsg{idx: 0, result: provider.CleanResult{BytesCleaned: 1024}, err: nil})
+	m = m2.(model)
+	assert.Equal(t, int64(1024), m.totalFreed)
+	assert.Equal(t, 1, m.cleanIdx) // advanced to p2
+
+	// p2 fails
+	m2, _ = m.Update(cleanResultMsg{idx: 1, result: provider.CleanResult{}, err: fmt.Errorf("disk error")})
+	m = m2.(model)
+	assert.Equal(t, int64(1024), m.totalFreed) // unchanged
+	assert.NotNil(t, m.providers[1].cleanErr)
+	assert.Equal(t, 2, m.cleanIdx) // advanced to p3
+
+	// p3 succeeds with 2048 bytes
+	m2, _ = m.Update(cleanResultMsg{idx: 2, result: provider.CleanResult{BytesCleaned: 2048}, err: nil})
+	m = m2.(model)
+	assert.Equal(t, int64(3072), m.totalFreed) // 1024 + 2048
+	assert.Equal(t, stateDone, m.state)
+
+	// Verify final state
+	assert.Nil(t, m.providers[0].cleanErr)
+	assert.NotNil(t, m.providers[1].cleanErr)
+	assert.Nil(t, m.providers[2].cleanErr)
+}
+
 func TestModelUpdateSpinnerTick(t *testing.T) {
 	cfg := &config.Config{
 		Providers: map[string]config.Provider{
@@ -426,7 +494,7 @@ func TestModelUpdateSpinnerTick(t *testing.T) {
 		},
 	}
 
-	m := newModel(cfg, []string{"p1"}, false, false)
+	m := newModel(cfg, []string{"p1"}, false, false, nil)
 	_, cmd := m.Update(spinner.TickMsg{})
 
 	assert.NotNil(t, cmd)
@@ -439,7 +507,7 @@ func TestModelUpdateProgressFrame(t *testing.T) {
 		},
 	}
 
-	m := newModel(cfg, []string{"p1"}, false, false)
+	m := newModel(cfg, []string{"p1"}, false, false, nil)
 	m2, _ := m.Update(progress.FrameMsg{})
 	_ = m2.(model)
 }
@@ -451,7 +519,7 @@ func TestModelHandleKeyInCleaningState(t *testing.T) {
 		},
 	}
 
-	m := newModel(cfg, []string{"p1"}, false, false)
+	m := newModel(cfg, []string{"p1"}, false, false, nil)
 	m.state = stateCleaning
 
 	m2, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}})
@@ -469,7 +537,7 @@ func TestModelConfirmationModeToggle(t *testing.T) {
 	}
 
 	t.Run("switch to full mode", func(t *testing.T) {
-		m := newModel(cfg, []string{"p1"}, false, true)
+		m := newModel(cfg, []string{"p1"}, false, true, nil)
 		m.state = stateConfirmation
 
 		m2, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'f'}})
@@ -479,7 +547,7 @@ func TestModelConfirmationModeToggle(t *testing.T) {
 	})
 
 	t.Run("switch to smart mode", func(t *testing.T) {
-		m := newModel(cfg, []string{"p1"}, false, false)
+		m := newModel(cfg, []string{"p1"}, false, false, nil)
 		m.state = stateConfirmation
 
 		m2, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}})
@@ -489,7 +557,7 @@ func TestModelConfirmationModeToggle(t *testing.T) {
 	})
 
 	t.Run("uppercase F works", func(t *testing.T) {
-		m := newModel(cfg, []string{"p1"}, false, true)
+		m := newModel(cfg, []string{"p1"}, false, true, nil)
 		m.state = stateConfirmation
 
 		m2, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'F'}})
@@ -499,7 +567,7 @@ func TestModelConfirmationModeToggle(t *testing.T) {
 	})
 
 	t.Run("uppercase S works", func(t *testing.T) {
-		m := newModel(cfg, []string{"p1"}, false, false)
+		m := newModel(cfg, []string{"p1"}, false, false, nil)
 		m.state = stateConfirmation
 
 		m2, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'S'}})
@@ -516,7 +584,7 @@ func TestModelConfirmationStartsCleaning(t *testing.T) {
 		},
 	}
 
-	m := newModel(cfg, []string{"p1"}, false, false)
+	m := newModel(cfg, []string{"p1"}, false, false, nil)
 	m.state = stateConfirmation
 	m.selected[0] = struct{}{}
 	m.providers[0].available = true
@@ -538,7 +606,7 @@ func TestModelCleanNext(t *testing.T) {
 	}
 
 	t.Run("skips unselected providers", func(t *testing.T) {
-		m := newModel(cfg, []string{"p1", "p2", "p3"}, false, false)
+		m := newModel(cfg, []string{"p1", "p2", "p3"}, false, false, nil)
 		m.state = stateCleaning
 		m.selected[0] = struct{}{}
 		m.selected[2] = struct{}{}
@@ -557,7 +625,7 @@ func TestModelCleanNext(t *testing.T) {
 	})
 
 	t.Run("transitions to done when complete", func(t *testing.T) {
-		m := newModel(cfg, []string{"p1"}, false, false)
+		m := newModel(cfg, []string{"p1"}, false, false, nil)
 		m.state = stateCleaning
 		m.selected[0] = struct{}{}
 		m.cleanIdx = 0
@@ -580,16 +648,17 @@ func TestViewSelection(t *testing.T) {
 		},
 	}
 
-	t.Run("shows unavailable provider dimmed", func(t *testing.T) {
-		m := newModel(cfg, []string{"p1"}, false, false)
+	t.Run("shows unavailable provider with error", func(t *testing.T) {
+		m := newModel(cfg, []string{"p1"}, false, false, nil)
 		m.providers[0].available = false
+		m.providers[0].errMsg = "unavailable" // as set by scanProviderCmd
 		view := m.viewSelection()
 
 		assert.Contains(t, view, "unavailable")
 	})
 
 	t.Run("shows error message", func(t *testing.T) {
-		m := newModel(cfg, []string{"p1"}, false, false)
+		m := newModel(cfg, []string{"p1"}, false, false, nil)
 		m.providers[0].available = true
 		m.providers[0].errMsg = "load error"
 		view := m.viewSelection()
@@ -598,7 +667,7 @@ func TestViewSelection(t *testing.T) {
 	})
 
 	t.Run("shows loading spinner when no size yet", func(t *testing.T) {
-		m := newModel(cfg, []string{"p1"}, false, false)
+		m := newModel(cfg, []string{"p1"}, false, false, nil)
 		m.providers[0].available = true
 		m.providers[0].currentFmt = ""
 		view := m.viewSelection()
@@ -607,7 +676,7 @@ func TestViewSelection(t *testing.T) {
 	})
 
 	t.Run("shows over limit status", func(t *testing.T) {
-		m := newModel(cfg, []string{"p1"}, false, false)
+		m := newModel(cfg, []string{"p1"}, false, false, nil)
 		m.providers[0].available = true
 		m.providers[0].currentFmt = "2 GiB"
 		m.providers[0].maxFmt = "1 GiB"
@@ -618,7 +687,7 @@ func TestViewSelection(t *testing.T) {
 	})
 
 	t.Run("shows ok status", func(t *testing.T) {
-		m := newModel(cfg, []string{"p1"}, false, false)
+		m := newModel(cfg, []string{"p1"}, false, false, nil)
 		m.providers[0].available = true
 		m.providers[0].currentFmt = "500 MiB"
 		m.providers[0].maxFmt = "1 GiB"
@@ -629,7 +698,7 @@ func TestViewSelection(t *testing.T) {
 	})
 
 	t.Run("shows selected count", func(t *testing.T) {
-		m := newModel(cfg, []string{"p1", "p2", "p3"}, false, false)
+		m := newModel(cfg, []string{"p1", "p2", "p3"}, false, false, nil)
 		m.selected[0] = struct{}{}
 		m.selected[1] = struct{}{}
 		view := m.viewSelection()
@@ -638,7 +707,7 @@ func TestViewSelection(t *testing.T) {
 	})
 
 	t.Run("shows cursor position", func(t *testing.T) {
-		m := newModel(cfg, []string{"p1", "p2"}, false, false)
+		m := newModel(cfg, []string{"p1", "p2"}, false, false, nil)
 		m.cursor = 1
 		view := m.viewSelection()
 
@@ -646,7 +715,7 @@ func TestViewSelection(t *testing.T) {
 	})
 
 	t.Run("shows checkbox state", func(t *testing.T) {
-		m := newModel(cfg, []string{"p1"}, false, false)
+		m := newModel(cfg, []string{"p1"}, false, false, nil)
 		m.selected[0] = struct{}{}
 		view := m.viewSelection()
 
@@ -663,7 +732,7 @@ func TestViewCleaning(t *testing.T) {
 	}
 
 	t.Run("shows current provider being cleaned", func(t *testing.T) {
-		m := newModel(cfg, []string{"p1", "p2"}, false, false)
+		m := newModel(cfg, []string{"p1", "p2"}, false, false, nil)
 		m.state = stateCleaning
 		m.cleanIdx = 0
 		m.providers[0].name = "p1"
@@ -673,7 +742,7 @@ func TestViewCleaning(t *testing.T) {
 	})
 
 	t.Run("shows completed providers", func(t *testing.T) {
-		m := newModel(cfg, []string{"p1", "p2"}, false, false)
+		m := newModel(cfg, []string{"p1", "p2"}, false, false, nil)
 		m.state = stateCleaning
 		m.selected[0] = struct{}{}
 		m.selected[1] = struct{}{}
@@ -686,7 +755,7 @@ func TestViewCleaning(t *testing.T) {
 	})
 
 	t.Run("shows error for failed clean", func(t *testing.T) {
-		m := newModel(cfg, []string{"p1"}, false, false)
+		m := newModel(cfg, []string{"p1"}, false, false, nil)
 		m.state = stateCleaning
 		m.selected[0] = struct{}{}
 		m.cleanIdx = 0
@@ -707,7 +776,7 @@ func TestViewDone(t *testing.T) {
 	}
 
 	t.Run("shows total freed", func(t *testing.T) {
-		m := newModel(cfg, []string{"p1"}, false, false)
+		m := newModel(cfg, []string{"p1"}, false, false, nil)
 		m.state = stateDone
 		m.selected[0] = struct{}{}
 		m.totalFreed = 1024 * 1024 * 100
@@ -719,7 +788,7 @@ func TestViewDone(t *testing.T) {
 	})
 
 	t.Run("shows dry-run message", func(t *testing.T) {
-		m := newModel(cfg, []string{"p1"}, true, false)
+		m := newModel(cfg, []string{"p1"}, true, false, nil)
 		m.state = stateDone
 		m.selected[0] = struct{}{}
 		view := m.viewDone()
@@ -729,7 +798,7 @@ func TestViewDone(t *testing.T) {
 	})
 
 	t.Run("shows errors section", func(t *testing.T) {
-		m := newModel(cfg, []string{"p1"}, false, false)
+		m := newModel(cfg, []string{"p1"}, false, false, nil)
 		m.state = stateDone
 		m.selected[0] = struct{}{}
 		m.providers[0].cleanResult = &provider.CleanResult{}
@@ -741,7 +810,7 @@ func TestViewDone(t *testing.T) {
 	})
 
 	t.Run("shows success checkmark", func(t *testing.T) {
-		m := newModel(cfg, []string{"p1"}, false, false)
+		m := newModel(cfg, []string{"p1"}, false, false, nil)
 		m.state = stateDone
 		m.selected[0] = struct{}{}
 		m.providers[0].cleanResult = &provider.CleanResult{BytesCleaned: 1024}
@@ -751,7 +820,7 @@ func TestViewDone(t *testing.T) {
 	})
 
 	t.Run("shows failure mark", func(t *testing.T) {
-		m := newModel(cfg, []string{"p1"}, false, false)
+		m := newModel(cfg, []string{"p1"}, false, false, nil)
 		m.state = stateDone
 		m.selected[0] = struct{}{}
 		m.providers[0].cleanResult = &provider.CleanResult{}
@@ -771,7 +840,7 @@ func TestViewConfirmation(t *testing.T) {
 	}
 
 	t.Run("shows full mode", func(t *testing.T) {
-		m := newModel(cfg, []string{"p1"}, false, false)
+		m := newModel(cfg, []string{"p1"}, false, false, nil)
 		m.state = stateConfirmation
 		m.selected[0] = struct{}{}
 		view := m.viewConfirmation()
@@ -780,7 +849,7 @@ func TestViewConfirmation(t *testing.T) {
 	})
 
 	t.Run("shows smart mode", func(t *testing.T) {
-		m := newModel(cfg, []string{"p1"}, false, true)
+		m := newModel(cfg, []string{"p1"}, false, true, nil)
 		m.state = stateConfirmation
 		m.selected[0] = struct{}{}
 		view := m.viewConfirmation()
@@ -789,7 +858,7 @@ func TestViewConfirmation(t *testing.T) {
 	})
 
 	t.Run("lists selected providers", func(t *testing.T) {
-		m := newModel(cfg, []string{"p1", "p2"}, false, false)
+		m := newModel(cfg, []string{"p1", "p2"}, false, false, nil)
 		m.state = stateConfirmation
 		m.selected[0] = struct{}{}
 		m.selected[1] = struct{}{}
@@ -800,7 +869,7 @@ func TestViewConfirmation(t *testing.T) {
 	})
 
 	t.Run("shows keybinding hints", func(t *testing.T) {
-		m := newModel(cfg, []string{"p1"}, false, false)
+		m := newModel(cfg, []string{"p1"}, false, false, nil)
 		m.state = stateConfirmation
 		m.selected[0] = struct{}{}
 		view := m.viewConfirmation()
@@ -818,7 +887,7 @@ func TestCtrlCHandling(t *testing.T) {
 	}
 
 	t.Run("ctrl+c quits from selection", func(t *testing.T) {
-		m := newModel(cfg, []string{"p1"}, false, false)
+		m := newModel(cfg, []string{"p1"}, false, false, nil)
 		m.state = stateSelection
 
 		m2, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
@@ -829,7 +898,7 @@ func TestCtrlCHandling(t *testing.T) {
 	})
 
 	t.Run("ctrl+c goes back from confirmation", func(t *testing.T) {
-		m := newModel(cfg, []string{"p1"}, false, false)
+		m := newModel(cfg, []string{"p1"}, false, false, nil)
 		m.state = stateConfirmation
 
 		m2, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
@@ -839,7 +908,7 @@ func TestCtrlCHandling(t *testing.T) {
 	})
 
 	t.Run("ctrl+c quits from done", func(t *testing.T) {
-		m := newModel(cfg, []string{"p1"}, false, false)
+		m := newModel(cfg, []string{"p1"}, false, false, nil)
 		m.state = stateDone
 
 		m2, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})

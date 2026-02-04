@@ -13,6 +13,7 @@ var rootCmd = &cobra.Command{
 	Use:   "cache-buster",
 	Short: "macOS developer cache manager with size limits",
 	Long:  `A CLI tool to manage developer caches on macOS with configurable size limits.`,
+	Args:  cobra.NoArgs,
 	RunE:  runRoot,
 }
 

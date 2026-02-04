@@ -141,11 +141,11 @@ func outputTable(statuses []ProviderStatus) error {
 	for _, s := range statuses {
 		total += s.Current
 
-		statusText := OkStyle.Render("ok")
+		statusText := okStyle.Render("ok")
 		if s.Error != "" {
-			statusText = ErrorStyle.Render("error")
+			statusText = errorStyle.Render("error")
 		} else if s.OverLimit {
-			statusText = OverStyle.Render("OVER")
+			statusText = overStyle.Render("OVER")
 		}
 
 		currentFmt := s.CurrentFmt
@@ -168,10 +168,10 @@ func outputTable(statuses []ProviderStatus) error {
 
 	t := table.New().
 		Border(lipgloss.NormalBorder()).
-		BorderStyle(DimStyle).
+		BorderStyle(dimStyle).
 		StyleFunc(func(row, _ int) lipgloss.Style {
 			if row == table.HeaderRow {
-				return HeaderStyle
+				return headerStyle
 			}
 			return lipgloss.NewStyle()
 		}).
@@ -181,7 +181,7 @@ func outputTable(statuses []ProviderStatus) error {
 
 	fmt.Println(t)
 	fmt.Println()
-	fmt.Println(TotalStyle.Render(fmt.Sprintf("Total: %s", size.FormatSize(total))))
+	fmt.Println(totalStyle.Render(fmt.Sprintf("Total: %s", size.FormatSize(total))))
 
 	return nil
 }

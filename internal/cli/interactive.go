@@ -43,16 +43,17 @@ type providerItem struct {
 
 type model struct {
 	cfg        *config.Config
+	ctx        context.Context
 	selected   map[int]struct{}
 	providers  []providerItem
 	spinner    spinner.Model
 	progress   progress.Model
-	state      state
 	totalFreed int64
 	cursor     int
 	cleanIdx   int
 	width      int
 	height     int
+	state      state
 	dryRun     bool
 	smartMode  bool
 	quitting   bool
@@ -104,11 +105,11 @@ func RunInteractiveWithLoader(loader *config.Loader, dryRun, smart bool) error {
 		return nil
 	}
 
-	m := newModel(cfg, providers, dryRun, smart)
-	p := tea.NewProgram(m, tea.WithAltScreen())
-
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+
+	m := newModel(cfg, providers, dryRun, smart, ctx)
+	p := tea.NewProgram(m, tea.WithAltScreen())
 
 	go func() {
 		<-ctx.Done()
@@ -122,7 +123,7 @@ func RunInteractiveWithLoader(loader *config.Loader, dryRun, smart bool) error {
 	return nil
 }
 
-func newModel(cfg *config.Config, providerNames []string, dryRun, smart bool) model {
+func newModel(cfg *config.Config, providerNames []string, dryRun, smart bool, ctx context.Context) model {
 	items := make([]providerItem, len(providerNames))
 	for i, name := range providerNames {
 		items[i] = providerItem{name: name}
@@ -134,6 +135,10 @@ func newModel(cfg *config.Config, providerNames []string, dryRun, smart bool) mo
 
 	prog := progress.New(progress.WithDefaultGradient())
 
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
 	return model{
 		state:     stateSelection,
 		providers: items,
@@ -141,6 +146,7 @@ func newModel(cfg *config.Config, providerNames []string, dryRun, smart bool) mo
 		spinner:   s,
 		progress:  prog,
 		cfg:       cfg,
+		ctx:       ctx,
 		dryRun:    dryRun,
 		smartMode: smart,
 		width:     80,
@@ -200,7 +206,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-		m.progress.Width = msg.Width - 10
+		progressWidth := msg.Width - 10
+		if progressWidth < 1 {
+			progressWidth = 1
+		}
+		m.progress.Width = progressWidth
 		return m, nil
 
 	case scanResultMsg:
@@ -349,7 +359,7 @@ func (m model) cleanProviderCmd(idx int) tea.Cmd {
 			mode = provider.CleanModeSmart
 		}
 
-		result, err := p.Clean(context.Background(), provider.CleanOptions{
+		result, err := p.Clean(m.ctx, provider.CleanOptions{
 			DryRun: m.dryRun,
 			Mode:   mode,
 		})
@@ -407,16 +417,16 @@ func (m model) viewSelection() string {
 
 		var line string
 		switch {
-		case !p.available:
-			line = fmt.Sprintf("%s%s %s", cursor, checkbox, DimStyle.Render(fmt.Sprintf("%-14s (unavailable)", p.name)))
 		case p.errMsg != "":
-			line = fmt.Sprintf("%s%s %-14s %s", cursor, checkbox, p.name, ErrorStyle.Render(p.errMsg))
+			line = fmt.Sprintf("%s%s %-14s %s", cursor, checkbox, p.name, errorStyle.Render(p.errMsg))
 		case p.currentFmt == "":
 			line = fmt.Sprintf("%s%s %-14s %s", cursor, checkbox, p.name, m.spinner.View())
+		case !p.available:
+			line = fmt.Sprintf("%s%s %s", cursor, checkbox, dimStyle.Render(fmt.Sprintf("%-14s (unavailable)", p.name)))
 		default:
-			status := OkStyle.Render("ok")
+			status := okStyle.Render("ok")
 			if p.overLimit {
-				status = OverStyle.Render("OVER")
+				status = overStyle.Render("OVER")
 			}
 			line = fmt.Sprintf("%s%s %-14s %10s / %-10s %s", cursor, checkbox, p.name, p.currentFmt, p.maxFmt, status)
 		}
@@ -429,7 +439,7 @@ func (m model) viewSelection() string {
 	b.WriteString(fmt.Sprintf("Selected: %d provider(s)", len(m.selected)))
 	b.WriteString("\n\n")
 
-	hint := DimStyle.Render("space=toggle  a=all  n=none  o=over-limit  enter=confirm  q=quit")
+	hint := dimStyle.Render("space=toggle  a=all  n=none  o=over-limit  enter=confirm  q=quit")
 	b.WriteString(hint)
 
 	return b.String()
@@ -454,7 +464,7 @@ func (m model) viewConfirmation() string {
 	}
 
 	b.WriteString("\n")
-	hint := DimStyle.Render("y=confirm  n/esc=back  s=smart  f=full")
+	hint := dimStyle.Render("y=confirm  n/esc=back  s=smart  f=full")
 	b.WriteString(hint)
 
 	return b.String()
@@ -490,7 +500,7 @@ func (m model) viewCleaning() string {
 			}
 			if p.cleanResult != nil {
 				if p.cleanErr != nil {
-					b.WriteString(fmt.Sprintf("  %s   %s\n", p.name, ErrorStyle.Render("error")))
+					b.WriteString(fmt.Sprintf("  %s   %s\n", p.name, errorStyle.Render("error")))
 				} else {
 					freed := size.FormatSize(p.cleanResult.BytesCleaned)
 					b.WriteString(fmt.Sprintf("  %s   freed %s\n", p.name, freed))
@@ -506,9 +516,9 @@ func (m model) viewDone() string {
 	var b strings.Builder
 
 	if m.dryRun {
-		b.WriteString(TotalStyle.Render(fmt.Sprintf("[dry-run] Would clean %d provider(s)", len(m.selected))))
+		b.WriteString(totalStyle.Render(fmt.Sprintf("[dry-run] Would clean %d provider(s)", len(m.selected))))
 	} else {
-		b.WriteString(TotalStyle.Render(fmt.Sprintf("Cleaned %d provider(s), freed %s", len(m.selected), size.FormatSize(m.totalFreed))))
+		b.WriteString(totalStyle.Render(fmt.Sprintf("Cleaned %d provider(s), freed %s", len(m.selected), size.FormatSize(m.totalFreed))))
 	}
 	b.WriteString("\n\n")
 
@@ -520,17 +530,17 @@ func (m model) viewDone() string {
 		if p.cleanResult != nil {
 			if p.cleanErr != nil {
 				errors = append(errors, fmt.Sprintf("%s: %v", p.name, p.cleanErr))
-				b.WriteString(fmt.Sprintf("  %s   %s\n", p.name, ErrorStyle.Render("✗")))
+				b.WriteString(fmt.Sprintf("  %s   %s\n", p.name, errorStyle.Render("✗")))
 			} else {
 				freed := size.FormatSize(p.cleanResult.BytesCleaned)
-				b.WriteString(fmt.Sprintf("  %-14s %10s  %s\n", p.name, freed, OkStyle.Render("✓")))
+				b.WriteString(fmt.Sprintf("  %-14s %10s  %s\n", p.name, freed, okStyle.Render("✓")))
 			}
 		}
 	}
 
 	if len(errors) > 0 {
 		b.WriteString("\n")
-		b.WriteString(ErrorStyle.Render("Errors:"))
+		b.WriteString(errorStyle.Render("Errors:"))
 		b.WriteString("\n")
 		for _, e := range errors {
 			b.WriteString(fmt.Sprintf("  %s\n", e))
@@ -538,7 +548,7 @@ func (m model) viewDone() string {
 	}
 
 	b.WriteString("\n")
-	b.WriteString(DimStyle.Render("Press enter to exit"))
+	b.WriteString(dimStyle.Render("Press enter to exit"))
 
 	return b.String()
 }
