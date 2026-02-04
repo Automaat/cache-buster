@@ -159,15 +159,19 @@ func TestClean_QuietMode(t *testing.T) {
 	assert.NotEmpty(t, output)
 }
 
-func TestClean_NoConfig(t *testing.T) {
+func TestClean_NoConfig_CreatesDefault(t *testing.T) {
 	tmpDir := t.TempDir()
+	cfgPath := filepath.Join(tmpDir, "nonexistent.yaml")
 	loader := config.NewLoader()
-	loader.SetConfigPath(filepath.Join(tmpDir, "nonexistent.yaml"))
+	loader.SetConfigPath(cfgPath)
 
-	err := runCleanWithLoader(loader, nil, true, false, true, false, os.Stdin)
+	// dry-run with all providers - should succeed with default config
+	err := runCleanWithLoader(loader, nil, true, true, false, true, os.Stdin)
 
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "load config")
+	require.NoError(t, err)
+	// verify config was created
+	_, statErr := os.Stat(cfgPath)
+	assert.NoError(t, statErr, "config file should be created")
 }
 
 func TestCleanCmd_HasFlags(t *testing.T) {

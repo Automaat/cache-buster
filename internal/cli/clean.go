@@ -40,9 +40,12 @@ func runClean(cmd *cobra.Command, args []string) error {
 }
 
 func runCleanWithLoader(loader *config.Loader, args []string, allFlag, dryRun, force, quiet bool, stdin *os.File) error {
-	cfg, err := loader.Load()
+	cfg, created, err := loader.LoadOrCreate()
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
+	}
+	if created && !quiet {
+		fmt.Fprintln(os.Stderr, "Created default config file")
 	}
 
 	providerNames, err := resolveProviders(cfg, args, allFlag)

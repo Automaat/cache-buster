@@ -209,15 +209,21 @@ func TestOutputTable_Empty(t *testing.T) {
 	assert.Contains(t, output, "Total: 0 B")
 }
 
-func TestRunStatus_NoConfig(t *testing.T) {
+func TestRunStatus_NoConfig_CreatesDefault(t *testing.T) {
 	tmpDir := t.TempDir()
+	cfgPath := filepath.Join(tmpDir, "nonexistent.yaml")
 	loader := config.NewLoader()
-	loader.SetConfigPath(filepath.Join(tmpDir, "nonexistent.yaml"))
+	loader.SetConfigPath(cfgPath)
 
-	err := runStatusWithLoader(loader, false)
+	var err error
+	captureStdout(t, func() {
+		err = runStatusWithLoader(loader, false)
+	})
 
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "load config")
+	require.NoError(t, err)
+	// verify config was created
+	_, statErr := os.Stat(cfgPath)
+	assert.NoError(t, statErr, "config file should be created")
 }
 
 func TestRunStatus_NoEnabledProviders(t *testing.T) {
