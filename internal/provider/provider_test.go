@@ -225,8 +225,9 @@ func TestDockerProvider_Available(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	available := p.Available()
-	t.Logf("docker available: %v", available)
+	if !p.Available() {
+		t.Skip("docker not available")
+	}
 }
 
 func TestNewProvider_CommandBased(t *testing.T) {
@@ -586,13 +587,9 @@ func TestNewProvider_NoCleanCmd(t *testing.T) {
 		Enabled: true,
 	}
 
-	p, err := provider.NewProvider("custom", cfg)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if p.Name() != "custom" {
-		t.Errorf("name = %q, want %q", p.Name(), "custom")
+	_, err := provider.NewProvider("custom", cfg)
+	if err == nil {
+		t.Error("expected error for unknown provider without clean_cmd")
 	}
 }
 

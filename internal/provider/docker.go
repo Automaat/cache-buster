@@ -3,10 +3,12 @@ package provider
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"os/exec"
 	"strings"
 
 	"github.com/Automaat/cache-buster/internal/config"
+	"github.com/kballard/go-shellquote"
 )
 
 // DockerProvider cleans Docker caches when daemon is available.
@@ -54,7 +56,10 @@ func (p *DockerProvider) Clean(ctx context.Context, opts CleanOptions) (CleanRes
 
 	sizeBefore, _ := p.CurrentSize()
 
-	parts := strings.Fields(p.cleanCmd)
+	parts, err := shellquote.Split(p.cleanCmd)
+	if err != nil {
+		return CleanResult{}, fmt.Errorf("invalid command: %w", err)
+	}
 	if len(parts) == 0 {
 		return CleanResult{}, nil
 	}
@@ -64,7 +69,7 @@ func (p *DockerProvider) Clean(ctx context.Context, opts CleanOptions) (CleanRes
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
-	err := cmd.Run()
+	err = cmd.Run()
 	output := strings.TrimSpace(stdout.String() + stderr.String())
 
 	if err != nil {

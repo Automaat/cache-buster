@@ -3,10 +3,12 @@ package provider
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"os/exec"
 	"strings"
 
 	"github.com/Automaat/cache-buster/internal/config"
+	"github.com/kballard/go-shellquote"
 )
 
 // CommandProvider cleans caches by running an external command.
@@ -38,7 +40,10 @@ func (p *CommandProvider) Clean(ctx context.Context, opts CleanOptions) (CleanRe
 
 	sizeBefore, _ := p.CurrentSize()
 
-	parts := strings.Fields(p.cleanCmd)
+	parts, err := shellquote.Split(p.cleanCmd)
+	if err != nil {
+		return CleanResult{}, fmt.Errorf("invalid command: %w", err)
+	}
 	if len(parts) == 0 {
 		return CleanResult{}, nil
 	}
@@ -48,7 +53,7 @@ func (p *CommandProvider) Clean(ctx context.Context, opts CleanOptions) (CleanRe
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
-	err := cmd.Run()
+	err = cmd.Run()
 	output := strings.TrimSpace(stdout.String() + stderr.String())
 
 	if err != nil {

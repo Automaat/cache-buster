@@ -23,7 +23,7 @@ func NewProvider(name string, cfg config.Provider) (Provider, error) {
 	}
 
 	if cfg.CleanCmd == "" {
-		return NewFileProvider(name, cfg)
+		return nil, fmt.Errorf("unknown provider %q requires clean_cmd", name)
 	}
 
 	return NewCommandProvider(name, cfg)

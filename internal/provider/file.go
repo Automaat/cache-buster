@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"sort"
+	"strings"
 
 	"github.com/Automaat/cache-buster/internal/cache"
 	"github.com/Automaat/cache-buster/internal/config"
@@ -54,7 +55,8 @@ func (p *FileProvider) Clean(ctx context.Context, opts CleanOptions) (CleanResul
 		bytesToDelete = currentSize - p.maxSize
 		bytesDeleted  int64
 		filesDeleted  int64
-		output        string
+		deleteErrors  []string
+		output        strings.Builder
 	)
 
 	for _, f := range files {
@@ -73,13 +75,14 @@ func (p *FileProvider) Clean(ctx context.Context, opts CleanOptions) (CleanResul
 		}
 
 		if opts.DryRun {
-			output += fmt.Sprintf("would delete: %s (%s)\n", f.Path, size.FormatSize(f.Size))
+			fmt.Fprintf(&output, "would delete: %s (%s)\n", f.Path, size.FormatSize(f.Size))
 			bytesDeleted += f.Size
 			filesDeleted++
 			continue
 		}
 
 		if err := os.Remove(f.Path); err != nil {
+			deleteErrors = append(deleteErrors, fmt.Sprintf("%s: %v", f.Path, err))
 			continue
 		}
 
@@ -91,13 +94,19 @@ func (p *FileProvider) Clean(ctx context.Context, opts CleanOptions) (CleanResul
 		return CleanResult{
 			BytesCleaned: bytesDeleted,
 			FilesDeleted: filesDeleted,
-			Output:       output,
+			Output:       output.String(),
 		}, nil
 	}
 
-	return CleanResult{
+	result := CleanResult{
 		BytesCleaned: bytesDeleted,
 		FilesDeleted: filesDeleted,
 		Output:       fmt.Sprintf("deleted %d files", filesDeleted),
-	}, nil
+	}
+
+	if len(deleteErrors) > 0 {
+		result.Output += fmt.Sprintf(" (%d errors: %s)", len(deleteErrors), strings.Join(deleteErrors, "; "))
+	}
+
+	return result, nil
 }
