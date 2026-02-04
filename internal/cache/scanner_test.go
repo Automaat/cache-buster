@@ -96,12 +96,12 @@ func TestCalculateSize(t *testing.T) {
 		expectedTotal += int64(size)
 	}
 
-	got, err := CalculateSize([]string{tmpDir})
+	result, err := CalculateSize([]string{tmpDir})
 	if err != nil {
 		t.Fatalf("CalculateSize() error = %v", err)
 	}
-	if got != expectedTotal {
-		t.Errorf("CalculateSize() = %d, want %d", got, expectedTotal)
+	if result.Size != expectedTotal {
+		t.Errorf("CalculateSize() = %d, want %d", result.Size, expectedTotal)
 	}
 }
 
@@ -116,12 +116,12 @@ func TestCalculateSizeMultiplePaths(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got, err := CalculateSize([]string{dir1, dir2})
+	result, err := CalculateSize([]string{dir1, dir2})
 	if err != nil {
 		t.Fatalf("CalculateSize() error = %v", err)
 	}
-	if got != 300 {
-		t.Errorf("CalculateSize() = %d, want 300", got)
+	if result.Size != 300 {
+		t.Errorf("CalculateSize() = %d, want 300", result.Size)
 	}
 }
 
@@ -138,12 +138,12 @@ func TestCalculateSizeSkipsSymlinks(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got, err := CalculateSize([]string{tmpDir})
+	result, err := CalculateSize([]string{tmpDir})
 	if err != nil {
 		t.Fatalf("CalculateSize() error = %v", err)
 	}
-	if got != 100 {
-		t.Errorf("CalculateSize() = %d, want 100 (symlink should be skipped)", got)
+	if result.Size != 100 {
+		t.Errorf("CalculateSize() = %d, want 100 (symlink should be skipped)", result.Size)
 	}
 }
 
@@ -166,16 +166,16 @@ func TestListFiles(t *testing.T) {
 		}
 	}
 
-	got, err := ListFiles([]string{tmpDir})
+	result, err := ListFiles([]string{tmpDir})
 	if err != nil {
 		t.Fatalf("ListFiles() error = %v", err)
 	}
-	if len(got) != 3 {
-		t.Errorf("ListFiles() len = %d, want 3", len(got))
+	if len(result.Files) != 3 {
+		t.Errorf("ListFiles() len = %d, want 3", len(result.Files))
 	}
 
 	sizeMap := make(map[string]int64)
-	for _, fi := range got {
+	for _, fi := range result.Files {
 		sizeMap[filepath.Base(fi.Path)] = fi.Size
 	}
 
@@ -197,15 +197,15 @@ func TestListFilesModTime(t *testing.T) {
 
 	now := time.Now()
 
-	got, err := ListFiles([]string{tmpDir})
+	result, err := ListFiles([]string{tmpDir})
 	if err != nil {
 		t.Fatalf("ListFiles() error = %v", err)
 	}
-	if len(got) != 1 {
-		t.Fatalf("ListFiles() len = %d, want 1", len(got))
+	if len(result.Files) != 1 {
+		t.Fatalf("ListFiles() len = %d, want 1", len(result.Files))
 	}
 
-	diff := now.Sub(got[0].ModTime)
+	diff := now.Sub(result.Files[0].ModTime)
 	if diff < 0 {
 		diff = -diff
 	}
@@ -227,11 +227,11 @@ func TestListFilesSkipsSymlinks(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got, err := ListFiles([]string{tmpDir})
+	result, err := ListFiles([]string{tmpDir})
 	if err != nil {
 		t.Fatalf("ListFiles() error = %v", err)
 	}
-	if len(got) != 1 {
-		t.Errorf("ListFiles() len = %d, want 1 (symlink should be skipped)", len(got))
+	if len(result.Files) != 1 {
+		t.Errorf("ListFiles() len = %d, want 1 (symlink should be skipped)", len(result.Files))
 	}
 }

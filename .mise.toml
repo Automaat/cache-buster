@@ -1,3 +1,49 @@
 [tools]
 go = "1.25.7"
 golangci-lint = "latest"
+
+[env]
+BINARY = "cache-buster"
+
+[tasks.version]
+description = "Get version from git"
+run = "git describe --tags --always --dirty 2>/dev/null || echo dev"
+hide = true
+
+[tasks.build]
+description = "Build binary"
+run = """
+VERSION=$(git describe --tags --always --dirty 2>/dev/null || echo dev)
+go build -ldflags "-s -w -X main.version=$VERSION" -o $BINARY ./cmd/cache-buster
+"""
+
+[tasks.install]
+description = "Install to GOPATH/bin"
+run = """
+VERSION=$(git describe --tags --always --dirty 2>/dev/null || echo dev)
+go install -ldflags "-s -w -X main.version=$VERSION" ./cmd/cache-buster
+"""
+
+[tasks.test]
+description = "Run tests with race detection"
+run = "go test -race ./..."
+
+[tasks.lint]
+description = "Run linter"
+run = "golangci-lint run"
+
+[tasks.cover]
+description = "Generate coverage report"
+run = """
+go test -coverprofile=coverage.out ./...
+go tool cover -html=coverage.out -o coverage.html
+echo "Coverage report: coverage.html"
+"""
+
+[tasks.clean]
+description = "Remove build artifacts"
+run = "rm -f $BINARY coverage.out coverage.html"
+
+[tasks.all]
+description = "Run lint, test, and build"
+depends = ["lint", "test", "build"]

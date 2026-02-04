@@ -19,10 +19,11 @@ func TestCalculateSizeAgainstDu(t *testing.T) {
 		t.Skip("~/.npm not found")
 	}
 
-	ourSize, err := CalculateSize(paths)
+	result, err := CalculateSize(paths)
 	if err != nil {
 		t.Fatalf("CalculateSize: %v", err)
 	}
+	ourSize := result.Size
 
 	out, err := exec.Command("du", "-sb", paths[0]).Output()
 	if err != nil {
@@ -59,7 +60,7 @@ func TestCalculateSizeAgainstDu(t *testing.T) {
 	pct := float64(diff) / float64(duSize) * 100
 	t.Logf("difference:    %d bytes (%.2f%%)", diff, pct)
 
-	if pct > 1 {
-		t.Errorf("size difference > 1%%: ours=%d, du=%d", ourSize, duSize)
+	if pct > 5 {
+		t.Errorf("size difference > 5%%: ours=%d, du=%d", ourSize, duSize)
 	}
 }

@@ -47,11 +47,17 @@ func (p *FileProvider) smartClean(ctx context.Context, opts CleanOptions) (Clean
 		return CleanResult{}, err
 	}
 
-	return CleanResult{
+	result := CleanResult{
 		BytesCleaned: trimResult.FreedBytes,
 		FilesDeleted: trimResult.DeletedCount,
 		Output:       trimResult.Output,
-	}, nil
+	}
+
+	if len(trimResult.Errors) > 0 {
+		result.Output = formatResultWithErrors(trimResult.Output, trimResult.DeletedCount, trimResult.Errors)
+	}
+
+	return result, nil
 }
 
 func (p *FileProvider) fullClean(ctx context.Context, opts CleanOptions) (CleanResult, error) {
@@ -66,11 +72,12 @@ func (p *FileProvider) fullClean(ctx context.Context, opts CleanOptions) (CleanR
 		}, nil
 	}
 
-	files, err := cache.ListFiles(p.paths)
+	listResult, err := cache.ListFiles(p.paths)
 	if err != nil {
 		return CleanResult{}, err
 	}
 
+	files := listResult.Files
 	sort.Slice(files, func(i, j int) bool {
 		return files[i].ModTime.Before(files[j].ModTime)
 	})
@@ -79,9 +86,12 @@ func (p *FileProvider) fullClean(ctx context.Context, opts CleanOptions) (CleanR
 		bytesToDelete = currentSize - p.maxSize
 		bytesDeleted  int64
 		filesDeleted  int64
-		deleteErrors  []string
+		deleteErrors  []cache.AccessError
 		output        strings.Builder
 	)
+
+	// Carry forward scan warnings
+	deleteErrors = append(deleteErrors, listResult.Warnings...)
 
 	for _, f := range files {
 		if bytesDeleted >= bytesToDelete {
@@ -106,7 +116,7 @@ func (p *FileProvider) fullClean(ctx context.Context, opts CleanOptions) (CleanR
 		}
 
 		if err := os.Remove(f.Path); err != nil {
-			deleteErrors = append(deleteErrors, fmt.Sprintf("%s: %v", f.Path, err))
+			deleteErrors = append(deleteErrors, cache.ClassifyError(f.Path, err))
 			continue
 		}
 
@@ -129,8 +139,39 @@ func (p *FileProvider) fullClean(ctx context.Context, opts CleanOptions) (CleanR
 	}
 
 	if len(deleteErrors) > 0 {
-		result.Output += fmt.Sprintf(" (%d errors: %s)", len(deleteErrors), strings.Join(deleteErrors, "; "))
+		result.Output = formatResultWithErrors(result.Output, filesDeleted, deleteErrors)
 	}
 
 	return result, nil
+}
+
+func formatResultWithErrors(base string, deleted int64, errors []cache.AccessError) string {
+	var permCount, lockedCount, otherCount int
+	for _, e := range errors {
+		switch e.Reason {
+		case cache.ReasonPermissionDenied:
+			permCount++
+		case cache.ReasonFileLocked:
+			lockedCount++
+		default:
+			otherCount++
+		}
+	}
+
+	var parts []string
+	if permCount > 0 {
+		parts = append(parts, fmt.Sprintf("%d permission denied", permCount))
+	}
+	if lockedCount > 0 {
+		parts = append(parts, fmt.Sprintf("%d locked", lockedCount))
+	}
+	if otherCount > 0 {
+		parts = append(parts, fmt.Sprintf("%d other errors", otherCount))
+	}
+
+	if len(parts) == 0 {
+		return base
+	}
+
+	return fmt.Sprintf("deleted %d files (%s)", deleted, strings.Join(parts, ", "))
 }
