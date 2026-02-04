@@ -32,8 +32,6 @@ type StatusOutput struct {
 	TotalBytes int64            `json:"total_bytes"`
 }
 
-var jsonOutput bool
-
 // StatusCmd shows cache status for all enabled providers.
 var StatusCmd = &cobra.Command{
 	Use:   "status",
@@ -42,14 +40,15 @@ var StatusCmd = &cobra.Command{
 }
 
 func init() {
-	StatusCmd.Flags().BoolVar(&jsonOutput, "json", false, "Output in JSON format")
+	StatusCmd.Flags().Bool("json", false, "Output in JSON format")
 }
 
-func runStatus(_ *cobra.Command, _ []string) error {
-	return runStatusWithLoader(config.NewLoader())
+func runStatus(cmd *cobra.Command, _ []string) error {
+	jsonFlag, _ := cmd.Flags().GetBool("json")
+	return runStatusWithLoader(config.NewLoader(), jsonFlag)
 }
 
-func runStatusWithLoader(loader *config.Loader) error {
+func runStatusWithLoader(loader *config.Loader, jsonOutput bool) error {
 	cfg, err := loader.Load()
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
@@ -151,7 +150,17 @@ func outputTable(statuses []ProviderStatus) error {
 			statusText = overStyle.Render("OVER")
 		}
 
-		rows = append(rows, []string{s.Name, s.CurrentFmt, s.MaxFmt, statusText})
+		currentFmt := s.CurrentFmt
+		maxFmt := s.MaxFmt
+		if s.Error != "" {
+			if currentFmt == "" {
+				currentFmt = "-"
+			}
+			if maxFmt == "" {
+				maxFmt = "-"
+			}
+		}
+		rows = append(rows, []string{s.Name, currentFmt, maxFmt, statusText})
 	}
 
 	t := table.New().

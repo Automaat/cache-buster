@@ -195,6 +195,8 @@ func TestOutputTable(t *testing.T) {
 	assert.Contains(t, output, "OVER")
 	assert.Contains(t, output, "error")
 	assert.Contains(t, output, "Total:")
+	// Error providers show "-" for empty values
+	assert.Contains(t, output, "-")
 }
 
 func TestOutputTable_Empty(t *testing.T) {
@@ -212,7 +214,7 @@ func TestRunStatus_NoConfig(t *testing.T) {
 	loader := config.NewLoader()
 	loader.SetConfigPath(filepath.Join(tmpDir, "nonexistent.yaml"))
 
-	err := runStatusWithLoader(loader)
+	err := runStatusWithLoader(loader, false)
 
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "load config")
@@ -236,7 +238,7 @@ providers:
 
 	var err error
 	output := captureStdout(t, func() {
-		err = runStatusWithLoader(loader)
+		err = runStatusWithLoader(loader, false)
 	})
 	require.NoError(t, err)
 
@@ -264,9 +266,8 @@ providers:
 	loader.SetConfigPath(cfgPath)
 
 	var err error
-	jsonOutput = false
 	output := captureStdout(t, func() {
-		err = runStatusWithLoader(loader)
+		err = runStatusWithLoader(loader, false)
 	})
 	require.NoError(t, err)
 
@@ -296,11 +297,9 @@ providers:
 	loader.SetConfigPath(cfgPath)
 
 	var err error
-	jsonOutput = true
 	output := captureStdout(t, func() {
-		err = runStatusWithLoader(loader)
+		err = runStatusWithLoader(loader, true)
 	})
-	jsonOutput = false
 	require.NoError(t, err)
 
 	var out StatusOutput
