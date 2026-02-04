@@ -37,6 +37,16 @@ jobs:
               echo "Error: Version must match format v<major>.<minor>.<patch> (e.g., v0.2.0)"
               exit 1
             fi
+            # Validate version > latest tag
+            LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+            if [ -n "$LATEST_TAG" ]; then
+              INPUT_NO_V=${INPUT_VERSION#v}
+              LATEST_NO_V=${LATEST_TAG#v}
+              if [ "$(printf '%s\n' "$INPUT_NO_V" "$LATEST_NO_V" | sort -V | tail -n1)" != "$INPUT_NO_V" ]; then
+                echo "Error: Version $INPUT_VERSION must be > $LATEST_TAG"
+                exit 1
+              fi
+            fi
             VERSION="$INPUT_VERSION"
           elif ! git describe --tags --abbrev=0 2>/dev/null; then
             VERSION="v0.1.0"
@@ -57,6 +67,12 @@ jobs:
       - name: Create and push tag
         run: |
           VERSION="${{ steps.version.outputs.version }}"
+
+          if git rev-parse "$VERSION" >/dev/null 2>&1; then
+            echo "Error: Git tag '$VERSION' already exists"
+            exit 1
+          fi
+
           git tag -a "$VERSION" -m "Release $VERSION"
           git push origin "$VERSION"
 
