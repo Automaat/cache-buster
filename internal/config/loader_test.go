@@ -8,18 +8,10 @@ import (
 
 func TestLoader_LoadSaveCycle(t *testing.T) {
 	tmpDir := t.TempDir()
-	origConfigDir := configDir
-
-	// Temporarily override config paths for testing
-	t.Cleanup(func() {
-		// Reset by creating new loader
-	})
-
 	configPath := filepath.Join(tmpDir, "config.yaml")
 
 	loader := NewLoader()
-	loader.v.SetConfigFile(configPath)
-	loader.v.SetConfigType("yaml")
+	loader.SetConfigPath(configPath)
 
 	cfg := DefaultConfig()
 	cfg.Providers["go-build"] = Provider{
@@ -29,37 +21,22 @@ func TestLoader_LoadSaveCycle(t *testing.T) {
 		CleanCmd: "custom clean",
 	}
 
-	// Save
-	for key, value := range map[string]any{
-		"version":   cfg.Version,
-		"providers": cfg.Providers,
-	} {
-		loader.v.Set(key, value)
-	}
-	if err := loader.v.WriteConfigAs(configPath); err != nil {
+	if err := loader.Save(cfg); err != nil {
 		t.Fatalf("Save() error = %v", err)
 	}
 
-	// Verify file exists
 	if _, err := os.Stat(configPath); os.IsNotExist(err) {
 		t.Fatal("config file not created")
 	}
 
-	// Load back
 	loader2 := NewLoader()
-	loader2.v.SetConfigFile(configPath)
-	loader2.v.SetConfigType("yaml")
+	loader2.SetConfigPath(configPath)
 
-	if err := loader2.v.ReadInConfig(); err != nil {
-		t.Fatalf("ReadInConfig() error = %v", err)
+	loaded, err := loader2.Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
 	}
 
-	var loaded Config
-	if err := loader2.v.Unmarshal(&loaded); err != nil {
-		t.Fatalf("Unmarshal() error = %v", err)
-	}
-
-	// Verify loaded config
 	if loaded.Version != cfg.Version {
 		t.Errorf("loaded version = %v, want %v", loaded.Version, cfg.Version)
 	}
@@ -75,8 +52,6 @@ func TestLoader_LoadSaveCycle(t *testing.T) {
 	if goBuild.MaxSize != "20G" {
 		t.Errorf("go-build MaxSize = %v, want 20G", goBuild.MaxSize)
 	}
-
-	_ = origConfigDir
 }
 
 func TestLoader_Exists(t *testing.T) {
@@ -84,22 +59,149 @@ func TestLoader_Exists(t *testing.T) {
 	configPath := filepath.Join(tmpDir, "config.yaml")
 
 	loader := NewLoader()
+	loader.SetConfigPath(configPath)
 
-	// Create a temporary test to check file existence
-	if _, err := os.Stat(configPath); !os.IsNotExist(err) {
-		t.Error("file should not exist initially")
+	exists, err := loader.Exists()
+	if err != nil {
+		t.Fatalf("Exists() error = %v", err)
+	}
+	if exists {
+		t.Error("Exists() = true, want false for missing file")
 	}
 
-	// Create file
-	if err := os.WriteFile(configPath, []byte("version: 1\n"), 0o600); err != nil {
+	err = os.WriteFile(configPath, []byte("version: 1\nproviders: {}\n"), 0o600)
+	if err != nil {
 		t.Fatalf("create file: %v", err)
 	}
 
-	if _, err := os.Stat(configPath); os.IsNotExist(err) {
-		t.Error("file should exist after creation")
+	exists, err = loader.Exists()
+	if err != nil {
+		t.Fatalf("Exists() error = %v", err)
+	}
+	if !exists {
+		t.Error("Exists() = false, want true after file creation")
+	}
+}
+
+func TestLoader_LoadOrCreate(t *testing.T) {
+	t.Run("creates default when missing", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		configPath := filepath.Join(tmpDir, "config.yaml")
+
+		loader := NewLoader()
+		loader.SetConfigPath(configPath)
+
+		cfg, created, err := loader.LoadOrCreate()
+		if err != nil {
+			t.Fatalf("LoadOrCreate() error = %v", err)
+		}
+		if !created {
+			t.Error("LoadOrCreate() created = false, want true")
+		}
+		if cfg == nil {
+			t.Fatal("LoadOrCreate() config = nil")
+		}
+		if cfg.Version != "1" {
+			t.Errorf("config.Version = %s, want 1", cfg.Version)
+		}
+
+		if _, err := os.Stat(configPath); os.IsNotExist(err) {
+			t.Error("config file not created on disk")
+		}
+	})
+
+	t.Run("loads existing config", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		configPath := filepath.Join(tmpDir, "config.yaml")
+
+		loader := NewLoader()
+		loader.SetConfigPath(configPath)
+
+		original := DefaultConfig()
+		original.Providers["test"] = Provider{
+			Enabled:  true,
+			Paths:    []string{"/test"},
+			MaxSize:  "5G",
+			CleanCmd: "rm -rf /test",
+		}
+		if err := loader.Save(original); err != nil {
+			t.Fatalf("Save() error = %v", err)
+		}
+
+		loader2 := NewLoader()
+		loader2.SetConfigPath(configPath)
+
+		cfg, created, err := loader2.LoadOrCreate()
+		if err != nil {
+			t.Fatalf("LoadOrCreate() error = %v", err)
+		}
+		if created {
+			t.Error("LoadOrCreate() created = true, want false for existing")
+		}
+		if _, ok := cfg.Providers["test"]; !ok {
+			t.Error("loaded config missing test provider")
+		}
+	})
+}
+
+func TestLoader_InitDefault(t *testing.T) {
+	t.Run("creates when missing", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		configPath := filepath.Join(tmpDir, "config.yaml")
+
+		loader := NewLoader()
+		loader.SetConfigPath(configPath)
+
+		created, err := loader.InitDefault()
+		if err != nil {
+			t.Fatalf("InitDefault() error = %v", err)
+		}
+		if !created {
+			t.Error("InitDefault() = false, want true")
+		}
+
+		if _, err := os.Stat(configPath); os.IsNotExist(err) {
+			t.Error("config file not created")
+		}
+	})
+
+	t.Run("skips when exists", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		configPath := filepath.Join(tmpDir, "config.yaml")
+
+		loader := NewLoader()
+		loader.SetConfigPath(configPath)
+
+		if err := loader.Save(DefaultConfig()); err != nil {
+			t.Fatalf("Save() error = %v", err)
+		}
+
+		created, err := loader.InitDefault()
+		if err != nil {
+			t.Fatalf("InitDefault() error = %v", err)
+		}
+		if created {
+			t.Error("InitDefault() = true, want false for existing file")
+		}
+	})
+}
+
+func TestLoader_Save_ValidatesConfig(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.yaml")
+
+	loader := NewLoader()
+	loader.SetConfigPath(configPath)
+
+	cfg := &Config{
+		Version:   "", // invalid version
+		Providers: map[string]Provider{},
 	}
 
-	_ = loader
+	err := loader.Save(cfg)
+	if err == nil {
+		t.Fatal("Save() expected error for invalid config")
+	}
 }
 
 func TestNewLoader(t *testing.T) {

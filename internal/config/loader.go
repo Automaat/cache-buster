@@ -3,13 +3,15 @@ package config
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/spf13/viper"
 )
 
 // Loader handles config file operations.
 type Loader struct {
-	v *viper.Viper
+	v          *viper.Viper
+	configPath string // override for testing, empty uses Path()
 }
 
 // NewLoader creates a new config loader.
@@ -17,9 +19,21 @@ func NewLoader() *Loader {
 	return &Loader{v: viper.New()}
 }
 
+// SetConfigPath overrides config path (for testing).
+func (l *Loader) SetConfigPath(path string) {
+	l.configPath = path
+}
+
+func (l *Loader) path() (string, error) {
+	if l.configPath != "" {
+		return l.configPath, nil
+	}
+	return Path()
+}
+
 // Load reads and validates config from disk.
 func (l *Loader) Load() (*Config, error) {
-	configPath, err := Path()
+	configPath, err := l.path()
 	if err != nil {
 		return nil, err
 	}
@@ -65,13 +79,18 @@ func (l *Loader) LoadOrCreate() (*Config, bool, error) {
 
 // Save writes config to disk.
 func (l *Loader) Save(cfg *Config) error {
-	if err := EnsureDir(); err != nil {
+	if err := cfg.Validate(); err != nil {
+		return fmt.Errorf("validate config: %w", err)
+	}
+
+	configPath, err := l.path()
+	if err != nil {
 		return err
 	}
 
-	configPath, err := Path()
-	if err != nil {
-		return err
+	// Ensure parent directory exists
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o750); err != nil {
+		return fmt.Errorf("create config dir: %w", err)
 	}
 
 	for key, value := range map[string]any{
@@ -104,7 +123,7 @@ func (l *Loader) InitDefault() (bool, error) {
 
 // Exists checks if config file exists.
 func (l *Loader) Exists() (bool, error) {
-	configPath, err := Path()
+	configPath, err := l.path()
 	if err != nil {
 		return false, err
 	}
