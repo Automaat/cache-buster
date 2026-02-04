@@ -89,6 +89,7 @@ func EnsureDir() error {
 func PathsExist(patterns []string) bool {
 	paths, err := ExpandPaths(patterns)
 	if err != nil {
+		fmt.Fprintf(os.Stderr, "warning: path expansion failed: %v\n", err)
 		return false
 	}
 	for _, p := range paths {

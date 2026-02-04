@@ -68,6 +68,7 @@ func DefaultProviders() map[string]Provider {
 			MaxAge:   "30d",
 			CleanCmd: "docker system prune -af",
 		},
+		// macOS-only: Xcode and iOS Simulator providers
 		"xcode-deriveddata": {
 			Enabled:  true,
 			Paths:    []string{"~/Library/Developer/Xcode/DerivedData"},
@@ -105,7 +106,7 @@ func DefaultProviders() map[string]Provider {
 		},
 		"pnpm": {
 			Enabled:  true,
-			Paths:    []string{"~/.local/share/pnpm/store"},
+			Paths:    []string{"~/.local/share/pnpm/store", "~/Library/pnpm/store"},
 			MaxSize:  "5G",
 			MaxAge:   "30d",
 			CleanCmd: "pnpm store prune",

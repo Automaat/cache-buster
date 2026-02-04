@@ -66,7 +66,8 @@ func (l *Loader) Load() (*Config, error) {
 		return nil, fmt.Errorf("unmarshal config: %w", err)
 	}
 
-	// Merge user overrides on top of defaults
+	// Merge user overrides on top of defaults.
+	// User providers fully replace defaults (not field-by-field merge).
 	for name, p := range userCfg.Providers {
 		cfg.Providers[name] = p
 	}
@@ -75,7 +76,8 @@ func (l *Loader) Load() (*Config, error) {
 }
 
 // LoadOrCreate loads config (always merges with defaults). Returns (config, created, error).
-// The created return value is deprecated and always false.
+//
+// Deprecated: Use Load() instead. The created return value is always false.
 func (l *Loader) LoadOrCreate() (*Config, bool, error) {
 	cfg, err := l.Load()
 	return cfg, false, err

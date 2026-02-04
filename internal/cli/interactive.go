@@ -425,6 +425,10 @@ func (m model) viewSelection() string {
 	if nameWidth < maxNameLen {
 		nameWidth = maxNameLen
 	}
+	const maxNameWidth = 50
+	if nameWidth > maxNameWidth {
+		nameWidth = maxNameWidth
+	}
 
 	for i, p := range m.providers {
 		cursor := "  "

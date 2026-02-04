@@ -21,7 +21,7 @@ func TestConfig_Validate(t *testing.T) {
 				Version:   "1",
 				Providers: map[string]Provider{},
 			},
-			name: "empty providers is valid",
+			name: "empty providers is valid", // user may rely entirely on defaults
 		},
 		{
 			cfg: &Config{

@@ -140,6 +140,39 @@ providers:
 			t.Error("LoadOrCreate() missing default go-build provider after merge")
 		}
 	})
+
+	t.Run("user can disable default provider", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		configPath := filepath.Join(tmpDir, "config.yaml")
+
+		content := `version: "1"
+providers:
+  go-build:
+    enabled: false
+    paths:
+      - ~/Library/Caches/go-build
+    max_size: 10G
+`
+		if err := os.WriteFile(configPath, []byte(content), 0o600); err != nil {
+			t.Fatalf("write config: %v", err)
+		}
+
+		loader := NewLoader()
+		loader.SetConfigPath(configPath)
+
+		cfg, _, err := loader.LoadOrCreate()
+		if err != nil {
+			t.Fatalf("LoadOrCreate() error = %v", err)
+		}
+
+		goBuild, ok := cfg.Providers["go-build"]
+		if !ok {
+			t.Fatal("go-build provider missing")
+		}
+		if goBuild.Enabled {
+			t.Error("user override enabled=false not applied")
+		}
+	})
 }
 
 func TestLoader_InitDefault(t *testing.T) {
