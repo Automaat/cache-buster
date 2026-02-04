@@ -1,6 +1,8 @@
 package provider
 
 import (
+	"time"
+
 	"github.com/Automaat/cache-buster/internal/cache"
 	"github.com/Automaat/cache-buster/internal/config"
 	"github.com/Automaat/cache-buster/pkg/size"
@@ -11,6 +13,7 @@ type BaseProvider struct {
 	name    string
 	paths   []string
 	maxSize int64
+	maxAge  time.Duration
 }
 
 // NewBaseProvider creates a BaseProvider from config.
@@ -25,10 +28,16 @@ func NewBaseProvider(name string, cfg config.Provider) (*BaseProvider, error) {
 		return nil, err
 	}
 
+	maxAge, err := config.ParseDuration(cfg.MaxAge)
+	if err != nil {
+		return nil, err
+	}
+
 	return &BaseProvider{
 		name:    name,
 		paths:   paths,
 		maxSize: maxBytes,
+		maxAge:  maxAge,
 	}, nil
 }
 
@@ -50,6 +59,11 @@ func (b *BaseProvider) CurrentSize() (int64, error) {
 // MaxSize implements Provider.
 func (b *BaseProvider) MaxSize() int64 {
 	return b.maxSize
+}
+
+// MaxAge implements Provider.
+func (b *BaseProvider) MaxAge() time.Duration {
+	return b.maxAge
 }
 
 // Available implements Provider.

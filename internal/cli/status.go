@@ -11,6 +11,7 @@ import (
 	"github.com/Automaat/cache-buster/pkg/size"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/lipgloss/table"
+	"github.com/charmbracelet/x/term"
 	"github.com/spf13/cobra"
 )
 
@@ -166,6 +167,11 @@ func outputTable(statuses []ProviderStatus) error {
 		rows = append(rows, []string{s.Name, currentFmt, maxFmt, statusText})
 	}
 
+	width, _, _ := term.GetSize(os.Stdout.Fd())
+	if width <= 0 {
+		width = 80
+	}
+
 	t := table.New().
 		Border(lipgloss.NormalBorder()).
 		BorderStyle(lipgloss.NewStyle().Foreground(lipgloss.Color("240"))).
@@ -176,7 +182,8 @@ func outputTable(statuses []ProviderStatus) error {
 			return lipgloss.NewStyle()
 		}).
 		Headers("Provider", "Current", "Max", "Status").
-		Rows(rows...)
+		Rows(rows...).
+		Width(width)
 
 	fmt.Println(t)
 	fmt.Println()

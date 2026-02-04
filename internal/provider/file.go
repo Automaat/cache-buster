@@ -31,6 +31,30 @@ func NewFileProvider(name string, cfg config.Provider) (*FileProvider, error) {
 
 // Clean implements Provider.
 func (p *FileProvider) Clean(ctx context.Context, opts CleanOptions) (CleanResult, error) {
+	if opts.Mode == CleanModeSmart {
+		return p.smartClean(ctx, opts)
+	}
+	return p.fullClean(ctx, opts)
+}
+
+func (p *FileProvider) smartClean(ctx context.Context, opts CleanOptions) (CleanResult, error) {
+	trimResult, err := cache.Trim(ctx, p.paths, cache.TrimOptions{
+		MaxSize: p.maxSize,
+		MaxAge:  p.maxAge,
+		DryRun:  opts.DryRun,
+	})
+	if err != nil {
+		return CleanResult{}, err
+	}
+
+	return CleanResult{
+		BytesCleaned: trimResult.FreedBytes,
+		FilesDeleted: trimResult.DeletedCount,
+		Output:       trimResult.Output,
+	}, nil
+}
+
+func (p *FileProvider) fullClean(ctx context.Context, opts CleanOptions) (CleanResult, error) {
 	currentSize, err := p.CurrentSize()
 	if err != nil {
 		return CleanResult{}, err

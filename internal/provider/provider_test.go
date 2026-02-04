@@ -747,3 +747,295 @@ func TestFileProvider_DeleteError(t *testing.T) {
 		t.Errorf("output should contain error info, got %q", result.Output)
 	}
 }
+
+func TestBaseProvider_MaxAge(t *testing.T) {
+	cfg := config.Provider{
+		Paths:   []string{t.TempDir()},
+		MaxSize: "1G",
+		MaxAge:  "7d",
+		Enabled: true,
+	}
+
+	base, err := provider.NewBaseProvider("test", cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	expected := 7 * 24 * time.Hour
+	if base.MaxAge() != expected {
+		t.Errorf("max age = %v, want %v", base.MaxAge(), expected)
+	}
+}
+
+func TestBaseProvider_MaxAge_Default(t *testing.T) {
+	cfg := config.Provider{
+		Paths:   []string{t.TempDir()},
+		MaxSize: "1G",
+		Enabled: true,
+	}
+
+	base, err := provider.NewBaseProvider("test", cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	expected := 30 * 24 * time.Hour
+	if base.MaxAge() != expected {
+		t.Errorf("max age = %v, want %v", base.MaxAge(), expected)
+	}
+}
+
+func TestBaseProvider_InvalidMaxAge(t *testing.T) {
+	cfg := config.Provider{
+		Paths:   []string{t.TempDir()},
+		MaxSize: "1G",
+		MaxAge:  "invalid",
+		Enabled: true,
+	}
+
+	_, err := provider.NewBaseProvider("test", cfg)
+	if err == nil {
+		t.Error("expected error for invalid max age")
+	}
+}
+
+func TestFileProvider_SmartClean(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	oldFile := filepath.Join(tmpDir, "old.txt")
+	newFile := filepath.Join(tmpDir, "new.txt")
+
+	if err := os.WriteFile(oldFile, make([]byte, 1000), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	oldTime := time.Now().Add(-40 * 24 * time.Hour)
+	if err := os.Chtimes(oldFile, oldTime, oldTime); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.WriteFile(newFile, make([]byte, 1000), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config.Provider{
+		Paths:   []string{tmpDir},
+		MaxSize: "10G",
+		MaxAge:  "30d",
+		Enabled: true,
+	}
+
+	p, err := provider.NewFileProvider("test", cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := p.Clean(context.Background(), provider.CleanOptions{Mode: provider.CleanModeSmart})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if result.FilesDeleted != 1 {
+		t.Errorf("files deleted = %d, want 1", result.FilesDeleted)
+	}
+
+	if _, err := os.Stat(oldFile); !os.IsNotExist(err) {
+		t.Error("old file should be deleted")
+	}
+
+	if _, err := os.Stat(newFile); err != nil {
+		t.Error("new file should exist")
+	}
+}
+
+func TestFileProvider_SmartClean_DryRun(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	oldFile := filepath.Join(tmpDir, "old.txt")
+	if err := os.WriteFile(oldFile, make([]byte, 1000), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	oldTime := time.Now().Add(-40 * 24 * time.Hour)
+	if err := os.Chtimes(oldFile, oldTime, oldTime); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config.Provider{
+		Paths:   []string{tmpDir},
+		MaxSize: "10G",
+		MaxAge:  "30d",
+		Enabled: true,
+	}
+
+	p, err := provider.NewFileProvider("test", cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := p.Clean(context.Background(), provider.CleanOptions{
+		Mode:   provider.CleanModeSmart,
+		DryRun: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if result.FilesDeleted != 1 {
+		t.Errorf("files deleted = %d, want 1", result.FilesDeleted)
+	}
+
+	if _, err := os.Stat(oldFile); err != nil {
+		t.Error("file should still exist after dry run")
+	}
+}
+
+func TestCommandProvider_SmartClean(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	oldFile := filepath.Join(tmpDir, "old.txt")
+	newFile := filepath.Join(tmpDir, "new.txt")
+
+	if err := os.WriteFile(oldFile, make([]byte, 1000), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	oldTime := time.Now().Add(-40 * 24 * time.Hour)
+	if err := os.Chtimes(oldFile, oldTime, oldTime); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.WriteFile(newFile, make([]byte, 1000), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config.Provider{
+		Paths:    []string{tmpDir},
+		MaxSize:  "10G",
+		MaxAge:   "30d",
+		CleanCmd: "echo cleaned",
+		Enabled:  true,
+	}
+
+	p, err := provider.NewCommandProvider("test", cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := p.Clean(context.Background(), provider.CleanOptions{Mode: provider.CleanModeSmart})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if result.FilesDeleted != 1 {
+		t.Errorf("files deleted = %d, want 1", result.FilesDeleted)
+	}
+
+	if _, err := os.Stat(oldFile); !os.IsNotExist(err) {
+		t.Error("old file should be deleted")
+	}
+
+	if _, err := os.Stat(newFile); err != nil {
+		t.Error("new file should exist")
+	}
+}
+
+func TestCommandProvider_SmartClean_DryRun(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	oldFile := filepath.Join(tmpDir, "old.txt")
+	if err := os.WriteFile(oldFile, make([]byte, 1000), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	oldTime := time.Now().Add(-40 * 24 * time.Hour)
+	if err := os.Chtimes(oldFile, oldTime, oldTime); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config.Provider{
+		Paths:    []string{tmpDir},
+		MaxSize:  "10G",
+		MaxAge:   "30d",
+		CleanCmd: "echo cleaned",
+		Enabled:  true,
+	}
+
+	p, err := provider.NewCommandProvider("test", cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := p.Clean(context.Background(), provider.CleanOptions{
+		Mode:   provider.CleanModeSmart,
+		DryRun: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if result.FilesDeleted != 1 {
+		t.Errorf("files deleted = %d, want 1", result.FilesDeleted)
+	}
+
+	if _, err := os.Stat(oldFile); err != nil {
+		t.Error("file should still exist after dry run")
+	}
+}
+
+func TestDockerProvider_SmartClean_NotAvailable(t *testing.T) {
+	cfg := config.Provider{
+		Paths:    []string{t.TempDir()},
+		MaxSize:  "50G",
+		CleanCmd: "docker system prune -af",
+		Enabled:  true,
+	}
+
+	p, err := provider.NewDockerProvider("docker", cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if p.Available() {
+		t.Skip("docker is available, skipping unavailable test")
+	}
+
+	result, err := p.Clean(context.Background(), provider.CleanOptions{Mode: provider.CleanModeSmart})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if result.Output != "docker not available" {
+		t.Errorf("output = %q, want %q", result.Output, "docker not available")
+	}
+}
+
+func TestDockerProvider_SmartClean_DryRun(t *testing.T) {
+	cfg := config.Provider{
+		Paths:    []string{t.TempDir()},
+		MaxSize:  "50G",
+		CleanCmd: "docker system prune -af",
+		Enabled:  true,
+	}
+
+	p, err := provider.NewDockerProvider("docker", cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !p.Available() {
+		t.Skip("docker not available")
+	}
+
+	result, err := p.Clean(context.Background(), provider.CleanOptions{
+		Mode:   provider.CleanModeSmart,
+		DryRun: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !strings.Contains(result.Output, "would run") {
+		t.Errorf("output should contain 'would run', got %q", result.Output)
+	}
+
+	if !strings.Contains(result.Output, "keep-storage") {
+		t.Errorf("output should contain 'keep-storage', got %q", result.Output)
+	}
+}

@@ -51,7 +51,7 @@ func TestClean_NoArgsNoAll(t *testing.T) {
 	cacheDir := t.TempDir()
 	loader := createTempConfig(t, cacheDir)
 
-	err := runCleanWithLoader(loader, nil, false, false, false, false, os.Stdin)
+	err := runCleanWithLoader(loader, nil, false, false, false, false, false, os.Stdin)
 
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "specify providers or use --all")
@@ -62,7 +62,7 @@ func TestClean_UnknownProvider(t *testing.T) {
 	cacheDir := t.TempDir()
 	loader := createTempConfig(t, cacheDir)
 
-	err := runCleanWithLoader(loader, []string{"nonexistent"}, false, false, false, false, os.Stdin)
+	err := runCleanWithLoader(loader, []string{"nonexistent"}, false, false, false, false, false, os.Stdin)
 
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "unknown providers: nonexistent")
@@ -75,7 +75,7 @@ func TestClean_DryRun_All(t *testing.T) {
 
 	var err error
 	output := captureStdout(t, func() {
-		err = runCleanWithLoader(loader, nil, true, true, false, false, os.Stdin)
+		err = runCleanWithLoader(loader, nil, true, true, false, false, false, os.Stdin)
 	})
 	require.NoError(t, err)
 
@@ -90,7 +90,7 @@ func TestClean_DryRun_SpecificProvider(t *testing.T) {
 
 	var err error
 	output := captureStdout(t, func() {
-		err = runCleanWithLoader(loader, []string{"test-provider"}, false, true, false, false, os.Stdin)
+		err = runCleanWithLoader(loader, []string{"test-provider"}, false, true, false, false, false, os.Stdin)
 	})
 	require.NoError(t, err)
 
@@ -104,7 +104,7 @@ func TestClean_Force_SkipsConfirmation(t *testing.T) {
 
 	var err error
 	output := captureStdout(t, func() {
-		err = runCleanWithLoader(loader, []string{"test-provider"}, false, false, true, false, os.Stdin)
+		err = runCleanWithLoader(loader, []string{"test-provider"}, false, false, true, false, false, os.Stdin)
 	})
 	require.NoError(t, err)
 
@@ -120,7 +120,7 @@ func TestClean_ConfirmationYes(t *testing.T) {
 
 	var err error
 	output := captureStdout(t, func() {
-		err = runCleanWithLoader(loader, []string{"test-provider"}, false, false, false, false, stdin)
+		err = runCleanWithLoader(loader, []string{"test-provider"}, false, false, false, false, false, stdin)
 	})
 	require.NoError(t, err)
 
@@ -135,7 +135,7 @@ func TestClean_ConfirmationNo(t *testing.T) {
 
 	var err error
 	output := captureStdout(t, func() {
-		err = runCleanWithLoader(loader, []string{"test-provider"}, false, false, false, false, stdin)
+		err = runCleanWithLoader(loader, []string{"test-provider"}, false, false, false, false, false, stdin)
 	})
 	require.NoError(t, err)
 
@@ -149,7 +149,7 @@ func TestClean_QuietMode(t *testing.T) {
 
 	var err error
 	output := captureStdout(t, func() {
-		err = runCleanWithLoader(loader, []string{"test-provider"}, false, false, true, true, os.Stdin)
+		err = runCleanWithLoader(loader, []string{"test-provider"}, false, false, true, true, false, os.Stdin)
 	})
 	require.NoError(t, err)
 
@@ -166,7 +166,7 @@ func TestClean_NoConfig_CreatesDefault(t *testing.T) {
 	loader.SetConfigPath(cfgPath)
 
 	// dry-run with all providers - should succeed with default config
-	err := runCleanWithLoader(loader, nil, true, true, false, true, os.Stdin)
+	err := runCleanWithLoader(loader, nil, true, true, false, true, false, os.Stdin)
 
 	require.NoError(t, err)
 	// verify config was created
@@ -183,6 +183,7 @@ func TestCleanCmd_HasFlags(t *testing.T) {
 		{"dry-run", "false"},
 		{"force", "false"},
 		{"quiet", "false"},
+		{"smart", "false"},
 	}
 
 	for _, tt := range tests {
@@ -241,7 +242,7 @@ func TestConfirmClean_Yes(t *testing.T) {
 	stdin := createStdinWithInput(t, "y\n")
 	var result bool
 	captureStdout(t, func() {
-		result = confirmClean(nil, stdin)
+		result = confirmClean(nil, false, stdin)
 	})
 	assert.True(t, result)
 }
@@ -250,7 +251,7 @@ func TestConfirmClean_No(t *testing.T) {
 	stdin := createStdinWithInput(t, "n\n")
 	var result bool
 	captureStdout(t, func() {
-		result = confirmClean(nil, stdin)
+		result = confirmClean(nil, false, stdin)
 	})
 	assert.False(t, result)
 }
@@ -259,7 +260,7 @@ func TestConfirmClean_Empty(t *testing.T) {
 	stdin := createStdinWithInput(t, "\n")
 	var result bool
 	captureStdout(t, func() {
-		result = confirmClean(nil, stdin)
+		result = confirmClean(nil, false, stdin)
 	})
 	assert.False(t, result)
 }
@@ -270,7 +271,7 @@ func TestClean_AllWithForce(t *testing.T) {
 
 	var err error
 	output := captureStdout(t, func() {
-		err = runCleanWithLoader(loader, nil, true, false, true, false, os.Stdin)
+		err = runCleanWithLoader(loader, nil, true, false, true, false, false, os.Stdin)
 	})
 	require.NoError(t, err)
 
@@ -305,11 +306,73 @@ providers:
 
 	var err error
 	output := captureStdout(t, func() {
-		err = runCleanWithLoader(loader, nil, true, false, true, false, os.Stdin)
+		err = runCleanWithLoader(loader, nil, true, false, true, false, false, os.Stdin)
 	})
 
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "some providers failed")
 	assert.Contains(t, err.Error(), "failing-provider")
 	assert.Contains(t, output, "working-provider")
+}
+
+func TestClean_SmartMode_DryRun(t *testing.T) {
+	cacheDir := t.TempDir()
+	tmpDir := t.TempDir()
+	cfgPath := filepath.Join(tmpDir, "config.yaml")
+	cfgContent := `version: "1"
+providers:
+  test-provider:
+    enabled: true
+    paths:
+      - ` + cacheDir + `
+    max_size: 1GB
+    max_age: 30d
+    clean_cmd: "echo cleaned"
+`
+	require.NoError(t, os.WriteFile(cfgPath, []byte(cfgContent), 0o600))
+
+	// Create a test file
+	testFile := filepath.Join(cacheDir, "test.txt")
+	require.NoError(t, os.WriteFile(testFile, []byte("test content"), 0o600))
+
+	loader := config.NewLoader()
+	loader.SetConfigPath(cfgPath)
+
+	var err error
+	output := captureStdout(t, func() {
+		err = runCleanWithLoader(loader, []string{"test-provider"}, false, true, false, false, true, os.Stdin)
+	})
+	require.NoError(t, err)
+
+	assert.Contains(t, output, "[dry-run]")
+	assert.Contains(t, output, "test-provider")
+}
+
+func TestClean_SmartMode_Force(t *testing.T) {
+	cacheDir := t.TempDir()
+	tmpDir := t.TempDir()
+	cfgPath := filepath.Join(tmpDir, "config.yaml")
+	cfgContent := `version: "1"
+providers:
+  test-provider:
+    enabled: true
+    paths:
+      - ` + cacheDir + `
+    max_size: 1GB
+    max_age: 30d
+    clean_cmd: "echo cleaned"
+`
+	require.NoError(t, os.WriteFile(cfgPath, []byte(cfgContent), 0o600))
+
+	loader := config.NewLoader()
+	loader.SetConfigPath(cfgPath)
+
+	var err error
+	output := captureStdout(t, func() {
+		err = runCleanWithLoader(loader, []string{"test-provider"}, false, false, true, false, true, os.Stdin)
+	})
+	require.NoError(t, err)
+
+	assert.Contains(t, output, "Cleaning test-provider")
+	assert.Contains(t, output, "done")
 }

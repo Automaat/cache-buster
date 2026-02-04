@@ -19,8 +19,11 @@ import (
 var CleanCmd = &cobra.Command{
 	Use:   "clean [providers...]",
 	Short: "Clean caches to free disk space",
-	Long:  `Clean caches for specified providers or all enabled providers with --all flag.`,
-	RunE:  runClean,
+	Long: `Clean caches for specified providers or all enabled providers with --all flag.
+
+By default, runs full clean using native tool commands (e.g., 'go clean -cache').
+Use --smart for LRU-based cleaning that removes old files until cache reaches max_size.`,
+	RunE: runClean,
 }
 
 func init() {
@@ -28,6 +31,7 @@ func init() {
 	CleanCmd.Flags().Bool("dry-run", false, "Preview without deleting")
 	CleanCmd.Flags().Bool("force", false, "Skip confirmation prompt")
 	CleanCmd.Flags().Bool("quiet", false, "Minimal output")
+	CleanCmd.Flags().Bool("smart", false, "LRU clean: delete old files until under max_size")
 }
 
 func runClean(cmd *cobra.Command, args []string) error {
@@ -35,11 +39,12 @@ func runClean(cmd *cobra.Command, args []string) error {
 	dryRun, _ := cmd.Flags().GetBool("dry-run")
 	force, _ := cmd.Flags().GetBool("force")
 	quiet, _ := cmd.Flags().GetBool("quiet")
+	smart, _ := cmd.Flags().GetBool("smart")
 
-	return runCleanWithLoader(config.NewLoader(), args, allFlag, dryRun, force, quiet, os.Stdin)
+	return runCleanWithLoader(config.NewLoader(), args, allFlag, dryRun, force, quiet, smart, os.Stdin)
 }
 
-func runCleanWithLoader(loader *config.Loader, args []string, allFlag, dryRun, force, quiet bool, stdin *os.File) error {
+func runCleanWithLoader(loader *config.Loader, args []string, allFlag, dryRun, force, quiet, smart bool, stdin *os.File) error {
 	cfg, created, err := loader.LoadOrCreate()
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
@@ -65,7 +70,7 @@ func runCleanWithLoader(loader *config.Loader, args []string, allFlag, dryRun, f
 	}
 
 	if !force && !dryRun {
-		if !confirmClean(providers, stdin) {
+		if !confirmClean(providers, smart, stdin) {
 			fmt.Println("Aborted")
 			return nil
 		}
@@ -74,7 +79,12 @@ func runCleanWithLoader(loader *config.Loader, args []string, allFlag, dryRun, f
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	return executeClean(ctx, providers, dryRun, quiet)
+	mode := provider.CleanModeFull
+	if smart {
+		mode = provider.CleanModeSmart
+	}
+
+	return executeClean(ctx, providers, dryRun, quiet, mode)
 }
 
 func resolveProviders(cfg *config.Config, args []string, allFlag bool) ([]string, error) {
@@ -130,13 +140,17 @@ func loadAndFilterProviders(cfg *config.Config, names []string) ([]provider.Prov
 	return providers, unavailable
 }
 
-func confirmClean(providers []provider.Provider, stdin *os.File) bool {
+func confirmClean(providers []provider.Provider, smart bool, stdin *os.File) bool {
 	names := make([]string, len(providers))
 	for i, p := range providers {
 		names[i] = p.Name()
 	}
 
-	fmt.Printf("Clean %d provider(s): %s? [y/N]: ", len(providers), strings.Join(names, ", "))
+	modeStr := "full"
+	if smart {
+		modeStr = "smart"
+	}
+	fmt.Printf("Clean %d provider(s) [%s]: %s? [y/N]: ", len(providers), modeStr, strings.Join(names, ", "))
 
 	reader := bufio.NewReader(stdin)
 	response, _ := reader.ReadString('\n')
@@ -145,7 +159,7 @@ func confirmClean(providers []provider.Provider, stdin *os.File) bool {
 	return response == "y" || response == "yes"
 }
 
-func executeClean(ctx context.Context, providers []provider.Provider, dryRun, quiet bool) error {
+func executeClean(ctx context.Context, providers []provider.Provider, dryRun, quiet bool, mode provider.CleanMode) error {
 	var totalCleaned int64
 	var errors []string
 
@@ -163,7 +177,7 @@ func executeClean(ctx context.Context, providers []provider.Provider, dryRun, qu
 			fmt.Printf("Cleaning %s... ", p.Name())
 		}
 
-		result, err := p.Clean(ctx, provider.CleanOptions{DryRun: dryRun})
+		result, err := p.Clean(ctx, provider.CleanOptions{DryRun: dryRun, Mode: mode})
 		if err != nil {
 			errors = append(errors, fmt.Sprintf("%s: %v", p.Name(), err))
 			if !quiet {
