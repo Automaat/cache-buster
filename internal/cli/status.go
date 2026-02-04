@@ -50,12 +50,9 @@ func runStatus(cmd *cobra.Command, _ []string) error {
 }
 
 func runStatusWithLoader(loader *config.Loader, jsonOutput bool) error {
-	cfg, created, err := loader.LoadOrCreate()
+	cfg, err := loader.Load()
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
-	}
-	if created {
-		fmt.Fprintln(os.Stderr, "Created default config file")
 	}
 
 	providers := cfg.EnabledProviders()

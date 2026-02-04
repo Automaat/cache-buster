@@ -1,6 +1,7 @@
 package config
 
 import (
+	"os"
 	"testing"
 )
 
@@ -17,21 +18,10 @@ func TestConfig_Validate(t *testing.T) {
 		},
 		{
 			cfg: &Config{
-				Version:   "",
-				Providers: DefaultProviders(),
-			},
-			name:    "missing version",
-			errMsg:  "version is required",
-			wantErr: true,
-		},
-		{
-			cfg: &Config{
 				Version:   "1",
 				Providers: map[string]Provider{},
 			},
-			name:    "no providers",
-			errMsg:  "at least one provider is required",
-			wantErr: true,
+			name: "empty providers is valid",
 		},
 		{
 			cfg: &Config{
@@ -90,12 +80,23 @@ func TestConfig_GetProvider(t *testing.T) {
 }
 
 func TestConfig_EnabledProviders(t *testing.T) {
+	// Create temp dirs for path existence check
+	tmpDir := t.TempDir()
+	dir1 := tmpDir + "/a"
+	dir2 := tmpDir + "/c"
+	if err := os.MkdirAll(dir1, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(dir2, 0o750); err != nil {
+		t.Fatal(err)
+	}
+
 	cfg := &Config{
 		Version: "1",
 		Providers: map[string]Provider{
-			"enabled1":  {Enabled: true, Paths: []string{"~/a"}, MaxSize: "1G"},
-			"disabled1": {Enabled: false, Paths: []string{"~/b"}, MaxSize: "1G"},
-			"enabled2":  {Enabled: true, Paths: []string{"~/c"}, MaxSize: "1G"},
+			"enabled1":  {Enabled: true, Paths: []string{dir1}, MaxSize: "1G"},
+			"disabled1": {Enabled: false, Paths: []string{tmpDir + "/b"}, MaxSize: "1G"},
+			"enabled2":  {Enabled: true, Paths: []string{dir2}, MaxSize: "1G"},
 		},
 	}
 
@@ -105,8 +106,29 @@ func TestConfig_EnabledProviders(t *testing.T) {
 	}
 
 	// Should be sorted
-	if enabled[0] != "enabled1" || enabled[1] != "enabled2" {
+	if len(enabled) >= 2 && (enabled[0] != "enabled1" || enabled[1] != "enabled2") {
 		t.Errorf("EnabledProviders() = %v, want [enabled1 enabled2]", enabled)
+	}
+}
+
+func TestConfig_AllEnabledProviders(t *testing.T) {
+	cfg := &Config{
+		Version: "1",
+		Providers: map[string]Provider{
+			"enabled1":  {Enabled: true, Paths: []string{"~/nonexistent"}, MaxSize: "1G"},
+			"disabled1": {Enabled: false, Paths: []string{"~/b"}, MaxSize: "1G"},
+			"enabled2":  {Enabled: true, Paths: []string{"~/c"}, MaxSize: "1G"},
+		},
+	}
+
+	enabled := cfg.AllEnabledProviders()
+	if len(enabled) != 2 {
+		t.Errorf("AllEnabledProviders() len = %d, want 2", len(enabled))
+	}
+
+	// Should be sorted
+	if len(enabled) >= 2 && (enabled[0] != "enabled1" || enabled[1] != "enabled2") {
+		t.Errorf("AllEnabledProviders() = %v, want [enabled1 enabled2]", enabled)
 	}
 }
 

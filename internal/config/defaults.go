@@ -68,6 +68,55 @@ func DefaultProviders() map[string]Provider {
 			MaxAge:   "30d",
 			CleanCmd: "docker system prune -af",
 		},
+		"xcode-deriveddata": {
+			Enabled:  true,
+			Paths:    []string{"~/Library/Developer/Xcode/DerivedData"},
+			MaxSize:  "20G",
+			MaxAge:   "30d",
+			CleanCmd: "",
+		},
+		"xcode-archives": {
+			Enabled:  true,
+			Paths:    []string{"~/Library/Developer/Xcode/Archives"},
+			MaxSize:  "10G",
+			MaxAge:   "30d",
+			CleanCmd: "",
+		},
+		"ios-simulator": {
+			Enabled:  true,
+			Paths:    []string{"~/Library/Developer/CoreSimulator/Caches"},
+			MaxSize:  "10G",
+			MaxAge:   "30d",
+			CleanCmd: "xcrun simctl delete unavailable",
+		},
+		"cargo": {
+			Enabled:  true,
+			Paths:    []string{"~/.cargo/registry", "~/.cargo/git"},
+			MaxSize:  "5G",
+			MaxAge:   "30d",
+			CleanCmd: "",
+		},
+		"gradle": {
+			Enabled:  true,
+			Paths:    []string{"~/.gradle/caches"},
+			MaxSize:  "10G",
+			MaxAge:   "30d",
+			CleanCmd: "",
+		},
+		"pnpm": {
+			Enabled:  true,
+			Paths:    []string{"~/.local/share/pnpm/store"},
+			MaxSize:  "5G",
+			MaxAge:   "30d",
+			CleanCmd: "pnpm store prune",
+		},
+		"pip": {
+			Enabled:  true,
+			Paths:    []string{"~/.cache/pip", "~/Library/Caches/pip"},
+			MaxSize:  "3G",
+			MaxAge:   "30d",
+			CleanCmd: "pip cache purge",
+		},
 	}
 }
 

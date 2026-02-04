@@ -91,12 +91,9 @@ func runInteractive(cmd *cobra.Command, _ []string) error {
 
 // RunInteractiveWithLoader launches interactive mode with specified loader.
 func RunInteractiveWithLoader(loader *config.Loader, dryRun, smart bool) error {
-	cfg, created, err := loader.LoadOrCreate()
+	cfg, err := loader.Load()
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
-	}
-	if created {
-		fmt.Fprintln(os.Stderr, "Created default config file")
 	}
 
 	providers := cfg.EnabledProviders()
@@ -404,6 +401,31 @@ func (m model) viewSelection() string {
 
 	b.WriteString("Select providers to clean:\n\n")
 
+	// Calculate column widths based on terminal width
+	// Layout: cursor(2) + checkbox(4) + name + gap + size + gap + status
+	contentWidth := m.width - 8 // box border + padding
+	if contentWidth < 40 {
+		contentWidth = 40
+	}
+
+	// Find max provider name length
+	maxNameLen := 0
+	for _, p := range m.providers {
+		if len(p.name) > maxNameLen {
+			maxNameLen = len(p.name)
+		}
+	}
+	if maxNameLen < 10 {
+		maxNameLen = 10
+	}
+
+	// Column widths: prefix(6) + name + size(24) + status(6)
+	fixedWidth := 6 + 24 + 6
+	nameWidth := contentWidth - fixedWidth
+	if nameWidth < maxNameLen {
+		nameWidth = maxNameLen
+	}
+
 	for i, p := range m.providers {
 		cursor := "  "
 		if i == m.cursor {
@@ -415,20 +437,24 @@ func (m model) viewSelection() string {
 			checkbox = "[x]"
 		}
 
+		prefix := cursor + checkbox + " "
+		nameFmt := fmt.Sprintf("%%-%ds", nameWidth)
+
 		var line string
 		switch {
 		case p.errMsg != "":
-			line = fmt.Sprintf("%s%s %-14s %s", cursor, checkbox, p.name, errorStyle.Render(p.errMsg))
+			line = prefix + fmt.Sprintf(nameFmt, p.name) + " " + errorStyle.Render(p.errMsg)
 		case p.currentFmt == "":
-			line = fmt.Sprintf("%s%s %-14s %s", cursor, checkbox, p.name, m.spinner.View())
+			line = prefix + fmt.Sprintf(nameFmt, p.name) + " " + m.spinner.View()
 		case !p.available:
-			line = fmt.Sprintf("%s%s %s", cursor, checkbox, dimStyle.Render(fmt.Sprintf("%-14s (unavailable)", p.name)))
+			line = prefix + dimStyle.Render(fmt.Sprintf(nameFmt+" (unavailable)", p.name))
 		default:
 			status := okStyle.Render("ok")
 			if p.overLimit {
 				status = overStyle.Render("OVER")
 			}
-			line = fmt.Sprintf("%s%s %-14s %10s / %-10s %s", cursor, checkbox, p.name, p.currentFmt, p.maxFmt, status)
+			sizeCol := fmt.Sprintf("%10s / %-10s", p.currentFmt, p.maxFmt)
+			line = prefix + fmt.Sprintf(nameFmt, p.name) + " " + sizeCol + " " + status
 		}
 
 		b.WriteString(line)

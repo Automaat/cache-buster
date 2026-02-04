@@ -8,8 +8,12 @@ import (
 
 // fileBasedProviders lists providers that clean by deleting files.
 var fileBasedProviders = map[string]bool{
-	"uv":        true,
-	"jetbrains": true,
+	"uv":                true,
+	"jetbrains":         true,
+	"xcode-deriveddata": true,
+	"xcode-archives":    true,
+	"cargo":             true,
+	"gradle":            true,
 }
 
 // NewProvider creates a provider from config.

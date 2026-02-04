@@ -84,3 +84,17 @@ func EnsureDir() error {
 	}
 	return os.MkdirAll(dir, 0o750)
 }
+
+// PathsExist checks if any of the given paths exist on disk.
+func PathsExist(patterns []string) bool {
+	paths, err := ExpandPaths(patterns)
+	if err != nil {
+		return false
+	}
+	for _, p := range paths {
+		if _, err := os.Stat(p); err == nil {
+			return true
+		}
+	}
+	return false
+}
