@@ -377,10 +377,8 @@ func (m model) View() string {
 	b.WriteString("\n\n")
 
 	switch m.state {
-	case stateSelection:
+	case stateSelection, stateConfirmation:
 		b.WriteString(m.viewSelection())
-	case stateConfirmation:
-		b.WriteString(m.viewConfirmation())
 	case stateCleaning:
 		b.WriteString(m.viewCleaning())
 	case stateDone:
@@ -393,7 +391,42 @@ func (m model) View() string {
 		Padding(1, 2).
 		Width(m.width - 2)
 
-	return boxStyle.Render(b.String())
+	content := boxStyle.Render(b.String())
+
+	if m.state == stateConfirmation {
+		popup := m.viewConfirmationPopup()
+		popupWidth := lipgloss.Width(popup)
+		popupHeight := lipgloss.Height(popup)
+
+		bgLines := strings.Split(content, "\n")
+		popupLines := strings.Split(popup, "\n")
+
+		startY := (len(bgLines) - popupHeight) / 2
+		startX := (m.width - popupWidth) / 2
+
+		for i, pLine := range popupLines {
+			bgIdx := startY + i
+			if bgIdx >= 0 && bgIdx < len(bgLines) {
+				bgLine := bgLines[bgIdx]
+				bgWidth := lipgloss.Width(bgLine)
+
+				var result strings.Builder
+				if startX > 0 {
+					result.WriteString(truncateRight(bgLine, startX))
+				}
+				result.WriteString(pLine)
+				endX := startX + popupWidth
+				if endX < bgWidth {
+					suffix := truncateLeft(bgLine, endX)
+					result.WriteString(suffix)
+				}
+				bgLines[bgIdx] = result.String()
+			}
+		}
+		content = strings.Join(bgLines, "\n")
+	}
+
+	return content
 }
 
 func (m model) viewSelection() string {
@@ -449,7 +482,8 @@ func (m model) viewSelection() string {
 		case p.errMsg != "":
 			line = prefix + fmt.Sprintf(nameFmt, p.name) + " " + errorStyle.Render(p.errMsg)
 		case p.currentFmt == "":
-			line = prefix + fmt.Sprintf(nameFmt, p.name) + " " + m.spinner.View()
+			sizeCol := fmt.Sprintf("%10s / %-10s", "-", "-")
+			line = prefix + fmt.Sprintf(nameFmt, p.name) + " " + sizeCol + " " + m.spinner.View()
 		case !p.available:
 			line = prefix + dimStyle.Render(fmt.Sprintf(nameFmt+" (unavailable)", p.name))
 		default:
@@ -461,6 +495,9 @@ func (m model) viewSelection() string {
 			line = prefix + fmt.Sprintf(nameFmt, p.name) + " " + sizeCol + " " + status
 		}
 
+		if i == m.cursor {
+			line = selectedLineStyle.Render(line)
+		}
 		b.WriteString(line)
 		b.WriteString("\n")
 	}
@@ -475,7 +512,7 @@ func (m model) viewSelection() string {
 	return b.String()
 }
 
-func (m model) viewConfirmation() string {
+func (m model) viewConfirmationPopup() string {
 	var b strings.Builder
 
 	names := m.selectedNames()
@@ -497,7 +534,12 @@ func (m model) viewConfirmation() string {
 	hint := dimStyle.Render("y=confirm  n/esc=back  s=smart  f=full")
 	b.WriteString(hint)
 
-	return b.String()
+	popupStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("205")).
+		Padding(1, 2)
+
+	return popupStyle.Render(b.String())
 }
 
 func (m model) viewCleaning() string {
@@ -591,4 +633,59 @@ func (m model) selectedNames() []string {
 		}
 	}
 	return names
+}
+
+func truncateLeft(s string, skip int) string {
+	var result strings.Builder
+	width := 0
+	inEscape := false
+	for _, r := range s {
+		if r == '\x1b' {
+			inEscape = true
+			if width >= skip {
+				result.WriteRune(r)
+			}
+			continue
+		}
+		if inEscape {
+			if width >= skip {
+				result.WriteRune(r)
+			}
+			if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') {
+				inEscape = false
+			}
+			continue
+		}
+		if width >= skip {
+			result.WriteRune(r)
+		}
+		width++
+	}
+	return result.String()
+}
+
+func truncateRight(s string, keep int) string {
+	var result strings.Builder
+	width := 0
+	inEscape := false
+	for _, r := range s {
+		if r == '\x1b' {
+			inEscape = true
+			result.WriteRune(r)
+			continue
+		}
+		if inEscape {
+			result.WriteRune(r)
+			if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') {
+				inEscape = false
+			}
+			continue
+		}
+		if width >= keep {
+			break
+		}
+		result.WriteRune(r)
+		width++
+	}
+	return result.String()
 }

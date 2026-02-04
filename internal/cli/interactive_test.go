@@ -843,7 +843,7 @@ func TestViewConfirmation(t *testing.T) {
 		m := newModel(cfg, []string{"p1"}, false, false, nil)
 		m.state = stateConfirmation
 		m.selected[0] = struct{}{}
-		view := m.viewConfirmation()
+		view := m.viewConfirmationPopup()
 
 		assert.Contains(t, view, "[full]")
 	})
@@ -852,7 +852,7 @@ func TestViewConfirmation(t *testing.T) {
 		m := newModel(cfg, []string{"p1"}, false, true, nil)
 		m.state = stateConfirmation
 		m.selected[0] = struct{}{}
-		view := m.viewConfirmation()
+		view := m.viewConfirmationPopup()
 
 		assert.Contains(t, view, "[smart]")
 	})
@@ -862,7 +862,7 @@ func TestViewConfirmation(t *testing.T) {
 		m.state = stateConfirmation
 		m.selected[0] = struct{}{}
 		m.selected[1] = struct{}{}
-		view := m.viewConfirmation()
+		view := m.viewConfirmationPopup()
 
 		assert.Contains(t, view, "• p1")
 		assert.Contains(t, view, "• p2")
@@ -872,7 +872,7 @@ func TestViewConfirmation(t *testing.T) {
 		m := newModel(cfg, []string{"p1"}, false, false, nil)
 		m.state = stateConfirmation
 		m.selected[0] = struct{}{}
-		view := m.viewConfirmation()
+		view := m.viewConfirmationPopup()
 
 		assert.Contains(t, view, "s=smart")
 		assert.Contains(t, view, "f=full")
