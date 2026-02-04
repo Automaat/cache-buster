@@ -1,0 +1,38 @@
+run:
+  timeout: 5m
+  go: "1.25.6"
+
+linters:
+  enable:
+    - errcheck
+    - gosimple
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+    - gofmt
+    - goimports
+    - misspell
+    - revive
+    - gosec
+    - unconvert
+    - gocritic
+    - prealloc
+
+linters-settings:
+  govet:
+    enable-all: true
+  gofmt:
+    simplify: true
+  revive:
+    rules:
+      - name: exported
+        disabled: false
+  gosec:
+    excludes:
+      - G204
+
+issues:
+  exclude-use-default: false
+  max-issues-per-linter: 0
+  max-same-issues: 0
