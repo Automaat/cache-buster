@@ -101,25 +101,25 @@ macOS developer cache manager with size limits.
 
 ## Phase 6: Cleaner
 
-- [ ] Implement `internal/cache/cleaner.go`:
+- [x] Implement cleaner logic (in `internal/provider/file.go`):
   - Sort files by mtime (oldest first)
   - Delete until under target size
   - Return bytes cleaned, files deleted
-- [ ] External command execution with output capture
-- [ ] Dry-run support (show what would be deleted)
+- [x] External command execution with output capture (`internal/provider/command.go`)
+- [x] Dry-run support (show what would be deleted)
 
 ---
 
 ## Phase 7: Clean Command
 
-- [ ] Implement `cache-buster clean` in `internal/cli/clean.go`
-- [ ] Flags:
+- [x] Implement `cache-buster clean` in `internal/cli/clean.go`
+- [x] Flags:
   - `--all` - non-interactive, all providers
   - `--dry-run` - preview only
   - `--force` - skip confirmation
   - `--quiet` - minimal output
-- [ ] Args: specific providers (`cache-buster clean go-build npm`)
-- [ ] Default: interactive mode (select providers)
+- [x] Args: specific providers (`cache-buster clean go-build npm`)
+- [x] Confirmation prompt with stdin reader
 
 ---
 
