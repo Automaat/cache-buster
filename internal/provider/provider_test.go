@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -608,5 +609,141 @@ func TestLoadProviders_Error(t *testing.T) {
 	_, err := provider.LoadProviders(cfg)
 	if err == nil {
 		t.Error("expected error for invalid provider config")
+	}
+}
+
+func TestCommandProvider_InvalidShellQuote(t *testing.T) {
+	cfg := config.Provider{
+		Paths:    []string{t.TempDir()},
+		MaxSize:  "1G",
+		CleanCmd: "echo 'unterminated",
+		Enabled:  true,
+	}
+
+	p, err := provider.NewCommandProvider("test", cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = p.Clean(context.Background(), provider.CleanOptions{})
+	if err == nil {
+		t.Error("expected error for invalid shell quote")
+	}
+}
+
+func TestCommandProvider_QuotedArgs(t *testing.T) {
+	cfg := config.Provider{
+		Paths:    []string{t.TempDir()},
+		MaxSize:  "1G",
+		CleanCmd: "echo 'hello world'",
+		Enabled:  true,
+	}
+
+	p, err := provider.NewCommandProvider("test", cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := p.Clean(context.Background(), provider.CleanOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if result.Output != "hello world" {
+		t.Errorf("output = %q, want %q", result.Output, "hello world")
+	}
+}
+
+func TestDockerProvider_InvalidShellQuote(t *testing.T) {
+	cfg := config.Provider{
+		Paths:    []string{t.TempDir()},
+		MaxSize:  "50G",
+		CleanCmd: "docker 'unterminated",
+		Enabled:  true,
+	}
+
+	p, err := provider.NewDockerProvider("docker", cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !p.Available() {
+		t.Skip("docker not available")
+	}
+
+	_, err = p.Clean(context.Background(), provider.CleanOptions{})
+	if err == nil {
+		t.Error("expected error for invalid shell quote")
+	}
+}
+
+func TestDockerProvider_CleanSuccess(t *testing.T) {
+	cfg := config.Provider{
+		Paths:    []string{t.TempDir()},
+		MaxSize:  "50G",
+		CleanCmd: "docker version --format '{{.Server.Version}}'",
+		Enabled:  true,
+	}
+
+	p, err := provider.NewDockerProvider("docker", cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !p.Available() {
+		t.Skip("docker not available")
+	}
+
+	result, err := p.Clean(context.Background(), provider.CleanOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if result.Output == "" {
+		t.Error("expected non-empty output")
+	}
+}
+
+func TestFileProvider_DeleteError(t *testing.T) {
+	tmpDir := t.TempDir()
+	subDir := filepath.Join(tmpDir, "subdir")
+	if err := os.Mkdir(subDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	testFile := filepath.Join(subDir, "test.txt")
+	if err := os.WriteFile(testFile, make([]byte, 2000), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.Chmod(subDir, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = os.Chmod(subDir, 0o700)
+	})
+
+	cfg := config.Provider{
+		Paths:   []string{subDir},
+		MaxSize: "1000B",
+		Enabled: true,
+	}
+
+	p, err := provider.NewFileProvider("test", cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := p.Clean(context.Background(), provider.CleanOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if result.FilesDeleted != 0 {
+		t.Errorf("files deleted = %d, want 0", result.FilesDeleted)
+	}
+
+	if !strings.Contains(result.Output, "error") {
+		t.Errorf("output should contain error info, got %q", result.Output)
 	}
 }
