@@ -6,6 +6,7 @@ import (
 	"os/exec"
 
 	"github.com/Automaat/cache-buster/internal/config"
+	"github.com/kballard/go-shellquote"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 )
@@ -99,7 +100,13 @@ func runConfigEditWithLoader(loader *config.Loader, editor string) error {
 		return fmt.Errorf("get config path: %w", err)
 	}
 
-	cmd := exec.Command(editor, configPath)
+	parts, err := shellquote.Split(editor)
+	if err != nil || len(parts) == 0 {
+		return fmt.Errorf("invalid editor: %s", editor)
+	}
+
+	args := append(parts[1:], configPath)
+	cmd := exec.Command(parts[0], args...)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
