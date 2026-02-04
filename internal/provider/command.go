@@ -28,6 +28,7 @@ func NewCommandProvider(name string, cfg config.Provider) (*CommandProvider, err
 	}, nil
 }
 
+// Clean implements Provider.
 func (p *CommandProvider) Clean(ctx context.Context, opts CleanOptions) (CleanResult, error) {
 	if opts.DryRun {
 		return CleanResult{

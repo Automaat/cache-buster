@@ -28,6 +28,7 @@ func NewDockerProvider(name string, cfg config.Provider) (*DockerProvider, error
 	}, nil
 }
 
+// Available implements Provider.
 func (p *DockerProvider) Available() bool {
 	if _, err := exec.LookPath("docker"); err != nil {
 		return false
@@ -37,6 +38,7 @@ func (p *DockerProvider) Available() bool {
 	return cmd.Run() == nil
 }
 
+// Clean implements Provider.
 func (p *DockerProvider) Clean(ctx context.Context, opts CleanOptions) (CleanResult, error) {
 	if !p.Available() {
 		return CleanResult{

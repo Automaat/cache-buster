@@ -32,22 +32,27 @@ func NewBaseProvider(name string, cfg config.Provider) (*BaseProvider, error) {
 	}, nil
 }
 
+// Name implements Provider.
 func (b *BaseProvider) Name() string {
 	return b.name
 }
 
+// Paths implements Provider.
 func (b *BaseProvider) Paths() []string {
 	return b.paths
 }
 
+// CurrentSize implements Provider.
 func (b *BaseProvider) CurrentSize() (int64, error) {
 	return cache.CalculateSize(b.paths)
 }
 
+// MaxSize implements Provider.
 func (b *BaseProvider) MaxSize() int64 {
 	return b.maxSize
 }
 
+// Available implements Provider.
 func (b *BaseProvider) Available() bool {
 	return true
 }

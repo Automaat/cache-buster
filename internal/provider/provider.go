@@ -33,7 +33,7 @@ type CleanOptions struct {
 
 // CleanResult contains cleaning operation results.
 type CleanResult struct {
+	Output       string
 	BytesCleaned int64
 	FilesDeleted int64
-	Output       string
 }

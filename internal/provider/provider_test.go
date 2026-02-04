@@ -15,7 +15,7 @@ import (
 func TestBaseProvider(t *testing.T) {
 	tmpDir := t.TempDir()
 	testFile := filepath.Join(tmpDir, "test.txt")
-	if err := os.WriteFile(testFile, []byte("hello"), 0o644); err != nil {
+	if err := os.WriteFile(testFile, []byte("hello"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -103,7 +103,7 @@ func TestCommandProvider_Clean(t *testing.T) {
 
 func TestFileProvider_AlreadyUnderLimit(t *testing.T) {
 	tmpDir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(tmpDir, "test.txt"), []byte("hi"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(tmpDir, "test.txt"), []byte("hi"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -134,7 +134,7 @@ func TestFileProvider_Clean(t *testing.T) {
 	oldFile := filepath.Join(tmpDir, "old.txt")
 	newFile := filepath.Join(tmpDir, "new.txt")
 
-	if err := os.WriteFile(oldFile, make([]byte, 1000), 0o644); err != nil {
+	if err := os.WriteFile(oldFile, make([]byte, 1000), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -143,7 +143,7 @@ func TestFileProvider_Clean(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := os.WriteFile(newFile, make([]byte, 1000), 0o644); err != nil {
+	if err := os.WriteFile(newFile, make([]byte, 1000), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -183,7 +183,7 @@ func TestFileProvider_Clean(t *testing.T) {
 func TestFileProvider_DryRun(t *testing.T) {
 	tmpDir := t.TempDir()
 	testFile := filepath.Join(tmpDir, "test.txt")
-	if err := os.WriteFile(testFile, make([]byte, 2000), 0o644); err != nil {
+	if err := os.WriteFile(testFile, make([]byte, 2000), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -429,7 +429,7 @@ func TestFileProvider_ContextCancellation(t *testing.T) {
 
 	for i := range 10 {
 		f := filepath.Join(tmpDir, fmt.Sprintf("file%d.txt", i))
-		if err := os.WriteFile(f, make([]byte, 1000), 0o644); err != nil {
+		if err := os.WriteFile(f, make([]byte, 1000), 0o600); err != nil {
 			t.Fatal(err)
 		}
 	}

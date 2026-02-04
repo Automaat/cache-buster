@@ -28,6 +28,7 @@ func NewFileProvider(name string, cfg config.Provider) (*FileProvider, error) {
 	}, nil
 }
 
+// Clean implements Provider.
 func (p *FileProvider) Clean(ctx context.Context, opts CleanOptions) (CleanResult, error) {
 	currentSize, err := p.CurrentSize()
 	if err != nil {
