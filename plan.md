@@ -61,20 +61,20 @@ macOS developer cache manager with size limits.
 
 ## Phase 4: Status Command
 
-- [ ] Implement `cache-buster status` in `internal/cli/status.go`
-- [ ] Table output with lipgloss:
+- [x] Implement `cache-buster status` in `internal/cli/status.go`
+- [x] Table output with lipgloss:
   ```
   │ Provider │ Current │ Max │ Status │
   ```
-- [ ] Color coding: red=over, green=ok
-- [ ] Add `--json` flag for machine output
-- [ ] Show totals at bottom
+- [x] Color coding: red=over, green=ok
+- [x] Add `--json` flag for machine output
+- [x] Show totals at bottom
 
 ---
 
 ## Phase 5: Provider Interface
 
-- [ ] Define interface in `internal/provider/provider.go`:
+- [x] Define interface in `internal/provider/provider.go`:
   ```go
   type Provider interface {
       Name() string
@@ -85,17 +85,17 @@ macOS developer cache manager with size limits.
       Available() bool  // for Docker check
   }
   ```
-- [ ] Implement registry to load providers from config
-- [ ] MVP providers:
-  - [ ] go-build (`go clean -cache`)
-  - [ ] go-mod (`go clean -modcache`)
-  - [ ] npm (`npm cache clean --force`)
-  - [ ] yarn (`yarn cache clean`)
-  - [ ] homebrew (`brew cleanup`)
-  - [ ] mise (`mise prune`)
-  - [ ] uv (file-based)
-  - [ ] jetbrains (file-based)
-  - [ ] docker (`docker system prune -af`, skip if not running)
+- [x] Implement registry to load providers from config
+- [x] MVP providers:
+  - [x] go-build (`go clean -cache`)
+  - [x] go-mod (`go clean -modcache`)
+  - [x] npm (`npm cache clean --force`)
+  - [x] yarn (`yarn cache clean`)
+  - [x] homebrew (`brew cleanup`)
+  - [x] mise (`mise prune`)
+  - [x] uv (file-based)
+  - [x] jetbrains (file-based)
+  - [x] docker (`docker system prune -af`, skip if not running)
 
 ---
 

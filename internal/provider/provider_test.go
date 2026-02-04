@@ -1,0 +1,356 @@
+package provider_test
+
+import (
+	"context"
+	"os"
+	"path/filepath"
+	"testing"
+	"time"
+
+	"github.com/Automaat/cache-buster/internal/config"
+	"github.com/Automaat/cache-buster/internal/provider"
+)
+
+func TestBaseProvider(t *testing.T) {
+	tmpDir := t.TempDir()
+	testFile := filepath.Join(tmpDir, "test.txt")
+	if err := os.WriteFile(testFile, []byte("hello"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config.Provider{
+		Paths:   []string{tmpDir},
+		MaxSize: "1G",
+		Enabled: true,
+	}
+
+	base, err := provider.NewBaseProvider("test", cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if base.Name() != "test" {
+		t.Errorf("name = %q, want %q", base.Name(), "test")
+	}
+
+	if len(base.Paths()) != 1 || base.Paths()[0] != tmpDir {
+		t.Errorf("paths = %v, want [%s]", base.Paths(), tmpDir)
+	}
+
+	if base.MaxSize() != 1024*1024*1024 {
+		t.Errorf("max size = %d, want %d", base.MaxSize(), 1024*1024*1024)
+	}
+
+	if !base.Available() {
+		t.Error("available = false, want true")
+	}
+
+	size, err := base.CurrentSize()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if size != 5 {
+		t.Errorf("current size = %d, want 5", size)
+	}
+}
+
+func TestCommandProvider_DryRun(t *testing.T) {
+	cfg := config.Provider{
+		Paths:    []string{t.TempDir()},
+		MaxSize:  "1G",
+		CleanCmd: "echo hello",
+		Enabled:  true,
+	}
+
+	p, err := provider.NewCommandProvider("test", cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := p.Clean(context.Background(), provider.CleanOptions{DryRun: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if result.Output != "would run: echo hello" {
+		t.Errorf("output = %q, want %q", result.Output, "would run: echo hello")
+	}
+}
+
+func TestCommandProvider_Clean(t *testing.T) {
+	cfg := config.Provider{
+		Paths:    []string{t.TempDir()},
+		MaxSize:  "1G",
+		CleanCmd: "echo cleaned",
+		Enabled:  true,
+	}
+
+	p, err := provider.NewCommandProvider("test", cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := p.Clean(context.Background(), provider.CleanOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if result.Output != "cleaned" {
+		t.Errorf("output = %q, want %q", result.Output, "cleaned")
+	}
+}
+
+func TestFileProvider_AlreadyUnderLimit(t *testing.T) {
+	tmpDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(tmpDir, "test.txt"), []byte("hi"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config.Provider{
+		Paths:   []string{tmpDir},
+		MaxSize: "1G",
+		Enabled: true,
+	}
+
+	p, err := provider.NewFileProvider("test", cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := p.Clean(context.Background(), provider.CleanOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if result.Output != "already under limit" {
+		t.Errorf("output = %q, want %q", result.Output, "already under limit")
+	}
+}
+
+func TestFileProvider_Clean(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	oldFile := filepath.Join(tmpDir, "old.txt")
+	newFile := filepath.Join(tmpDir, "new.txt")
+
+	if err := os.WriteFile(oldFile, make([]byte, 1000), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	oldTime := time.Now().Add(-time.Hour)
+	if err := os.Chtimes(oldFile, oldTime, oldTime); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.WriteFile(newFile, make([]byte, 1000), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config.Provider{
+		Paths:   []string{tmpDir},
+		MaxSize: "1000B",
+		Enabled: true,
+	}
+
+	p, err := provider.NewFileProvider("test", cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := p.Clean(context.Background(), provider.CleanOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if result.FilesDeleted != 1 {
+		t.Errorf("files deleted = %d, want 1", result.FilesDeleted)
+	}
+
+	if result.BytesCleaned != 1000 {
+		t.Errorf("bytes cleaned = %d, want 1000", result.BytesCleaned)
+	}
+
+	if _, err := os.Stat(oldFile); !os.IsNotExist(err) {
+		t.Error("old file should be deleted")
+	}
+
+	if _, err := os.Stat(newFile); err != nil {
+		t.Error("new file should exist")
+	}
+}
+
+func TestFileProvider_DryRun(t *testing.T) {
+	tmpDir := t.TempDir()
+	testFile := filepath.Join(tmpDir, "test.txt")
+	if err := os.WriteFile(testFile, make([]byte, 2000), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config.Provider{
+		Paths:   []string{tmpDir},
+		MaxSize: "1000B",
+		Enabled: true,
+	}
+
+	p, err := provider.NewFileProvider("test", cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := p.Clean(context.Background(), provider.CleanOptions{DryRun: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if result.FilesDeleted != 1 {
+		t.Errorf("files deleted = %d, want 1", result.FilesDeleted)
+	}
+
+	if _, err := os.Stat(testFile); err != nil {
+		t.Error("file should still exist after dry run")
+	}
+}
+
+func TestDockerProvider_Available(t *testing.T) {
+	cfg := config.Provider{
+		Paths:    []string{t.TempDir()},
+		MaxSize:  "50G",
+		CleanCmd: "docker system prune -af",
+		Enabled:  true,
+	}
+
+	p, err := provider.NewDockerProvider("docker", cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	available := p.Available()
+	t.Logf("docker available: %v", available)
+}
+
+func TestNewProvider_CommandBased(t *testing.T) {
+	cfg := config.Provider{
+		Paths:    []string{t.TempDir()},
+		MaxSize:  "10G",
+		CleanCmd: "go clean -cache",
+		Enabled:  true,
+	}
+
+	p, err := provider.NewProvider("go-build", cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if p.Name() != "go-build" {
+		t.Errorf("name = %q, want %q", p.Name(), "go-build")
+	}
+}
+
+func TestNewProvider_FileBased(t *testing.T) {
+	cfg := config.Provider{
+		Paths:   []string{t.TempDir()},
+		MaxSize: "4G",
+		Enabled: true,
+	}
+
+	p, err := provider.NewProvider("uv", cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if p.Name() != "uv" {
+		t.Errorf("name = %q, want %q", p.Name(), "uv")
+	}
+}
+
+func TestNewProvider_Docker(t *testing.T) {
+	cfg := config.Provider{
+		Paths:    []string{t.TempDir()},
+		MaxSize:  "50G",
+		CleanCmd: "docker system prune -af",
+		Enabled:  true,
+	}
+
+	p, err := provider.NewProvider("docker", cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if p.Name() != "docker" {
+		t.Errorf("name = %q, want %q", p.Name(), "docker")
+	}
+}
+
+func TestLoadProviders(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	cfg := &config.Config{
+		Version: "1",
+		Providers: map[string]config.Provider{
+			"test1": {
+				Paths:    []string{tmpDir},
+				MaxSize:  "1G",
+				CleanCmd: "echo 1",
+				Enabled:  true,
+			},
+			"test2": {
+				Paths:    []string{tmpDir},
+				MaxSize:  "2G",
+				CleanCmd: "echo 2",
+				Enabled:  false,
+			},
+			"test3": {
+				Paths:    []string{tmpDir},
+				MaxSize:  "3G",
+				CleanCmd: "echo 3",
+				Enabled:  true,
+			},
+		},
+	}
+
+	providers, err := provider.LoadProviders(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(providers) != 2 {
+		t.Errorf("providers count = %d, want 2", len(providers))
+	}
+}
+
+func TestLoadProvider(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	cfg := &config.Config{
+		Version: "1",
+		Providers: map[string]config.Provider{
+			"test": {
+				Paths:    []string{tmpDir},
+				MaxSize:  "1G",
+				CleanCmd: "echo test",
+				Enabled:  true,
+			},
+		},
+	}
+
+	p, err := provider.LoadProvider("test", cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if p.Name() != "test" {
+		t.Errorf("name = %q, want %q", p.Name(), "test")
+	}
+}
+
+func TestLoadProvider_NotFound(t *testing.T) {
+	cfg := &config.Config{
+		Version:   "1",
+		Providers: map[string]config.Provider{},
+	}
+
+	_, err := provider.LoadProvider("nonexistent", cfg)
+	if err == nil {
+		t.Error("expected error for nonexistent provider")
+	}
+}
