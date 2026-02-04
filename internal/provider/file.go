@@ -173,5 +173,9 @@ func formatResultWithErrors(base string, deleted int64, errors []cache.AccessErr
 		return base
 	}
 
-	return fmt.Sprintf("deleted %d files (%s)", deleted, strings.Join(parts, ", "))
+	errorSummary := fmt.Sprintf("(%s)", strings.Join(parts, ", "))
+	if base == "" {
+		return fmt.Sprintf("deleted %d files %s", deleted, errorSummary)
+	}
+	return fmt.Sprintf("%s %s", base, errorSummary)
 }

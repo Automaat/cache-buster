@@ -60,7 +60,9 @@ func TestCalculateSizeAgainstDu(t *testing.T) {
 	pct := float64(diff) / float64(duSize) * 100
 	t.Logf("difference:    %d bytes (%.2f%%)", diff, pct)
 
-	if pct > 5 {
-		t.Errorf("size difference > 5%%: ours=%d, du=%d", ourSize, duSize)
+	// 3% tolerance: scanner collects access warnings (permission denied, locked files)
+	// rather than counting them, causing minor variance vs du
+	if pct > 3 {
+		t.Errorf("size difference > 3%%: ours=%d, du=%d", ourSize, duSize)
 	}
 }

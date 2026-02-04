@@ -743,8 +743,8 @@ func TestFileProvider_DeleteError(t *testing.T) {
 		t.Errorf("files deleted = %d, want 0", result.FilesDeleted)
 	}
 
-	if !strings.Contains(result.Output, "permission denied") && !strings.Contains(result.Output, "error") {
-		t.Errorf("output should contain error info, got %q", result.Output)
+	if !strings.Contains(result.Output, "permission denied") {
+		t.Errorf("output should contain 'permission denied', got %q", result.Output)
 	}
 }
 
