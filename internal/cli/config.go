@@ -105,8 +105,7 @@ func runConfigEditWithLoader(loader *config.Loader, editor string) error {
 		return fmt.Errorf("invalid editor: %s", editor)
 	}
 
-	args := append(parts[1:], configPath)
-	cmd := exec.Command(parts[0], args...)
+	cmd := exec.Command(parts[0], append(parts[1:], configPath)...)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
