@@ -6,13 +6,13 @@ macOS developer cache manager with size limits.
 
 ## Phase 1: Project Setup
 
-- [ ] `go mod init github.com/marcinc/cache-buster`
-- [ ] Add dependencies:
+- [x] `go mod init github.com/marcinc/cache-buster`
+- [x] Add dependencies:
   - `github.com/spf13/cobra`
   - `github.com/spf13/viper`
   - `github.com/dustin/go-humanize`
   - `github.com/charmbracelet/lipgloss`
-- [ ] Create directory structure:
+- [x] Create directory structure:
   ```
   cmd/cache-buster/main.go
   internal/cli/
@@ -21,7 +21,7 @@ macOS developer cache manager with size limits.
   internal/cache/
   pkg/size/
   ```
-- [ ] Implement root Cobra command
+- [x] Implement root Cobra command
 
 ---
 
