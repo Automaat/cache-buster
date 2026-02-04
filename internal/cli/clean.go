@@ -68,15 +68,8 @@ func runCleanWithLoader(loader *config.Loader, args []string, allFlag, dryRun, f
 		}
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
-	go func() {
-		<-sigCh
-		cancel()
-	}()
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
 
 	return executeClean(ctx, providers, dryRun, quiet)
 }
@@ -119,7 +112,7 @@ func loadAndFilterProviders(cfg *config.Config, names []string) ([]provider.Prov
 	for _, name := range names {
 		p, err := provider.LoadProvider(name, cfg)
 		if err != nil {
-			unavailable = append(unavailable, name)
+			unavailable = append(unavailable, fmt.Sprintf("%s (load error: %v)", name, err))
 			continue
 		}
 

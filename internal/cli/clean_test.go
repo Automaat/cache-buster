@@ -43,6 +43,7 @@ func createStdinWithInput(t *testing.T, input string) *os.File {
 	_, err = w.WriteString(input)
 	require.NoError(t, err)
 	require.NoError(t, w.Close())
+	t.Cleanup(func() { _ = r.Close() })
 	return r
 }
 
@@ -234,25 +235,28 @@ func TestResolveProviders_InvalidProvider(t *testing.T) {
 
 func TestConfirmClean_Yes(t *testing.T) {
 	stdin := createStdinWithInput(t, "y\n")
-
-	result := confirmClean(nil, stdin)
-
+	var result bool
+	captureStdout(t, func() {
+		result = confirmClean(nil, stdin)
+	})
 	assert.True(t, result)
 }
 
 func TestConfirmClean_No(t *testing.T) {
 	stdin := createStdinWithInput(t, "n\n")
-
-	result := confirmClean(nil, stdin)
-
+	var result bool
+	captureStdout(t, func() {
+		result = confirmClean(nil, stdin)
+	})
 	assert.False(t, result)
 }
 
 func TestConfirmClean_Empty(t *testing.T) {
 	stdin := createStdinWithInput(t, "\n")
-
-	result := confirmClean(nil, stdin)
-
+	var result bool
+	captureStdout(t, func() {
+		result = confirmClean(nil, stdin)
+	})
 	assert.False(t, result)
 }
 
@@ -269,4 +273,39 @@ func TestClean_AllWithForce(t *testing.T) {
 	assert.Contains(t, output, "Cleaning test-provider")
 	assert.Contains(t, output, "done")
 	assert.Contains(t, output, "Total:")
+}
+
+func TestClean_ProviderFailure(t *testing.T) {
+	tmpDir := t.TempDir()
+	cfgPath := filepath.Join(tmpDir, "config.yaml")
+	cacheDir := t.TempDir()
+	cfgContent := `version: "1"
+providers:
+  failing-provider:
+    enabled: true
+    paths:
+      - ` + cacheDir + `
+    max_size: 1GB
+    clean_cmd: "/nonexistent-command-that-does-not-exist"
+  working-provider:
+    enabled: true
+    paths:
+      - ` + cacheDir + `
+    max_size: 1GB
+    clean_cmd: "echo cleaned"
+`
+	require.NoError(t, os.WriteFile(cfgPath, []byte(cfgContent), 0o600))
+
+	loader := config.NewLoader()
+	loader.SetConfigPath(cfgPath)
+
+	var err error
+	output := captureStdout(t, func() {
+		err = runCleanWithLoader(loader, nil, true, false, true, false, os.Stdin)
+	})
+
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "some providers failed")
+	assert.Contains(t, err.Error(), "failing-provider")
+	assert.Contains(t, output, "working-provider")
 }
