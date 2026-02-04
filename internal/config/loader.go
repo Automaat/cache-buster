@@ -10,8 +10,9 @@ import (
 
 // Loader handles config file operations.
 type Loader struct {
-	v          *viper.Viper
-	configPath string // override for testing, empty uses Path()
+	v            *viper.Viper
+	configPath   string // override for testing, empty uses Path()
+	skipDefaults bool   // skip merging with defaults (for test isolation)
 }
 
 // NewLoader creates a new config loader.
@@ -24,6 +25,11 @@ func (l *Loader) SetConfigPath(path string) {
 	l.configPath = path
 }
 
+// SkipDefaults disables merging with defaults (for test isolation).
+func (l *Loader) SkipDefaults() {
+	l.skipDefaults = true
+}
+
 func (l *Loader) path() (string, error) {
 	if l.configPath != "" {
 		return l.configPath, nil
@@ -33,7 +39,12 @@ func (l *Loader) path() (string, error) {
 
 // Load reads config from disk and merges with defaults.
 func (l *Loader) Load() (*Config, error) {
-	cfg := DefaultConfig()
+	var cfg *Config
+	if l.skipDefaults {
+		cfg = &Config{Version: "1", Providers: make(map[string]Provider)}
+	} else {
+		cfg = DefaultConfig()
+	}
 
 	configPath, err := l.path()
 	if err != nil {

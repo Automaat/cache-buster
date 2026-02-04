@@ -20,13 +20,19 @@ func captureStdout(t *testing.T, fn func()) string {
 	require.NoError(t, err)
 	os.Stdout = w
 
+	// Read in goroutine to avoid pipe buffer deadlock
+	var buf bytes.Buffer
+	done := make(chan struct{})
+	go func() {
+		_, _ = io.Copy(&buf, r)
+		close(done)
+	}()
+
 	fn()
 
 	require.NoError(t, w.Close())
 	os.Stdout = old
-
-	var buf bytes.Buffer
-	_, _ = io.Copy(&buf, r)
+	<-done
 	return buf.String()
 }
 
@@ -209,21 +215,23 @@ func TestOutputTable_Empty(t *testing.T) {
 	assert.Contains(t, output, "Total: 0 B")
 }
 
-func TestRunStatus_NoConfig_CreatesDefault(t *testing.T) {
+func TestRunStatus_NoConfig_UsesDefaults(t *testing.T) {
 	tmpDir := t.TempDir()
 	cfgPath := filepath.Join(tmpDir, "nonexistent.yaml")
 	loader := config.NewLoader()
 	loader.SetConfigPath(cfgPath)
 
 	var err error
-	captureStdout(t, func() {
+	output := captureStdout(t, func() {
 		err = runStatusWithLoader(loader, false)
 	})
 
 	require.NoError(t, err)
-	// verify config was created
+	// Config file should NOT be auto-created
 	_, statErr := os.Stat(cfgPath)
-	assert.NoError(t, statErr, "config file should be created")
+	assert.True(t, os.IsNotExist(statErr), "config file should not be auto-created")
+	// But should show default providers
+	assert.Contains(t, output, "go-build")
 }
 
 func TestRunStatus_NoEnabledProviders(t *testing.T) {
@@ -241,6 +249,7 @@ providers:
 
 	loader := config.NewLoader()
 	loader.SetConfigPath(cfgPath)
+	loader.SkipDefaults()
 
 	var err error
 	output := captureStdout(t, func() {
@@ -270,6 +279,7 @@ providers:
 
 	loader := config.NewLoader()
 	loader.SetConfigPath(cfgPath)
+	loader.SkipDefaults()
 
 	var err error
 	output := captureStdout(t, func() {
@@ -301,6 +311,7 @@ providers:
 
 	loader := config.NewLoader()
 	loader.SetConfigPath(cfgPath)
+	loader.SkipDefaults()
 
 	var err error
 	output := captureStdout(t, func() {

@@ -33,6 +33,7 @@ providers:
 
 	loader := config.NewLoader()
 	loader.SetConfigPath(cfgPath)
+	loader.SkipDefaults()
 	return loader
 }
 
@@ -66,7 +67,8 @@ func TestClean_UnknownProvider(t *testing.T) {
 
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "unknown providers: nonexistent")
-	assert.Contains(t, err.Error(), "Available: test-provider")
+	assert.Contains(t, err.Error(), "Available:")
+	assert.Contains(t, err.Error(), "test-provider")
 }
 
 func TestClean_DryRun_All(t *testing.T) {
@@ -159,19 +161,20 @@ func TestClean_QuietMode(t *testing.T) {
 	assert.NotEmpty(t, output)
 }
 
-func TestClean_NoConfig_CreatesDefault(t *testing.T) {
+func TestClean_NoConfig_UsesDefaults(t *testing.T) {
 	tmpDir := t.TempDir()
 	cfgPath := filepath.Join(tmpDir, "nonexistent.yaml")
 	loader := config.NewLoader()
 	loader.SetConfigPath(cfgPath)
 
-	// dry-run with all providers - should succeed with default config
-	err := runCleanWithLoader(loader, nil, true, true, false, true, false, os.Stdin)
-
+	// Load should succeed with defaults even without config file
+	cfg, err := loader.Load()
 	require.NoError(t, err)
-	// verify config was created
+	assert.NotEmpty(t, cfg.Providers, "should have default providers")
+
+	// Config file should NOT be auto-created
 	_, statErr := os.Stat(cfgPath)
-	assert.NoError(t, statErr, "config file should be created")
+	assert.True(t, os.IsNotExist(statErr), "config file should not be auto-created")
 }
 
 func TestCleanCmd_HasFlags(t *testing.T) {
@@ -303,6 +306,7 @@ providers:
 
 	loader := config.NewLoader()
 	loader.SetConfigPath(cfgPath)
+	loader.SkipDefaults()
 
 	var err error
 	output := captureStdout(t, func() {
@@ -337,6 +341,7 @@ providers:
 
 	loader := config.NewLoader()
 	loader.SetConfigPath(cfgPath)
+	loader.SkipDefaults()
 
 	var err error
 	output := captureStdout(t, func() {
@@ -366,6 +371,7 @@ providers:
 
 	loader := config.NewLoader()
 	loader.SetConfigPath(cfgPath)
+	loader.SkipDefaults()
 
 	var err error
 	output := captureStdout(t, func() {
