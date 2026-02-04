@@ -125,9 +125,9 @@ macOS developer cache manager with size limits.
 
 ## Phase 8: Config Command
 
-- [ ] `cache-buster config show` - display current config
-- [ ] `cache-buster config init` - create default config
-- [ ] `cache-buster config edit` - open in $EDITOR
+- [x] `cache-buster config show` - display current config
+- [x] `cache-buster config init` - create default config
+- [x] `cache-buster config edit` - open in $EDITOR
 
 ---
 
