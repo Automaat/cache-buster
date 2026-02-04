@@ -247,7 +247,7 @@ func TestModelView(t *testing.T) {
 		view := m.View()
 
 		assert.Contains(t, view, "Clean 1 provider")
-		assert.Contains(t, view, "Press y to confirm")
+		assert.Contains(t, view, "y=confirm")
 	})
 
 	t.Run("done view shows results", func(t *testing.T) {
