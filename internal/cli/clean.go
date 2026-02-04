@@ -40,7 +40,7 @@ func runClean(cmd *cobra.Command, args []string) error {
 }
 
 func runCleanWithLoader(loader *config.Loader, args []string, allFlag, dryRun, force, quiet bool, stdin *os.File) error {
-	cfg, err := loader.Load()
+	cfg, _, err := loader.LoadOrCreate()
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
 	}

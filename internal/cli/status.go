@@ -49,7 +49,7 @@ func runStatus(cmd *cobra.Command, _ []string) error {
 }
 
 func runStatusWithLoader(loader *config.Loader, jsonOutput bool) error {
-	cfg, err := loader.Load()
+	cfg, _, err := loader.LoadOrCreate()
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
 	}
