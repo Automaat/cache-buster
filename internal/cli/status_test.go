@@ -230,8 +230,8 @@ func TestRunStatus_NoConfig_UsesDefaults(t *testing.T) {
 	// Config file should NOT be auto-created
 	_, statErr := os.Stat(cfgPath)
 	assert.True(t, os.IsNotExist(statErr), "config file should not be auto-created")
-	// But should show default providers
-	assert.Contains(t, output, "go-build")
+	// But should show default providers (go-mod exists on CI runners)
+	assert.Contains(t, output, "go-mod")
 }
 
 func TestRunStatus_NoEnabledProviders(t *testing.T) {
