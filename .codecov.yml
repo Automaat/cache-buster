@@ -9,6 +9,9 @@ coverage:
         target: 60%
         only_pulls: true
 
+ignore:
+  - "cmd/"
+
 github:
   require_ci_to_pass: true
 
