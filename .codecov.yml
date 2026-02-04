@@ -1,0 +1,18 @@
+coverage:
+  status:
+    project:
+      default:
+        target: 70%
+        threshold: null
+    patch:
+      default:
+        target: 60%
+        only_pulls: true
+
+github:
+  require_ci_to_pass: true
+
+comment:
+  require_changes: true
+  layout: "files"
+  behavior: "default"

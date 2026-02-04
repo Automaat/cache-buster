@@ -45,6 +45,15 @@ jobs:
       - name: Check coverage
         run: go tool cover -func=coverage.out
 
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@4fe8c953157c34b20c4f8c3e220ff7f79f821e8f # v4
+        with:
+          files: ./coverage.out
+          flags: unittests
+          fail_ci_if_error: false
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+
   build:
     name: Build
     runs-on: ubuntu-latest
