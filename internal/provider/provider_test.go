@@ -1035,7 +1035,10 @@ func TestDockerProvider_SmartClean_DryRun(t *testing.T) {
 		t.Errorf("output should contain 'would run', got %q", result.Output)
 	}
 
-	if !strings.Contains(result.Output, "keep-storage") {
-		t.Errorf("output should contain 'keep-storage', got %q", result.Output)
+	if !strings.Contains(result.Output, "system prune") {
+		t.Errorf("output should contain 'system prune', got %q", result.Output)
+	}
+	if !strings.Contains(result.Output, "until=") {
+		t.Errorf("output should contain 'until=', got %q", result.Output)
 	}
 }

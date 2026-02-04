@@ -4,11 +4,11 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 
 	"github.com/Automaat/cache-buster/internal/config"
-	"github.com/Automaat/cache-buster/pkg/size"
 	"github.com/kballard/go-shellquote"
 )
 
@@ -56,8 +56,12 @@ func (p *DockerProvider) Clean(ctx context.Context, opts CleanOptions) (CleanRes
 }
 
 func (p *DockerProvider) smartClean(ctx context.Context, opts CleanOptions) (CleanResult, error) {
-	keepStorage := size.FormatSize(p.maxSize)
-	smartCmd := fmt.Sprintf("docker buildx prune -af --keep-storage=%s", keepStorage)
+	hours := int64(p.maxAge.Hours())
+	if hours < 1 {
+		hours = 1
+	}
+	filterArg := fmt.Sprintf("until=%dh", hours)
+	smartCmd := fmt.Sprintf("docker system prune -af --filter %s", filterArg)
 
 	if opts.DryRun {
 		return CleanResult{
@@ -67,7 +71,7 @@ func (p *DockerProvider) smartClean(ctx context.Context, opts CleanOptions) (Cle
 
 	sizeBefore, _ := p.CurrentSize()
 
-	cmd := exec.CommandContext(ctx, "docker", "buildx", "prune", "-af", "--keep-storage="+keepStorage)
+	cmd := exec.CommandContext(ctx, "docker", "system", "prune", "-af", "--filter", filterArg)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -82,6 +86,7 @@ func (p *DockerProvider) smartClean(ctx context.Context, opts CleanOptions) (Cle
 	sizeAfter, _ := p.CurrentSize()
 	bytesCleaned := sizeBefore - sizeAfter
 	if bytesCleaned < 0 {
+		fmt.Fprintf(os.Stderr, "warning: %s cache size increased during clean\n", p.name)
 		bytesCleaned = 0
 	}
 
@@ -123,6 +128,7 @@ func (p *DockerProvider) fullClean(ctx context.Context, opts CleanOptions) (Clea
 	sizeAfter, _ := p.CurrentSize()
 	bytesCleaned := sizeBefore - sizeAfter
 	if bytesCleaned < 0 {
+		fmt.Fprintf(os.Stderr, "warning: %s cache size increased during clean\n", p.name)
 		bytesCleaned = 0
 	}
 

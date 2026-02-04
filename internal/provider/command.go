@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 
@@ -88,6 +89,7 @@ func (p *CommandProvider) fullClean(ctx context.Context, opts CleanOptions) (Cle
 	sizeAfter, _ := p.CurrentSize()
 	bytesCleaned := sizeBefore - sizeAfter
 	if bytesCleaned < 0 {
+		fmt.Fprintf(os.Stderr, "warning: %s cache size increased during clean\n", p.name)
 		bytesCleaned = 0
 	}
 

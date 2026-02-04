@@ -48,5 +48,10 @@ func ParseDuration(s string) (time.Duration, error) {
 		return 0, fmt.Errorf("unknown duration unit: %q", unit)
 	}
 
+	const maxNanoseconds = int64(1<<63 - 1)
+	if value > maxNanoseconds/int64(multiplier) {
+		return 0, fmt.Errorf("duration too large: %q", s)
+	}
+
 	return time.Duration(value) * multiplier, nil
 }
