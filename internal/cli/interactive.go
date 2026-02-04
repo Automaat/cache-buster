@@ -1,0 +1,554 @@
+package cli
+
+import (
+	"context"
+	"fmt"
+	"os"
+	"os/signal"
+	"strings"
+	"syscall"
+
+	"github.com/Automaat/cache-buster/internal/config"
+	"github.com/Automaat/cache-buster/internal/provider"
+	"github.com/Automaat/cache-buster/pkg/size"
+	"github.com/charmbracelet/bubbles/progress"
+	"github.com/charmbracelet/bubbles/spinner"
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
+	"github.com/spf13/cobra"
+)
+
+type state int
+
+const (
+	stateSelection state = iota
+	stateConfirmation
+	stateCleaning
+	stateDone
+)
+
+type providerItem struct {
+	provider    provider.Provider
+	cleanResult *provider.CleanResult
+	cleanErr    error
+	name        string
+	currentFmt  string
+	maxFmt      string
+	errMsg      string
+	current     int64
+	max         int64
+	overLimit   bool
+	available   bool
+}
+
+type model struct {
+	cfg        *config.Config
+	selected   map[int]struct{}
+	providers  []providerItem
+	spinner    spinner.Model
+	progress   progress.Model
+	state      state
+	totalFreed int64
+	cursor     int
+	cleanIdx   int
+	width      int
+	height     int
+	dryRun     bool
+	smartMode  bool
+	quitting   bool
+}
+
+type scanResultMsg struct {
+	item providerItem
+	idx  int
+}
+
+type cleanResultMsg struct {
+	err    error
+	result provider.CleanResult
+	idx    int
+}
+
+// InteractiveCmd launches interactive TUI mode.
+var InteractiveCmd = &cobra.Command{
+	Use:     "interactive",
+	Aliases: []string{"i"},
+	Short:   "Interactive cache management mode",
+	RunE:    runInteractive,
+}
+
+func init() {
+	InteractiveCmd.Flags().Bool("dry-run", false, "Preview without deleting")
+	InteractiveCmd.Flags().Bool("full", false, "Use full clean mode instead of smart")
+}
+
+func runInteractive(cmd *cobra.Command, _ []string) error {
+	dryRun, _ := cmd.Flags().GetBool("dry-run")
+	full, _ := cmd.Flags().GetBool("full")
+	return RunInteractiveWithLoader(config.NewLoader(), dryRun, !full)
+}
+
+// RunInteractiveWithLoader launches interactive mode with specified loader.
+func RunInteractiveWithLoader(loader *config.Loader, dryRun, smart bool) error {
+	cfg, created, err := loader.LoadOrCreate()
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
+	if created {
+		fmt.Fprintln(os.Stderr, "Created default config file")
+	}
+
+	providers := cfg.EnabledProviders()
+	if len(providers) == 0 {
+		fmt.Println("No enabled providers")
+		return nil
+	}
+
+	m := newModel(cfg, providers, dryRun, smart)
+	p := tea.NewProgram(m, tea.WithAltScreen())
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	go func() {
+		<-ctx.Done()
+		p.Send(tea.Quit())
+	}()
+
+	if _, err := p.Run(); err != nil {
+		return fmt.Errorf("run interactive: %w", err)
+	}
+
+	return nil
+}
+
+func newModel(cfg *config.Config, providerNames []string, dryRun, smart bool) model {
+	items := make([]providerItem, len(providerNames))
+	for i, name := range providerNames {
+		items[i] = providerItem{name: name}
+	}
+
+	s := spinner.New()
+	s.Spinner = spinner.Dot
+	s.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("205"))
+
+	prog := progress.New(progress.WithDefaultGradient())
+
+	return model{
+		state:     stateSelection,
+		providers: items,
+		selected:  make(map[int]struct{}),
+		spinner:   s,
+		progress:  prog,
+		cfg:       cfg,
+		dryRun:    dryRun,
+		smartMode: smart,
+		width:     80,
+		height:    24,
+	}
+}
+
+func (m model) Init() tea.Cmd {
+	cmds := make([]tea.Cmd, 0, len(m.providers)+1)
+	for i := range m.providers {
+		cmds = append(cmds, m.scanProviderCmd(i))
+	}
+	cmds = append(cmds, m.spinner.Tick)
+	return tea.Batch(cmds...)
+}
+
+func (m model) scanProviderCmd(idx int) tea.Cmd {
+	return func() tea.Msg {
+		name := m.providers[idx].name
+		item := providerItem{name: name}
+
+		p, err := provider.LoadProvider(name, m.cfg)
+		if err != nil {
+			item.errMsg = fmt.Sprintf("load error: %v", err)
+			return scanResultMsg{idx: idx, item: item}
+		}
+
+		item.provider = p
+		item.available = p.Available()
+
+		if !item.available {
+			item.errMsg = "unavailable"
+			return scanResultMsg{idx: idx, item: item}
+		}
+
+		currentSize, err := p.CurrentSize()
+		if err != nil {
+			item.errMsg = fmt.Sprintf("scan error: %v", err)
+			return scanResultMsg{idx: idx, item: item}
+		}
+
+		item.current = currentSize
+		item.currentFmt = size.FormatSize(currentSize)
+		item.max = p.MaxSize()
+		item.maxFmt = size.FormatSize(p.MaxSize())
+		item.overLimit = currentSize > p.MaxSize()
+
+		return scanResultMsg{idx: idx, item: item}
+	}
+}
+
+func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		return m.handleKey(msg)
+
+	case tea.WindowSizeMsg:
+		m.width = msg.Width
+		m.height = msg.Height
+		m.progress.Width = msg.Width - 10
+		return m, nil
+
+	case scanResultMsg:
+		m.providers[msg.idx] = msg.item
+		return m, nil
+
+	case cleanResultMsg:
+		m.providers[msg.idx].cleanResult = &msg.result
+		m.providers[msg.idx].cleanErr = msg.err
+		if msg.err == nil {
+			m.totalFreed += msg.result.BytesCleaned
+		}
+		return m.cleanNext()
+
+	case spinner.TickMsg:
+		var cmd tea.Cmd
+		m.spinner, cmd = m.spinner.Update(msg)
+		return m, cmd
+
+	case progress.FrameMsg:
+		progressModel, cmd := m.progress.Update(msg)
+		m.progress = progressModel.(progress.Model)
+		return m, cmd
+	}
+
+	return m, nil
+}
+
+func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch m.state {
+	case stateSelection:
+		return m.handleSelectionKey(msg)
+	case stateConfirmation:
+		return m.handleConfirmationKey(msg)
+	case stateDone:
+		return m.handleDoneKey(msg)
+	}
+	return m, nil
+}
+
+func (m model) handleSelectionKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "q", "esc", "ctrl+c":
+		m.quitting = true
+		return m, tea.Quit
+
+	case "j", "down":
+		if m.cursor < len(m.providers)-1 {
+			m.cursor++
+		}
+
+	case "k", "up":
+		if m.cursor > 0 {
+			m.cursor--
+		}
+
+	case " ":
+		if m.providers[m.cursor].available {
+			if _, ok := m.selected[m.cursor]; ok {
+				delete(m.selected, m.cursor)
+			} else {
+				m.selected[m.cursor] = struct{}{}
+			}
+		}
+
+	case "a":
+		for i, p := range m.providers {
+			if p.available {
+				m.selected[i] = struct{}{}
+			}
+		}
+
+	case "n":
+		m.selected = make(map[int]struct{})
+
+	case "o":
+		m.selected = make(map[int]struct{})
+		for i, p := range m.providers {
+			if p.available && p.overLimit {
+				m.selected[i] = struct{}{}
+			}
+		}
+
+	case "enter":
+		if len(m.selected) > 0 {
+			m.state = stateConfirmation
+		}
+	}
+
+	return m, nil
+}
+
+func (m model) handleConfirmationKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "y", "Y":
+		m.state = stateCleaning
+		m.cleanIdx = -1
+		return m.cleanNext()
+
+	case "n", "N", "esc", "ctrl+c":
+		m.state = stateSelection
+
+	case "f", "F":
+		m.smartMode = false
+
+	case "s", "S":
+		m.smartMode = true
+	}
+
+	return m, nil
+}
+
+func (m model) handleDoneKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "enter", "q", "esc", "ctrl+c":
+		m.quitting = true
+		return m, tea.Quit
+	}
+	return m, nil
+}
+
+func (m model) cleanNext() (tea.Model, tea.Cmd) {
+	for {
+		m.cleanIdx++
+		if m.cleanIdx >= len(m.providers) {
+			m.state = stateDone
+			return m, nil
+		}
+		if _, ok := m.selected[m.cleanIdx]; ok {
+			break
+		}
+	}
+
+	return m, m.cleanProviderCmd(m.cleanIdx)
+}
+
+func (m model) cleanProviderCmd(idx int) tea.Cmd {
+	return func() tea.Msg {
+		p := m.providers[idx].provider
+		if p == nil {
+			return cleanResultMsg{idx: idx, err: fmt.Errorf("provider not loaded")}
+		}
+
+		mode := provider.CleanModeFull
+		if m.smartMode {
+			mode = provider.CleanModeSmart
+		}
+
+		result, err := p.Clean(context.Background(), provider.CleanOptions{
+			DryRun: m.dryRun,
+			Mode:   mode,
+		})
+
+		return cleanResultMsg{idx: idx, result: result, err: err}
+	}
+}
+
+func (m model) View() string {
+	if m.quitting {
+		return ""
+	}
+
+	var b strings.Builder
+
+	title := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("205")).Render("Cache Buster - Interactive Mode")
+	b.WriteString(title)
+	b.WriteString("\n\n")
+
+	switch m.state {
+	case stateSelection:
+		b.WriteString(m.viewSelection())
+	case stateConfirmation:
+		b.WriteString(m.viewConfirmation())
+	case stateCleaning:
+		b.WriteString(m.viewCleaning())
+	case stateDone:
+		b.WriteString(m.viewDone())
+	}
+
+	boxStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("205")).
+		Padding(1, 2).
+		Width(m.width - 2)
+
+	return boxStyle.Render(b.String())
+}
+
+func (m model) viewSelection() string {
+	var b strings.Builder
+
+	b.WriteString("Select providers to clean:\n\n")
+
+	for i, p := range m.providers {
+		cursor := "  "
+		if i == m.cursor {
+			cursor = "> "
+		}
+
+		checkbox := "[ ]"
+		if _, ok := m.selected[i]; ok {
+			checkbox = "[x]"
+		}
+
+		var line string
+		switch {
+		case !p.available:
+			line = fmt.Sprintf("%s%s %s", cursor, checkbox, DimStyle.Render(fmt.Sprintf("%-14s (unavailable)", p.name)))
+		case p.errMsg != "":
+			line = fmt.Sprintf("%s%s %-14s %s", cursor, checkbox, p.name, ErrorStyle.Render(p.errMsg))
+		case p.currentFmt == "":
+			line = fmt.Sprintf("%s%s %-14s %s", cursor, checkbox, p.name, m.spinner.View())
+		default:
+			status := OkStyle.Render("ok")
+			if p.overLimit {
+				status = OverStyle.Render("OVER")
+			}
+			line = fmt.Sprintf("%s%s %-14s %10s / %-10s %s", cursor, checkbox, p.name, p.currentFmt, p.maxFmt, status)
+		}
+
+		b.WriteString(line)
+		b.WriteString("\n")
+	}
+
+	b.WriteString("\n")
+	b.WriteString(fmt.Sprintf("Selected: %d provider(s)", len(m.selected)))
+	b.WriteString("\n\n")
+
+	hint := DimStyle.Render("space=toggle  a=all  n=none  o=over-limit  enter=confirm  q=quit")
+	b.WriteString(hint)
+
+	return b.String()
+}
+
+func (m model) viewConfirmation() string {
+	var b strings.Builder
+
+	names := m.selectedNames()
+	mode := "full"
+	if m.smartMode {
+		mode = "smart"
+	}
+	if m.dryRun {
+		mode += " (dry-run)"
+	}
+
+	b.WriteString(fmt.Sprintf("Clean %d provider(s) [%s]?\n\n", len(names), mode))
+
+	for _, name := range names {
+		b.WriteString(fmt.Sprintf("  • %s\n", name))
+	}
+
+	b.WriteString("\n")
+	hint := DimStyle.Render("y=confirm  n/esc=back  s=smart  f=full")
+	b.WriteString(hint)
+
+	return b.String()
+}
+
+func (m model) viewCleaning() string {
+	var b strings.Builder
+
+	if m.cleanIdx >= 0 && m.cleanIdx < len(m.providers) {
+		p := m.providers[m.cleanIdx]
+		b.WriteString(fmt.Sprintf("Cleaning %s... %s\n\n", p.name, m.spinner.View()))
+	}
+
+	selectedCount := len(m.selected)
+	completed := 0
+	for i := range m.providers {
+		if _, ok := m.selected[i]; ok && m.providers[i].cleanResult != nil {
+			completed++
+		}
+	}
+
+	if completed > 0 {
+		pct := float64(completed) / float64(selectedCount)
+		b.WriteString(m.progress.ViewAs(pct))
+		b.WriteString("\n\n")
+	}
+
+	if completed > 0 {
+		b.WriteString("Completed:\n")
+		for i, p := range m.providers {
+			if _, ok := m.selected[i]; !ok {
+				continue
+			}
+			if p.cleanResult != nil {
+				if p.cleanErr != nil {
+					b.WriteString(fmt.Sprintf("  %s   %s\n", p.name, ErrorStyle.Render("error")))
+				} else {
+					freed := size.FormatSize(p.cleanResult.BytesCleaned)
+					b.WriteString(fmt.Sprintf("  %s   freed %s\n", p.name, freed))
+				}
+			}
+		}
+	}
+
+	return b.String()
+}
+
+func (m model) viewDone() string {
+	var b strings.Builder
+
+	if m.dryRun {
+		b.WriteString(TotalStyle.Render(fmt.Sprintf("[dry-run] Would clean %d provider(s)", len(m.selected))))
+	} else {
+		b.WriteString(TotalStyle.Render(fmt.Sprintf("Cleaned %d provider(s), freed %s", len(m.selected), size.FormatSize(m.totalFreed))))
+	}
+	b.WriteString("\n\n")
+
+	var errors []string
+	for i, p := range m.providers {
+		if _, ok := m.selected[i]; !ok {
+			continue
+		}
+		if p.cleanResult != nil {
+			if p.cleanErr != nil {
+				errors = append(errors, fmt.Sprintf("%s: %v", p.name, p.cleanErr))
+				b.WriteString(fmt.Sprintf("  %s   %s\n", p.name, ErrorStyle.Render("✗")))
+			} else {
+				freed := size.FormatSize(p.cleanResult.BytesCleaned)
+				b.WriteString(fmt.Sprintf("  %-14s %10s  %s\n", p.name, freed, OkStyle.Render("✓")))
+			}
+		}
+	}
+
+	if len(errors) > 0 {
+		b.WriteString("\n")
+		b.WriteString(ErrorStyle.Render("Errors:"))
+		b.WriteString("\n")
+		for _, e := range errors {
+			b.WriteString(fmt.Sprintf("  %s\n", e))
+		}
+	}
+
+	b.WriteString("\n")
+	b.WriteString(DimStyle.Render("Press enter to exit"))
+
+	return b.String()
+}
+
+func (m model) selectedNames() []string {
+	var names []string
+	for i := range m.providers {
+		if _, ok := m.selected[i]; ok {
+			names = append(names, m.providers[i].name)
+		}
+	}
+	return names
+}
