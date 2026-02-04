@@ -843,7 +843,7 @@ func TestViewConfirmation(t *testing.T) {
 		m := newModel(cfg, []string{"p1"}, false, false, nil)
 		m.state = stateConfirmation
 		m.selected[0] = struct{}{}
-		view := m.viewConfirmation()
+		view := m.viewConfirmationPopup()
 
 		assert.Contains(t, view, "[full]")
 	})
@@ -852,7 +852,7 @@ func TestViewConfirmation(t *testing.T) {
 		m := newModel(cfg, []string{"p1"}, false, true, nil)
 		m.state = stateConfirmation
 		m.selected[0] = struct{}{}
-		view := m.viewConfirmation()
+		view := m.viewConfirmationPopup()
 
 		assert.Contains(t, view, "[smart]")
 	})
@@ -862,7 +862,7 @@ func TestViewConfirmation(t *testing.T) {
 		m.state = stateConfirmation
 		m.selected[0] = struct{}{}
 		m.selected[1] = struct{}{}
-		view := m.viewConfirmation()
+		view := m.viewConfirmationPopup()
 
 		assert.Contains(t, view, "• p1")
 		assert.Contains(t, view, "• p2")
@@ -872,11 +872,64 @@ func TestViewConfirmation(t *testing.T) {
 		m := newModel(cfg, []string{"p1"}, false, false, nil)
 		m.state = stateConfirmation
 		m.selected[0] = struct{}{}
-		view := m.viewConfirmation()
+		view := m.viewConfirmationPopup()
 
 		assert.Contains(t, view, "s=smart")
 		assert.Contains(t, view, "f=full")
 	})
+}
+
+func TestTruncateLeft(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+		skip     int
+	}{
+		{"empty string", "", "", 5},
+		{"skip zero", "hello", "hello", 0},
+		{"skip partial", "hello world", "world", 6},
+		{"skip exact length", "hello", "", 5},
+		{"skip beyond length", "hello", "", 10},
+		{"with ANSI at start", "\x1b[31mhello\x1b[0m", "llo\x1b[0m", 2},
+		{"with ANSI in middle", "he\x1b[31mllo\x1b[0m", "\x1b[31mllo\x1b[0m", 2},
+		{"wide char CJK", "日本語test", "test", 6},
+		{"wide char emoji", "🎉test", "test", 2},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := truncateLeft(tt.input, tt.skip)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestTruncateRight(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+		keep     int
+	}{
+		{"empty string", "", "", 5},
+		{"keep zero", "hello", "", 0},
+		{"keep partial", "hello world", "hello", 5},
+		{"keep exact length", "hello", "hello", 5},
+		{"keep beyond length", "hello", "hello", 10},
+		{"with ANSI codes", "\x1b[31mhello\x1b[0m world", "\x1b[31mhello\x1b[0m", 5},
+		{"ANSI at end preserved", "hel\x1b[31mlo\x1b[0m", "hel\x1b[31mlo\x1b[0m", 5},
+		{"wide char CJK truncate", "日本語test", "日本", 4},
+		{"wide char no split", "日test", "", 1},
+		{"wide char emoji", "🎉test", "🎉", 2},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := truncateRight(tt.input, tt.keep)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
 }
 
 func TestCtrlCHandling(t *testing.T) {
