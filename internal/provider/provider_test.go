@@ -2,6 +2,7 @@ package provider_test
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -352,5 +353,263 @@ func TestLoadProvider_NotFound(t *testing.T) {
 	_, err := provider.LoadProvider("nonexistent", cfg)
 	if err == nil {
 		t.Error("expected error for nonexistent provider")
+	}
+}
+
+func TestBaseProvider_InvalidMaxSize(t *testing.T) {
+	cfg := config.Provider{
+		Paths:   []string{t.TempDir()},
+		MaxSize: "invalid",
+		Enabled: true,
+	}
+
+	_, err := provider.NewBaseProvider("test", cfg)
+	if err == nil {
+		t.Error("expected error for invalid max size")
+	}
+}
+
+func TestBaseProvider_InvalidPath(t *testing.T) {
+	cfg := config.Provider{
+		Paths:   []string{"~nonexistent[invalid"},
+		MaxSize: "1G",
+		Enabled: true,
+	}
+
+	_, err := provider.NewBaseProvider("test", cfg)
+	if err == nil {
+		t.Error("expected error for invalid path pattern")
+	}
+}
+
+func TestCommandProvider_EmptyCmd(t *testing.T) {
+	cfg := config.Provider{
+		Paths:    []string{t.TempDir()},
+		MaxSize:  "1G",
+		CleanCmd: "",
+		Enabled:  true,
+	}
+
+	p, err := provider.NewCommandProvider("test", cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := p.Clean(context.Background(), provider.CleanOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if result.BytesCleaned != 0 {
+		t.Errorf("bytes cleaned = %d, want 0", result.BytesCleaned)
+	}
+}
+
+func TestCommandProvider_FailingCommand(t *testing.T) {
+	cfg := config.Provider{
+		Paths:    []string{t.TempDir()},
+		MaxSize:  "1G",
+		CleanCmd: "false",
+		Enabled:  true,
+	}
+
+	p, err := provider.NewCommandProvider("test", cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = p.Clean(context.Background(), provider.CleanOptions{})
+	if err == nil {
+		t.Error("expected error for failing command")
+	}
+}
+
+func TestFileProvider_ContextCancellation(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	for i := range 10 {
+		f := filepath.Join(tmpDir, fmt.Sprintf("file%d.txt", i))
+		if err := os.WriteFile(f, make([]byte, 1000), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	cfg := config.Provider{
+		Paths:   []string{tmpDir},
+		MaxSize: "1B",
+		Enabled: true,
+	}
+
+	p, err := provider.NewFileProvider("test", cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	result, err := p.Clean(ctx, provider.CleanOptions{})
+	if err == nil {
+		t.Error("expected context cancellation error")
+	}
+
+	if result.Output != "interrupted" {
+		t.Errorf("output = %q, want %q", result.Output, "interrupted")
+	}
+}
+
+func TestDockerProvider_CleanNotAvailable(t *testing.T) {
+	cfg := config.Provider{
+		Paths:    []string{t.TempDir()},
+		MaxSize:  "50G",
+		CleanCmd: "nonexistent-docker-command",
+		Enabled:  true,
+	}
+
+	p, err := provider.NewDockerProvider("docker", cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if p.Available() {
+		t.Skip("docker is available, skipping unavailable test")
+	}
+
+	result, err := p.Clean(context.Background(), provider.CleanOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if result.Output != "docker not available" {
+		t.Errorf("output = %q, want %q", result.Output, "docker not available")
+	}
+}
+
+func TestDockerProvider_DryRun(t *testing.T) {
+	cfg := config.Provider{
+		Paths:    []string{t.TempDir()},
+		MaxSize:  "50G",
+		CleanCmd: "docker system prune -af",
+		Enabled:  true,
+	}
+
+	p, err := provider.NewDockerProvider("docker", cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !p.Available() {
+		t.Skip("docker not available")
+	}
+
+	result, err := p.Clean(context.Background(), provider.CleanOptions{DryRun: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if result.Output != "would run: docker system prune -af" {
+		t.Errorf("output = %q, want %q", result.Output, "would run: docker system prune -af")
+	}
+}
+
+func TestDockerProvider_EmptyCmd(t *testing.T) {
+	cfg := config.Provider{
+		Paths:    []string{t.TempDir()},
+		MaxSize:  "50G",
+		CleanCmd: "",
+		Enabled:  true,
+	}
+
+	p, err := provider.NewDockerProvider("docker", cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !p.Available() {
+		t.Skip("docker not available")
+	}
+
+	result, err := p.Clean(context.Background(), provider.CleanOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if result.BytesCleaned != 0 {
+		t.Errorf("bytes cleaned = %d, want 0", result.BytesCleaned)
+	}
+}
+
+func TestDockerProvider_FailingCommand(t *testing.T) {
+	cfg := config.Provider{
+		Paths:    []string{t.TempDir()},
+		MaxSize:  "50G",
+		CleanCmd: "docker nonexistent-subcommand",
+		Enabled:  true,
+	}
+
+	p, err := provider.NewDockerProvider("docker", cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !p.Available() {
+		t.Skip("docker not available")
+	}
+
+	_, err = p.Clean(context.Background(), provider.CleanOptions{})
+	if err == nil {
+		t.Error("expected error for failing command")
+	}
+}
+
+func TestNewProvider_JetBrains(t *testing.T) {
+	cfg := config.Provider{
+		Paths:   []string{t.TempDir()},
+		MaxSize: "3G",
+		Enabled: true,
+	}
+
+	p, err := provider.NewProvider("jetbrains", cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if p.Name() != "jetbrains" {
+		t.Errorf("name = %q, want %q", p.Name(), "jetbrains")
+	}
+}
+
+func TestNewProvider_NoCleanCmd(t *testing.T) {
+	cfg := config.Provider{
+		Paths:   []string{t.TempDir()},
+		MaxSize: "1G",
+		Enabled: true,
+	}
+
+	p, err := provider.NewProvider("custom", cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if p.Name() != "custom" {
+		t.Errorf("name = %q, want %q", p.Name(), "custom")
+	}
+}
+
+func TestLoadProviders_Error(t *testing.T) {
+	cfg := &config.Config{
+		Version: "1",
+		Providers: map[string]config.Provider{
+			"bad": {
+				Paths:   []string{t.TempDir()},
+				MaxSize: "invalid",
+				Enabled: true,
+			},
+		},
+	}
+
+	_, err := provider.LoadProviders(cfg)
+	if err == nil {
+		t.Error("expected error for invalid provider config")
 	}
 }
