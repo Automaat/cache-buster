@@ -27,7 +27,7 @@ macOS developer cache manager with size limits.
 
 ## Phase 2: Config System
 
-- [ ] Define config structs in `internal/config/config.go`:
+- [x] Define config structs in `internal/config/config.go`:
   ```go
   type Config struct {
       Version   string
@@ -40,10 +40,10 @@ macOS developer cache manager with size limits.
       CleanCmd string
   }
   ```
-- [ ] Implement path expansion (`~`, globs)
-- [ ] Load/save YAML config via Viper
-- [ ] Create default config with all providers
-- [ ] Config location: `~/.config/cache-buster/config.yaml`
+- [x] Implement path expansion (`~`, globs)
+- [x] Load/save YAML config via Viper
+- [x] Create default config with all providers
+- [x] Config location: `~/.config/cache-buster/config.yaml`
 
 ---
 
