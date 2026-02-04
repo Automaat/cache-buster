@@ -2,6 +2,7 @@ package config
 
 const currentVersion = "1"
 
+// DefaultProviders returns builtin provider definitions.
 func DefaultProviders() map[string]Provider {
 	return map[string]Provider{
 		"go-build": {
@@ -61,6 +62,7 @@ func DefaultProviders() map[string]Provider {
 	}
 }
 
+// DefaultConfig returns config with all default providers.
 func DefaultConfig() *Config {
 	return &Config{
 		Version:   currentVersion,

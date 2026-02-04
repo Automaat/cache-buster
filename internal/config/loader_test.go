@@ -91,7 +91,7 @@ func TestLoader_Exists(t *testing.T) {
 	}
 
 	// Create file
-	if err := os.WriteFile(configPath, []byte("version: 1\n"), 0o644); err != nil {
+	if err := os.WriteFile(configPath, []byte("version: 1\n"), 0o600); err != nil {
 		t.Fatalf("create file: %v", err)
 	}
 

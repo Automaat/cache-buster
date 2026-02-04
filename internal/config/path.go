@@ -12,6 +12,7 @@ const (
 	configFile = "config.yaml"
 )
 
+// ExpandTilde replaces ~ prefix with home directory.
 func ExpandTilde(path string) (string, error) {
 	if !strings.HasPrefix(path, "~") {
 		return path, nil
@@ -33,6 +34,7 @@ func ExpandTilde(path string) (string, error) {
 	return path, nil
 }
 
+// ExpandPaths expands ~ and globs in path patterns.
 func ExpandPaths(patterns []string) ([]string, error) {
 	var result []string
 
@@ -56,7 +58,8 @@ func ExpandPaths(patterns []string) ([]string, error) {
 	return result, nil
 }
 
-func ConfigDirPath() (string, error) {
+// DirPath returns ~/.config/cache-buster.
+func DirPath() (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", fmt.Errorf("get home dir: %w", err)
@@ -64,18 +67,20 @@ func ConfigDirPath() (string, error) {
 	return filepath.Join(home, configDir), nil
 }
 
-func ConfigPath() (string, error) {
-	dir, err := ConfigDirPath()
+// Path returns ~/.config/cache-buster/config.yaml.
+func Path() (string, error) {
+	dir, err := DirPath()
 	if err != nil {
 		return "", err
 	}
 	return filepath.Join(dir, configFile), nil
 }
 
-func EnsureConfigDir() error {
-	dir, err := ConfigDirPath()
+// EnsureDir creates config directory if missing.
+func EnsureDir() error {
+	dir, err := DirPath()
 	if err != nil {
 		return err
 	}
-	return os.MkdirAll(dir, 0o755)
+	return os.MkdirAll(dir, 0o750)
 }

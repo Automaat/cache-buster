@@ -6,55 +6,54 @@ import (
 
 func TestConfig_Validate(t *testing.T) {
 	tests := []struct {
-		name    string
 		cfg     *Config
-		wantErr bool
+		name    string
 		errMsg  string
+		wantErr bool
 	}{
 		{
-			name:    "valid config",
-			cfg:     DefaultConfig(),
-			wantErr: false,
+			cfg:  DefaultConfig(),
+			name: "valid config",
 		},
 		{
-			name: "missing version",
 			cfg: &Config{
 				Version:   "",
 				Providers: DefaultProviders(),
 			},
-			wantErr: true,
+			name:    "missing version",
 			errMsg:  "version is required",
+			wantErr: true,
 		},
 		{
-			name: "no providers",
 			cfg: &Config{
 				Version:   "1",
 				Providers: map[string]Provider{},
 			},
-			wantErr: true,
+			name:    "no providers",
 			errMsg:  "at least one provider is required",
+			wantErr: true,
 		},
 		{
-			name: "provider without paths",
 			cfg: &Config{
 				Version: "1",
 				Providers: map[string]Provider{
 					"test": {Enabled: true, Paths: []string{}, MaxSize: "1G"},
 				},
 			},
-			wantErr: true,
+			name:    "provider without paths",
 			errMsg:  "at least one path is required",
+			wantErr: true,
 		},
 		{
-			name: "provider without max_size",
 			cfg: &Config{
 				Version: "1",
 				Providers: map[string]Provider{
 					"test": {Enabled: true, Paths: []string{"~/test"}, MaxSize: ""},
 				},
 			},
-			wantErr: true,
+			name:    "provider without max_size",
 			errMsg:  "max_size is required",
+			wantErr: true,
 		},
 	}
 

@@ -5,18 +5,21 @@ import (
 	"sort"
 )
 
+// Config holds cache-buster configuration.
 type Config struct {
-	Version   string              `mapstructure:"version" yaml:"version"`
 	Providers map[string]Provider `mapstructure:"providers" yaml:"providers"`
+	Version   string              `mapstructure:"version" yaml:"version"`
 }
 
+// Provider defines a cache provider's settings.
 type Provider struct {
-	Enabled  bool     `mapstructure:"enabled" yaml:"enabled"`
-	Paths    []string `mapstructure:"paths" yaml:"paths"`
 	MaxSize  string   `mapstructure:"max_size" yaml:"max_size"`
 	CleanCmd string   `mapstructure:"clean_cmd" yaml:"clean_cmd,omitempty"`
+	Paths    []string `mapstructure:"paths" yaml:"paths"`
+	Enabled  bool     `mapstructure:"enabled" yaml:"enabled"`
 }
 
+// Validate checks config for required fields.
 func (c *Config) Validate() error {
 	if c.Version == "" {
 		return fmt.Errorf("version is required")
@@ -38,11 +41,13 @@ func (c *Config) Validate() error {
 	return nil
 }
 
+// GetProvider returns provider by name.
 func (c *Config) GetProvider(name string) (Provider, bool) {
 	p, ok := c.Providers[name]
 	return p, ok
 }
 
+// EnabledProviders returns sorted list of enabled provider names.
 func (c *Config) EnabledProviders() []string {
 	var enabled []string
 	for name, p := range c.Providers {

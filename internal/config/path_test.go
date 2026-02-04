@@ -47,20 +47,20 @@ func TestExpandPaths(t *testing.T) {
 
 	tmpDir := t.TempDir()
 	testFile := filepath.Join(tmpDir, "test.txt")
-	if err := os.WriteFile(testFile, []byte("test"), 0o644); err != nil {
+	if err := os.WriteFile(testFile, []byte("test"), 0o600); err != nil {
 		t.Fatalf("create test file: %v", err)
 	}
 
 	tests := []struct {
+		contains string
 		name     string
 		patterns []string
 		wantLen  int
-		contains string
 	}{
-		{"tilde expansion", []string{"~/foo"}, 1, filepath.Join(home, "foo")},
-		{"glob match", []string{filepath.Join(tmpDir, "*.txt")}, 1, testFile},
-		{"no glob match", []string{filepath.Join(tmpDir, "*.json")}, 0, ""},
-		{"mixed", []string{"~/foo", filepath.Join(tmpDir, "*.txt")}, 2, testFile},
+		{filepath.Join(home, "foo"), "tilde expansion", []string{"~/foo"}, 1},
+		{testFile, "glob match", []string{filepath.Join(tmpDir, "*.txt")}, 1},
+		{"", "no glob match", []string{filepath.Join(tmpDir, "*.json")}, 0},
+		{testFile, "mixed", []string{"~/foo", filepath.Join(tmpDir, "*.txt")}, 2},
 	}
 
 	for _, tt := range tests {
@@ -89,36 +89,36 @@ func TestExpandPaths(t *testing.T) {
 	}
 }
 
-func TestConfigPath(t *testing.T) {
+func TestPath(t *testing.T) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		t.Fatalf("get home dir: %v", err)
 	}
 
-	path, err := ConfigPath()
+	path, err := Path()
 	if err != nil {
-		t.Fatalf("ConfigPath() error = %v", err)
+		t.Fatalf("Path() error = %v", err)
 	}
 
 	want := filepath.Join(home, ".config/cache-buster/config.yaml")
 	if path != want {
-		t.Errorf("ConfigPath() = %v, want %v", path, want)
+		t.Errorf("Path() = %v, want %v", path, want)
 	}
 }
 
-func TestConfigDirPath(t *testing.T) {
+func TestDirPath(t *testing.T) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		t.Fatalf("get home dir: %v", err)
 	}
 
-	path, err := ConfigDirPath()
+	path, err := DirPath()
 	if err != nil {
-		t.Fatalf("ConfigDirPath() error = %v", err)
+		t.Fatalf("DirPath() error = %v", err)
 	}
 
 	want := filepath.Join(home, ".config/cache-buster")
 	if path != want {
-		t.Errorf("ConfigDirPath() = %v, want %v", path, want)
+		t.Errorf("DirPath() = %v, want %v", path, want)
 	}
 }

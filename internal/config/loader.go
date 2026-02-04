@@ -7,16 +7,19 @@ import (
 	"github.com/spf13/viper"
 )
 
+// Loader handles config file operations.
 type Loader struct {
 	v *viper.Viper
 }
 
+// NewLoader creates a new config loader.
 func NewLoader() *Loader {
 	return &Loader{v: viper.New()}
 }
 
+// Load reads and validates config from disk.
 func (l *Loader) Load() (*Config, error) {
-	configPath, err := ConfigPath()
+	configPath, err := Path()
 	if err != nil {
 		return nil, err
 	}
@@ -40,6 +43,7 @@ func (l *Loader) Load() (*Config, error) {
 	return &cfg, nil
 }
 
+// LoadOrCreate loads config or creates default. Returns (config, created, error).
 func (l *Loader) LoadOrCreate() (*Config, bool, error) {
 	exists, err := l.Exists()
 	if err != nil {
@@ -59,12 +63,13 @@ func (l *Loader) LoadOrCreate() (*Config, bool, error) {
 	return cfg, true, nil
 }
 
+// Save writes config to disk.
 func (l *Loader) Save(cfg *Config) error {
-	if err := EnsureConfigDir(); err != nil {
+	if err := EnsureDir(); err != nil {
 		return err
 	}
 
-	configPath, err := ConfigPath()
+	configPath, err := Path()
 	if err != nil {
 		return err
 	}
@@ -79,6 +84,7 @@ func (l *Loader) Save(cfg *Config) error {
 	return l.v.WriteConfigAs(configPath)
 }
 
+// InitDefault creates default config if missing. Returns true if created.
 func (l *Loader) InitDefault() (bool, error) {
 	exists, err := l.Exists()
 	if err != nil {
@@ -96,8 +102,9 @@ func (l *Loader) InitDefault() (bool, error) {
 	return true, nil
 }
 
+// Exists checks if config file exists.
 func (l *Loader) Exists() (bool, error) {
-	configPath, err := ConfigPath()
+	configPath, err := Path()
 	if err != nil {
 		return false, err
 	}
