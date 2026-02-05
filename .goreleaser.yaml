@@ -42,6 +42,23 @@ changelog:
       - Merge pull request
       - Merge branch
 
+brews:
+  - name: cache-buster
+    repository:
+      owner: Automaat
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+    commit_author:
+      name: goreleaser-bot
+      email: bot@goreleaser.com
+    homepage: "https://github.com/Automaat/cache-buster"
+    description: "macOS developer cache manager with configurable size limits"
+    license: "MIT"
+    install: |
+      bin.install "cache-buster"
+    test: |
+      system "#{bin}/cache-buster --version"
+
 release:
   github:
     owner: Automaat

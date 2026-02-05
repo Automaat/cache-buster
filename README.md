@@ -6,11 +6,21 @@ Monitors and cleans caches for Go, npm, Docker, Homebrew, and other dev tools.
 
 ## Installation
 
+### Homebrew (macOS)
+
+```bash
+brew install Automaat/tap/cache-buster
+```
+
+### Go Install
+
 ```bash
 go install github.com/Automaat/cache-buster/cmd/cache-buster@latest
 ```
 
-Or download from [releases](https://github.com/Automaat/cache-buster/releases).
+### Binary Download
+
+Download from [releases](https://github.com/Automaat/cache-buster/releases).
 
 ## Quick Start
 
