@@ -52,7 +52,7 @@ brews:
       name: goreleaser-bot
       email: bot@goreleaser.com
     homepage: "https://github.com/Automaat/cache-buster"
-    description: "macOS developer cache manager with configurable size limits"
+    description: "Developer cache manager with configurable size limits"
     license: "MIT"
     install: |
       bin.install "cache-buster"

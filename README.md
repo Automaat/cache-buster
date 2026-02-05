@@ -1,6 +1,6 @@
 # cache-buster
 
-macOS developer cache manager with configurable size limits.
+Developer cache manager with configurable size limits.
 
 Monitors and cleans caches for Go, npm, Docker, Homebrew, and other dev tools.
 
