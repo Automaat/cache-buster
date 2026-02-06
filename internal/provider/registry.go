@@ -9,7 +9,6 @@ import (
 // fileBasedProviders lists providers that clean by deleting files.
 var fileBasedProviders = map[string]bool{
 	"uv":                true,
-	"jetbrains":         true,
 	"xcode-deriveddata": true,
 	"xcode-archives":    true,
 	"cargo":             true,
@@ -20,6 +19,10 @@ var fileBasedProviders = map[string]bool{
 func NewProvider(name string, cfg config.Provider) (Provider, error) {
 	if name == "docker" {
 		return NewDockerProvider(name, cfg)
+	}
+
+	if name == "jetbrains" {
+		return NewJetBrainsProvider(name, cfg)
 	}
 
 	if fileBasedProviders[name] {
