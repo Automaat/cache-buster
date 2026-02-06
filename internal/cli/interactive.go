@@ -580,10 +580,10 @@ func (m model) viewCleaning() string {
 			}
 			if p.cleanResult != nil {
 				if p.cleanErr != nil {
-					b.WriteString(fmt.Sprintf("  %s   %s\n", p.name, errorStyle.Render("error")))
+					b.WriteString(fmt.Sprintf("  %-14s %s\n", p.name, errorStyle.Render("error")))
 				} else {
 					freed := size.FormatSize(p.cleanResult.BytesCleaned)
-					b.WriteString(fmt.Sprintf("  %s   freed %s\n", p.name, freed))
+					b.WriteString(fmt.Sprintf("  %-14s freed %10s\n", p.name, freed))
 				}
 			}
 		}
