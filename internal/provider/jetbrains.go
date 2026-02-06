@@ -7,14 +7,16 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/Automaat/cache-buster/internal/cache"
 	"github.com/Automaat/cache-buster/internal/config"
 	"github.com/Automaat/cache-buster/pkg/size"
 )
 
-var versionDirPattern = regexp.MustCompile(`^([a-zA-Z]+)(\d{4}\.\d+)$`)
+var versionDirPattern = regexp.MustCompile(`^([A-Za-z][A-Za-z0-9]*)(\d{4}\.\d+)$`)
 
 // JetBrainsProvider cleans old JetBrains version directories while keeping the latest per product.
 type JetBrainsProvider struct {
@@ -41,11 +43,47 @@ type versionDir struct {
 
 // Clean implements Provider.
 func (p *JetBrainsProvider) Clean(ctx context.Context, opts CleanOptions) (CleanResult, error) {
+	if opts.Mode == CleanModeSmart {
+		return p.smartClean(ctx, opts)
+	}
+	return p.fullClean(ctx, opts)
+}
+
+func (p *JetBrainsProvider) smartClean(ctx context.Context, opts CleanOptions) (CleanResult, error) {
 	removable, err := p.findRemovableDirs()
 	if err != nil {
 		return CleanResult{}, err
 	}
 
+	// Filter by maxAge if configured
+	if p.maxAge > 0 {
+		cutoff := time.Now().Add(-p.maxAge)
+		filtered := make([]string, 0)
+		for _, dir := range removable {
+			info, err := os.Stat(dir)
+			if err != nil {
+				continue
+			}
+			if info.ModTime().Before(cutoff) {
+				filtered = append(filtered, dir)
+			}
+		}
+		removable = filtered
+	}
+
+	return p.cleanDirs(ctx, removable, opts)
+}
+
+func (p *JetBrainsProvider) fullClean(ctx context.Context, opts CleanOptions) (CleanResult, error) {
+	removable, err := p.findRemovableDirs()
+	if err != nil {
+		return CleanResult{}, err
+	}
+
+	return p.cleanDirs(ctx, removable, opts)
+}
+
+func (p *JetBrainsProvider) cleanDirs(ctx context.Context, removable []string, opts CleanOptions) (CleanResult, error) {
 	if len(removable) == 0 {
 		return CleanResult{Output: "no old versions to clean"}, nil
 	}
@@ -65,7 +103,10 @@ func (p *JetBrainsProvider) Clean(ctx context.Context, opts CleanOptions) (Clean
 		default:
 		}
 
-		dirSize, _ := cache.CalculateSize([]string{dir})
+		dirSize, err := cache.CalculateSize([]string{dir})
+		if err != nil {
+			fmt.Fprintf(&output, "warning: size calculation failed for %s: %v\n", filepath.Base(dir), err)
+		}
 
 		if opts.DryRun {
 			fmt.Fprintf(&output, "would remove: %s (%s)\n", filepath.Base(dir), size.FormatSize(dirSize.Size))
@@ -138,7 +179,7 @@ func (p *JetBrainsProvider) findRemovableDirs() ([]string, error) {
 		}
 
 		sort.Slice(versions, func(i, j int) bool {
-			return versions[i].version < versions[j].version
+			return compareVersions(versions[i].version, versions[j].version) < 0
 		})
 
 		// Remove all but the latest version
@@ -148,4 +189,35 @@ func (p *JetBrainsProvider) findRemovableDirs() ([]string, error) {
 	}
 
 	return removable, nil
+}
+
+// compareVersions compares semantic versions like "2024.1" and "2024.10".
+// Returns -1 if v1 < v2, 0 if equal, 1 if v1 > v2.
+func compareVersions(v1, v2 string) int {
+	parts1 := strings.Split(v1, ".")
+	parts2 := strings.Split(v2, ".")
+
+	maxLen := len(parts1)
+	if len(parts2) > maxLen {
+		maxLen = len(parts2)
+	}
+
+	for i := 0; i < maxLen; i++ {
+		var n1, n2 int
+		if i < len(parts1) {
+			n1, _ = strconv.Atoi(parts1[i])
+		}
+		if i < len(parts2) {
+			n2, _ = strconv.Atoi(parts2[i])
+		}
+
+		if n1 < n2 {
+			return -1
+		}
+		if n1 > n2 {
+			return 1
+		}
+	}
+
+	return 0
 }
