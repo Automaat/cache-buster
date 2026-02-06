@@ -565,8 +565,20 @@ func TestDockerProvider_FailingCommand(t *testing.T) {
 }
 
 func TestNewProvider_JetBrains(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Create version directories
+	for _, dir := range []string{"GoLand2024.1", "GoLand2024.2", "IntelliJIdea2024.1"} {
+		if err := os.MkdirAll(filepath.Join(tmpDir, dir), 0o750); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(tmpDir, dir, "data.bin"), make([]byte, 100), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
 	cfg := config.Provider{
-		Paths:   []string{t.TempDir()},
+		Paths:   []string{tmpDir},
 		MaxSize: "3G",
 		Enabled: true,
 	}
@@ -578,6 +590,349 @@ func TestNewProvider_JetBrains(t *testing.T) {
 
 	if p.Name() != "jetbrains" {
 		t.Errorf("name = %q, want %q", p.Name(), "jetbrains")
+	}
+
+	// Clean should remove GoLand2024.1 (old) but keep GoLand2024.2 and IntelliJIdea2024.1
+	result, err := p.Clean(context.Background(), provider.CleanOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if result.BytesCleaned == 0 {
+		t.Error("expected bytes cleaned > 0")
+	}
+
+	if _, err := os.Stat(filepath.Join(tmpDir, "GoLand2024.1")); !os.IsNotExist(err) {
+		t.Error("GoLand2024.1 should be removed")
+	}
+	if _, err := os.Stat(filepath.Join(tmpDir, "GoLand2024.2")); err != nil {
+		t.Error("GoLand2024.2 should be kept")
+	}
+	if _, err := os.Stat(filepath.Join(tmpDir, "IntelliJIdea2024.1")); err != nil {
+		t.Error("IntelliJIdea2024.1 should be kept (only version)")
+	}
+}
+
+func TestJetBrainsProvider_DryRun(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	for _, dir := range []string{"GoLand2024.1", "GoLand2024.2"} {
+		if err := os.MkdirAll(filepath.Join(tmpDir, dir), 0o750); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(tmpDir, dir, "data.bin"), make([]byte, 500), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	cfg := config.Provider{
+		Paths:   []string{tmpDir},
+		MaxSize: "3G",
+		Enabled: true,
+	}
+
+	p, err := provider.NewJetBrainsProvider("jetbrains", cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := p.Clean(context.Background(), provider.CleanOptions{DryRun: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !strings.Contains(result.Output, "would remove") {
+		t.Errorf("output should contain 'would remove', got %q", result.Output)
+	}
+	if !strings.Contains(result.Output, "GoLand2024.1") {
+		t.Errorf("output should reference GoLand2024.1, got %q", result.Output)
+	}
+
+	// Both dirs should still exist
+	if _, err := os.Stat(filepath.Join(tmpDir, "GoLand2024.1")); err != nil {
+		t.Error("GoLand2024.1 should still exist after dry run")
+	}
+	if _, err := os.Stat(filepath.Join(tmpDir, "GoLand2024.2")); err != nil {
+		t.Error("GoLand2024.2 should still exist after dry run")
+	}
+}
+
+func TestJetBrainsProvider_UnrecognizedDirsUntouched(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	for _, dir := range []string{"GoLand2024.1", "GoLand2024.2", "random-dir", ".cache"} {
+		if err := os.MkdirAll(filepath.Join(tmpDir, dir), 0o750); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	cfg := config.Provider{
+		Paths:   []string{tmpDir},
+		MaxSize: "3G",
+		Enabled: true,
+	}
+
+	p, err := provider.NewJetBrainsProvider("jetbrains", cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = p.Clean(context.Background(), provider.CleanOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Unrecognized dirs must remain
+	if _, err := os.Stat(filepath.Join(tmpDir, "random-dir")); err != nil {
+		t.Error("random-dir should be untouched")
+	}
+	if _, err := os.Stat(filepath.Join(tmpDir, ".cache")); err != nil {
+		t.Error(".cache should be untouched")
+	}
+}
+
+func TestJetBrainsProvider_SingleVersionPerProduct(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	for _, dir := range []string{"GoLand2024.2", "IntelliJIdea2024.1"} {
+		if err := os.MkdirAll(filepath.Join(tmpDir, dir), 0o750); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	cfg := config.Provider{
+		Paths:   []string{tmpDir},
+		MaxSize: "3G",
+		Enabled: true,
+	}
+
+	p, err := provider.NewJetBrainsProvider("jetbrains", cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := p.Clean(context.Background(), provider.CleanOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if result.Output != "no old versions to clean" {
+		t.Errorf("output = %q, want %q", result.Output, "no old versions to clean")
+	}
+
+	// All dirs remain
+	if _, err := os.Stat(filepath.Join(tmpDir, "GoLand2024.2")); err != nil {
+		t.Error("GoLand2024.2 should be kept")
+	}
+	if _, err := os.Stat(filepath.Join(tmpDir, "IntelliJIdea2024.1")); err != nil {
+		t.Error("IntelliJIdea2024.1 should be kept")
+	}
+}
+
+func TestJetBrainsProvider_ContextCancellation(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	for _, dir := range []string{"GoLand2024.1", "GoLand2024.2", "GoLand2024.3"} {
+		if err := os.MkdirAll(filepath.Join(tmpDir, dir), 0o750); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	cfg := config.Provider{
+		Paths:   []string{tmpDir},
+		MaxSize: "3G",
+		Enabled: true,
+	}
+
+	p, err := provider.NewJetBrainsProvider("jetbrains", cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	result, err := p.Clean(ctx, provider.CleanOptions{})
+	if err == nil {
+		t.Error("expected context cancellation error")
+	}
+
+	if result.Output != "interrupted" {
+		t.Errorf("output = %q, want %q", result.Output, "interrupted")
+	}
+}
+
+func TestJetBrainsProvider_MultipleProducts(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	dirs := []string{
+		"GoLand2023.1", "GoLand2023.2", "GoLand2024.1",
+		"IntelliJIdea2023.3", "IntelliJIdea2024.1", "IntelliJIdea2024.2",
+		"PyCharm2024.1",
+	}
+	for _, dir := range dirs {
+		if err := os.MkdirAll(filepath.Join(tmpDir, dir), 0o750); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(tmpDir, dir, "data.bin"), make([]byte, 100), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	cfg := config.Provider{
+		Paths:   []string{tmpDir},
+		MaxSize: "3G",
+		Enabled: true,
+	}
+
+	p, err := provider.NewJetBrainsProvider("jetbrains", cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = p.Clean(context.Background(), provider.CleanOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Latest per product kept
+	for _, dir := range []string{"GoLand2024.1", "IntelliJIdea2024.2", "PyCharm2024.1"} {
+		if _, err := os.Stat(filepath.Join(tmpDir, dir)); err != nil {
+			t.Errorf("%s should be kept", dir)
+		}
+	}
+
+	// Old versions removed
+	for _, dir := range []string{"GoLand2023.1", "GoLand2023.2", "IntelliJIdea2023.3", "IntelliJIdea2024.1"} {
+		if _, err := os.Stat(filepath.Join(tmpDir, dir)); !os.IsNotExist(err) {
+			t.Errorf("%s should be removed", dir)
+		}
+	}
+}
+
+func TestJetBrainsProvider_DoubleDigitVersions(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	for _, dir := range []string{"GoLand2024.9", "GoLand2024.10", "GoLand2024.11"} {
+		dirPath := filepath.Join(tmpDir, dir)
+		if err := os.MkdirAll(dirPath, 0o750); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dirPath, "data.bin"), make([]byte, 100), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	cfg := config.Provider{
+		Paths:   []string{tmpDir},
+		MaxSize: "3G",
+		Enabled: true,
+	}
+
+	p, err := provider.NewJetBrainsProvider("jetbrains", cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := p.Clean(context.Background(), provider.CleanOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.BytesCleaned == 0 {
+		t.Error("expected bytes cleaned > 0")
+	}
+
+	// Should keep only latest (2024.11)
+	if _, err := os.Stat(filepath.Join(tmpDir, "GoLand2024.9")); !os.IsNotExist(err) {
+		t.Error("GoLand2024.9 should be removed")
+	}
+
+	if _, err := os.Stat(filepath.Join(tmpDir, "GoLand2024.10")); !os.IsNotExist(err) {
+		t.Error("GoLand2024.10 should be removed")
+	}
+
+	if _, err := os.Stat(filepath.Join(tmpDir, "GoLand2024.11")); err != nil {
+		t.Error("GoLand2024.11 should be kept")
+	}
+}
+
+func TestJetBrainsProvider_SmartClean(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Create old versions (older than maxAge)
+	oldTime := time.Now().Add(-30 * 24 * time.Hour)
+	for _, dir := range []string{"GoLand2024.1", "GoLand2024.2"} {
+		dirPath := filepath.Join(tmpDir, dir)
+		if err := os.MkdirAll(dirPath, 0o750); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chtimes(dirPath, oldTime, oldTime); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	cfg := config.Provider{
+		Paths:   []string{tmpDir},
+		MaxSize: "3G",
+		MaxAge:  "15d",
+		Enabled: true,
+	}
+
+	p, err := provider.NewJetBrainsProvider("jetbrains", cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = p.Clean(context.Background(), provider.CleanOptions{
+		Mode: provider.CleanModeSmart,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Smart mode should only remove old version (2024.1) based on age
+	if _, err := os.Stat(filepath.Join(tmpDir, "GoLand2024.1")); !os.IsNotExist(err) {
+		t.Error("old version should be removed")
+	}
+}
+
+func TestJetBrainsProvider_FullClean(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	for _, dir := range []string{"GoLand2024.1", "GoLand2024.2"} {
+		dirPath := filepath.Join(tmpDir, dir)
+		if err := os.MkdirAll(dirPath, 0o750); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dirPath, "data.bin"), make([]byte, 100), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	cfg := config.Provider{
+		Paths:   []string{tmpDir},
+		MaxSize: "3G",
+		Enabled: true,
+	}
+
+	p, err := provider.NewJetBrainsProvider("jetbrains", cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := p.Clean(context.Background(), provider.CleanOptions{
+		Mode: provider.CleanModeFull,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.BytesCleaned == 0 {
+		t.Error("expected bytes cleaned > 0")
+	}
+
+	// Full mode removes all old versions regardless of age
+	if _, err := os.Stat(filepath.Join(tmpDir, "GoLand2024.1")); !os.IsNotExist(err) {
+		t.Error("GoLand2024.1 should be removed")
 	}
 }
 
