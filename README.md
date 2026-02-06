@@ -35,7 +35,7 @@ cache-buster status
 
 ## Interactive Mode
 
-Running `cache-buster` with no arguments launches a full-screen TUI built with [Bubbletea](https://github.com/charmbracelet/bubbletea).
+Running `cache-buster` with no arguments launches a full-screen TUI built with [Bubble Tea](https://github.com/charmbracelet/bubbletea).
 
 Providers are scanned in parallel with live size updates. Select what to clean, confirm, and watch progress — all without leaving the terminal.
 
