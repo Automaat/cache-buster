@@ -41,7 +41,7 @@ changelog:
       - Merge pull request
       - Merge branch
 
-homebrew:
+brews:
   - name: cache-buster
     repository:
       owner: Automaat
