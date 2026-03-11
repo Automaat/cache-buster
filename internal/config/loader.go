@@ -78,16 +78,16 @@ func (l *Loader) Load() (*Config, error) {
 			continue
 		}
 		merged := defaultP
-		if userP.MaxSize != "" {
+		if l.v.IsSet("providers." + name + ".max_size") {
 			merged.MaxSize = userP.MaxSize
 		}
-		if userP.MaxAge != "" {
+		if l.v.IsSet("providers." + name + ".max_age") {
 			merged.MaxAge = userP.MaxAge
 		}
-		if userP.CleanCmd != "" {
+		if l.v.IsSet("providers." + name + ".clean_cmd") {
 			merged.CleanCmd = userP.CleanCmd
 		}
-		if len(userP.Paths) > 0 {
+		if l.v.IsSet("providers." + name + ".paths") {
 			merged.Paths = userP.Paths
 		}
 		if l.v.IsSet("providers." + name + ".enabled") {
