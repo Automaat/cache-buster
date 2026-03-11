@@ -66,10 +66,34 @@ func (l *Loader) Load() (*Config, error) {
 		return nil, fmt.Errorf("unmarshal config: %w", err)
 	}
 
-	// Merge user overrides on top of defaults.
-	// User providers fully replace defaults (not field-by-field merge).
-	for name, p := range userCfg.Providers {
-		cfg.Providers[name] = p
+	// Merge user overrides on top of defaults, field by field.
+	for name, userP := range userCfg.Providers {
+		defaultP, hasDefault := cfg.Providers[name]
+		if !hasDefault {
+			// New provider not in defaults: use as-is, default enabled to true.
+			if !l.v.IsSet("providers." + name + ".enabled") {
+				userP.Enabled = true
+			}
+			cfg.Providers[name] = userP
+			continue
+		}
+		merged := defaultP
+		if userP.MaxSize != "" {
+			merged.MaxSize = userP.MaxSize
+		}
+		if userP.MaxAge != "" {
+			merged.MaxAge = userP.MaxAge
+		}
+		if userP.CleanCmd != "" {
+			merged.CleanCmd = userP.CleanCmd
+		}
+		if len(userP.Paths) > 0 {
+			merged.Paths = userP.Paths
+		}
+		if l.v.IsSet("providers." + name + ".enabled") {
+			merged.Enabled = userP.Enabled
+		}
+		cfg.Providers[name] = merged
 	}
 
 	return cfg, nil
