@@ -43,7 +43,7 @@ func TestScanProvider(t *testing.T) {
 
 	cfg := &config.Config{
 		Providers: map[string]config.Provider{
-			"test": {
+			"cargo": {
 				Paths:   []string{tmpDir},
 				MaxSize: "1GB",
 				Enabled: true,
@@ -51,9 +51,9 @@ func TestScanProvider(t *testing.T) {
 		},
 	}
 
-	status := scanProvider(cfg, "test")
+	status := scanProvider(cfg, "cargo")
 
-	assert.Equal(t, "test", status.Name)
+	assert.Equal(t, "cargo", status.Name)
 	assert.Equal(t, int64(5), status.Current)
 	assert.Equal(t, "5 B", status.CurrentFmt)
 	assert.Equal(t, int64(1073741824), status.Max)
@@ -69,7 +69,7 @@ func TestScanProvider_OverLimit(t *testing.T) {
 
 	cfg := &config.Config{
 		Providers: map[string]config.Provider{
-			"test": {
+			"cargo": {
 				Paths:   []string{tmpDir},
 				MaxSize: "5B",
 				Enabled: true,
@@ -77,7 +77,7 @@ func TestScanProvider_OverLimit(t *testing.T) {
 		},
 	}
 
-	status := scanProvider(cfg, "test")
+	status := scanProvider(cfg, "cargo")
 
 	assert.True(t, status.OverLimit)
 	assert.Greater(t, status.Current, status.Max)
@@ -86,7 +86,7 @@ func TestScanProvider_OverLimit(t *testing.T) {
 func TestScanProvider_InvalidMaxSize(t *testing.T) {
 	cfg := &config.Config{
 		Providers: map[string]config.Provider{
-			"test": {
+			"cargo": {
 				Paths:   []string{"/tmp"},
 				MaxSize: "invalid",
 				Enabled: true,
@@ -94,9 +94,9 @@ func TestScanProvider_InvalidMaxSize(t *testing.T) {
 		},
 	}
 
-	status := scanProvider(cfg, "test")
+	status := scanProvider(cfg, "cargo")
 
-	assert.Contains(t, status.Error, "parse max_size")
+	assert.Contains(t, status.Error, "load provider")
 }
 
 func TestScanProvider_EmptyDir(t *testing.T) {
@@ -104,7 +104,7 @@ func TestScanProvider_EmptyDir(t *testing.T) {
 
 	cfg := &config.Config{
 		Providers: map[string]config.Provider{
-			"test": {
+			"cargo": {
 				Paths:   []string{tmpDir},
 				MaxSize: "1GB",
 				Enabled: true,
@@ -112,7 +112,7 @@ func TestScanProvider_EmptyDir(t *testing.T) {
 		},
 	}
 
-	status := scanProvider(cfg, "test")
+	status := scanProvider(cfg, "cargo")
 
 	assert.Equal(t, int64(0), status.Current)
 	assert.False(t, status.OverLimit)
@@ -127,17 +127,17 @@ func TestScanProviders_Parallel(t *testing.T) {
 
 	cfg := &config.Config{
 		Providers: map[string]config.Provider{
-			"prov1": {Paths: []string{tmpDir1}, MaxSize: "1GB", Enabled: true},
-			"prov2": {Paths: []string{tmpDir2}, MaxSize: "1GB", Enabled: true},
+			"cargo":  {Paths: []string{tmpDir1}, MaxSize: "1GB", Enabled: true},
+			"gradle": {Paths: []string{tmpDir2}, MaxSize: "1GB", Enabled: true},
 		},
 	}
 
-	statuses := scanProviders(cfg, []string{"prov1", "prov2"})
+	statuses := scanProviders(cfg, []string{"cargo", "gradle"})
 
 	assert.Len(t, statuses, 2)
-	assert.Equal(t, "prov1", statuses[0].Name)
+	assert.Equal(t, "cargo", statuses[0].Name)
 	assert.Equal(t, int64(3), statuses[0].Current)
-	assert.Equal(t, "prov2", statuses[1].Name)
+	assert.Equal(t, "gradle", statuses[1].Name)
 	assert.Equal(t, int64(5), statuses[1].Current)
 }
 
@@ -274,6 +274,7 @@ providers:
     paths:
       - ` + cacheDir + `
     max_size: 1GB
+    clean_cmd: echo
 `
 	require.NoError(t, os.WriteFile(cfgPath, []byte(cfgContent), 0o600))
 
@@ -306,6 +307,7 @@ providers:
     paths:
       - ` + cacheDir + `
     max_size: 1GB
+    clean_cmd: echo
 `
 	require.NoError(t, os.WriteFile(cfgPath, []byte(cfgContent), 0o600))
 
@@ -336,7 +338,7 @@ func TestStatusCmd_HasJSONFlag(t *testing.T) {
 func TestScanProvider_InvalidGlobPattern(t *testing.T) {
 	cfg := &config.Config{
 		Providers: map[string]config.Provider{
-			"test": {
+			"cargo": {
 				Paths:   []string{"[invalid"},
 				MaxSize: "1GB",
 				Enabled: true,
@@ -344,7 +346,7 @@ func TestScanProvider_InvalidGlobPattern(t *testing.T) {
 		},
 	}
 
-	status := scanProvider(cfg, "test")
+	status := scanProvider(cfg, "cargo")
 
-	assert.Contains(t, status.Error, "expand paths")
+	assert.Contains(t, status.Error, "load provider")
 }

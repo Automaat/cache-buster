@@ -3,12 +3,14 @@ package provider
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
 	"strings"
 
 	"github.com/Automaat/cache-buster/internal/config"
+	"github.com/Automaat/cache-buster/pkg/size"
 	"github.com/kballard/go-shellquote"
 )
 
@@ -29,6 +31,50 @@ func NewDockerProvider(name string, cfg config.Provider) (*DockerProvider, error
 		BaseProvider: base,
 		cleanCmd:     cfg.CleanCmd,
 	}, nil
+}
+
+// dockerDFRow is one line of docker system df --format '{{json .}}' output.
+type dockerDFRow struct {
+	Size string `json:"Size"`
+}
+
+// CurrentSize returns actual Docker data usage from docker system df.
+// Falls back to path-based size when the daemon is not available.
+func (p *DockerProvider) CurrentSize() (int64, error) {
+	if !p.Available() {
+		return p.BaseProvider.CurrentSize()
+	}
+	return p.dockerDataSize()
+}
+
+// DiskImageSize returns the size of the Docker VM disk image on the filesystem.
+func (p *DockerProvider) DiskImageSize() (int64, error) {
+	return p.BaseProvider.CurrentSize()
+}
+
+func (p *DockerProvider) dockerDataSize() (int64, error) {
+	cmd := exec.Command("docker", "system", "df", "--format", "{{json .}}")
+	out, err := cmd.Output()
+	if err != nil {
+		return 0, fmt.Errorf("docker system df: %w", err)
+	}
+
+	var total int64
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		if line == "" {
+			continue
+		}
+		var row dockerDFRow
+		if jsonErr := json.Unmarshal([]byte(line), &row); jsonErr != nil {
+			continue
+		}
+		b, parseErr := size.ParseSize(row.Size)
+		if parseErr != nil {
+			continue
+		}
+		total += b
+	}
+	return total, nil
 }
 
 // Available implements Provider.
