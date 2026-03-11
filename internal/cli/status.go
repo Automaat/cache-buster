@@ -95,8 +95,9 @@ func scanProvider(cfg *config.Config, name string) ProviderStatus {
 		return status
 	}
 
-	status.Max = p.MaxSize()
-	status.MaxFmt = size.FormatSize(p.MaxSize())
+	maxSize := p.MaxSize()
+	status.Max = maxSize
+	status.MaxFmt = size.FormatSize(maxSize)
 
 	current, err := p.CurrentSize()
 	if err != nil {
@@ -106,7 +107,7 @@ func scanProvider(cfg *config.Config, name string) ProviderStatus {
 
 	status.Current = current
 	status.CurrentFmt = size.FormatSize(current)
-	status.OverLimit = current > p.MaxSize()
+	status.OverLimit = current > maxSize
 
 	if ds, ok := p.(provider.DiskSizer); ok {
 		if diskSize, diskErr := ds.DiskImageSize(); diskErr == nil && diskSize > 0 && diskSize != current {
