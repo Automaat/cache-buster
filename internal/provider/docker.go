@@ -58,8 +58,12 @@ func (p *DockerProvider) dockerDataSize() (int64, error) {
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, "docker", "system", "df", "--format", "{{json .}}")
-	out, err := cmd.Output()
+	out, err := cmd.CombinedOutput()
 	if err != nil {
+		msg := strings.TrimSpace(string(out))
+		if msg != "" {
+			return 0, fmt.Errorf("docker system df: %w: %s", err, msg)
+		}
 		return 0, fmt.Errorf("docker system df: %w", err)
 	}
 
