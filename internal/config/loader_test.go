@@ -169,8 +169,16 @@ providers:
 			t.Errorf("go-build MaxSize = %v, want 20G", goBuild.MaxSize)
 		}
 		defaults := DefaultProviders()
-		if len(goBuild.Paths) == 0 || goBuild.Paths[0] != defaults["go-build"].Paths[0] {
-			t.Errorf("go-build Paths = %v, want default paths", goBuild.Paths)
+		defaultGoBuild := defaults["go-build"]
+		if len(goBuild.Paths) != len(defaultGoBuild.Paths) {
+			t.Errorf("go-build Paths length = %d, want %d (default paths)", len(goBuild.Paths), len(defaultGoBuild.Paths))
+		} else {
+			for i, p := range defaultGoBuild.Paths {
+				if goBuild.Paths[i] != p {
+					t.Errorf("go-build Paths[%d] = %q, want %q (default paths %v)", i, goBuild.Paths[i], p, defaultGoBuild.Paths)
+					break
+				}
+			}
 		}
 	})
 

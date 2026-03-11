@@ -70,10 +70,7 @@ func (l *Loader) Load() (*Config, error) {
 	for name, userP := range userCfg.Providers {
 		defaultP, hasDefault := cfg.Providers[name]
 		if !hasDefault {
-			// New provider not in defaults: use as-is, default enabled to true.
-			if !l.v.IsSet("providers." + name + ".enabled") {
-				userP.Enabled = true
-			}
+			// New provider not in defaults: use as-is; do not auto-enable when `enabled` is omitted.
 			cfg.Providers[name] = userP
 			continue
 		}
