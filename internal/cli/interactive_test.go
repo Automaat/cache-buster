@@ -4,14 +4,18 @@ import (
 	"fmt"
 	"testing"
 
+	"charm.land/bubbles/v2/progress"
+	"charm.land/bubbles/v2/spinner"
+	tea "charm.land/bubbletea/v2"
 	"github.com/Automaat/cache-buster/internal/config"
 	"github.com/Automaat/cache-buster/internal/provider"
-	"github.com/charmbracelet/bubbles/progress"
-	"github.com/charmbracelet/bubbles/spinner"
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func keyPress(r rune) tea.KeyPressMsg {
+	return tea.KeyPressMsg{Code: r, Text: string(r)}
+}
 
 func TestNewModel(t *testing.T) {
 	cfg := &config.Config{
@@ -47,27 +51,27 @@ func TestModelSelectionKeyBindings(t *testing.T) {
 
 		assert.Equal(t, 0, m.cursor)
 
-		m2, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
+		m2, _ := m.Update(keyPress('j'))
 		m = m2.(model)
 		assert.Equal(t, 1, m.cursor)
 
-		m2, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+		m2, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyDown})
 		m = m2.(model)
 		assert.Equal(t, 2, m.cursor)
 
-		m2, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+		m2, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyDown})
 		m = m2.(model)
 		assert.Equal(t, 2, m.cursor)
 
-		m2, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'k'}})
+		m2, _ = m.Update(keyPress('k'))
 		m = m2.(model)
 		assert.Equal(t, 1, m.cursor)
 
-		m2, _ = m.Update(tea.KeyMsg{Type: tea.KeyUp})
+		m2, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyUp})
 		m = m2.(model)
 		assert.Equal(t, 0, m.cursor)
 
-		m2, _ = m.Update(tea.KeyMsg{Type: tea.KeyUp})
+		m2, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyUp})
 		m = m2.(model)
 		assert.Equal(t, 0, m.cursor)
 	})
@@ -77,11 +81,11 @@ func TestModelSelectionKeyBindings(t *testing.T) {
 		m.providers[0].available = true
 		m.providers[1].available = true
 
-		m2, _ := m.Update(tea.KeyMsg{Type: tea.KeySpace})
+		m2, _ := m.Update(tea.KeyPressMsg{Code: tea.KeySpace})
 		m = m2.(model)
 		assert.Contains(t, m.selected, 0)
 
-		m2, _ = m.Update(tea.KeyMsg{Type: tea.KeySpace})
+		m2, _ = m.Update(tea.KeyPressMsg{Code: tea.KeySpace})
 		m = m2.(model)
 		assert.NotContains(t, m.selected, 0)
 	})
@@ -92,7 +96,7 @@ func TestModelSelectionKeyBindings(t *testing.T) {
 		m.providers[1].available = false
 		m.providers[2].available = true
 
-		m2, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'a'}})
+		m2, _ := m.Update(keyPress('a'))
 		m = m2.(model)
 
 		assert.Contains(t, m.selected, 0)
@@ -107,7 +111,7 @@ func TestModelSelectionKeyBindings(t *testing.T) {
 		m.selected[0] = struct{}{}
 		m.selected[1] = struct{}{}
 
-		m2, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
+		m2, _ := m.Update(keyPress('n'))
 		m = m2.(model)
 
 		assert.Empty(t, m.selected)
@@ -122,7 +126,7 @@ func TestModelSelectionKeyBindings(t *testing.T) {
 		m.providers[2].available = true
 		m.providers[2].overLimit = true
 
-		m2, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'o'}})
+		m2, _ := m.Update(keyPress('o'))
 		m = m2.(model)
 
 		assert.Contains(t, m.selected, 0)
@@ -134,7 +138,7 @@ func TestModelSelectionKeyBindings(t *testing.T) {
 		m := newModel(cfg, []string{"p1"}, false, false, nil)
 		m.providers[0].available = false
 
-		m2, _ := m.Update(tea.KeyMsg{Type: tea.KeySpace})
+		m2, _ := m.Update(tea.KeyPressMsg{Code: tea.KeySpace})
 		m = m2.(model)
 
 		assert.Empty(t, m.selected)
@@ -153,7 +157,7 @@ func TestModelStateTransitions(t *testing.T) {
 		m.providers[0].available = true
 		m.selected[0] = struct{}{}
 
-		m2, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+		m2, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 		m = m2.(model)
 
 		assert.Equal(t, stateConfirmation, m.state)
@@ -163,7 +167,7 @@ func TestModelStateTransitions(t *testing.T) {
 		m := newModel(cfg, []string{"p1"}, false, false, nil)
 		m.providers[0].available = true
 
-		m2, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+		m2, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 		m = m2.(model)
 
 		assert.Equal(t, stateSelection, m.state)
@@ -173,7 +177,7 @@ func TestModelStateTransitions(t *testing.T) {
 		m := newModel(cfg, []string{"p1"}, false, false, nil)
 		m.state = stateConfirmation
 
-		m2, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
+		m2, _ := m.Update(keyPress('n'))
 		m = m2.(model)
 
 		assert.Equal(t, stateSelection, m.state)
@@ -183,7 +187,7 @@ func TestModelStateTransitions(t *testing.T) {
 		m := newModel(cfg, []string{"p1"}, false, false, nil)
 		m.state = stateConfirmation
 
-		m2, _ := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+		m2, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
 		m = m2.(model)
 
 		assert.Equal(t, stateSelection, m.state)
@@ -200,7 +204,7 @@ func TestModelQuit(t *testing.T) {
 	t.Run("quit from selection", func(t *testing.T) {
 		m := newModel(cfg, []string{"p1"}, false, false, nil)
 
-		m2, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}})
+		m2, cmd := m.Update(keyPress('q'))
 		m = m2.(model)
 
 		assert.True(t, m.quitting)
@@ -210,7 +214,7 @@ func TestModelQuit(t *testing.T) {
 	t.Run("esc from selection", func(t *testing.T) {
 		m := newModel(cfg, []string{"p1"}, false, false, nil)
 
-		m2, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+		m2, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
 		m = m2.(model)
 
 		assert.True(t, m.quitting)
@@ -221,7 +225,7 @@ func TestModelQuit(t *testing.T) {
 		m := newModel(cfg, []string{"p1"}, false, false, nil)
 		m.state = stateDone
 
-		m2, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+		m2, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 		m = m2.(model)
 
 		assert.True(t, m.quitting)
@@ -240,8 +244,8 @@ func TestModelView(t *testing.T) {
 		m := newModel(cfg, []string{"p1"}, false, false, nil)
 		view := m.View()
 
-		assert.Contains(t, view, "Cache Buster")
-		assert.Contains(t, view, "Select providers to clean")
+		assert.Contains(t, view.Content, "Cache Buster")
+		assert.Contains(t, view.Content, "Select providers to clean")
 	})
 
 	t.Run("confirmation view shows provider count", func(t *testing.T) {
@@ -250,8 +254,8 @@ func TestModelView(t *testing.T) {
 		m.selected[0] = struct{}{}
 		view := m.View()
 
-		assert.Contains(t, view, "Clean 1 provider")
-		assert.Contains(t, view, "y=confirm")
+		assert.Contains(t, view.Content, "Clean 1 provider")
+		assert.Contains(t, view.Content, "y=confirm")
 	})
 
 	t.Run("done view shows results", func(t *testing.T) {
@@ -261,8 +265,8 @@ func TestModelView(t *testing.T) {
 		m.totalFreed = 1024 * 1024 * 100
 		view := m.View()
 
-		assert.Contains(t, view, "Cleaned 1 provider")
-		assert.Contains(t, view, "Press enter to exit")
+		assert.Contains(t, view.Content, "Cleaned 1 provider")
+		assert.Contains(t, view.Content, "Press enter to exit")
 	})
 
 	t.Run("quitting returns empty", func(t *testing.T) {
@@ -270,7 +274,7 @@ func TestModelView(t *testing.T) {
 		m.quitting = true
 		view := m.View()
 
-		assert.Empty(t, view)
+		assert.Empty(t, view.Content)
 	})
 }
 
@@ -320,8 +324,8 @@ func TestModelDryRunAndSmart(t *testing.T) {
 		m.selected[0] = struct{}{}
 		view := m.View()
 
-		assert.Contains(t, view, "smart")
-		assert.Contains(t, view, "dry-run")
+		assert.Contains(t, view.Content, "smart")
+		assert.Contains(t, view.Content, "dry-run")
 	})
 }
 
@@ -352,7 +356,7 @@ func TestModelUpdateWindowSize(t *testing.T) {
 
 		assert.Equal(t, 120, m.width)
 		assert.Equal(t, 40, m.height)
-		assert.Equal(t, 110, m.progress.Width)
+		assert.Equal(t, 110, m.progress.Width())
 		assert.Nil(t, cmd)
 	})
 
@@ -363,7 +367,7 @@ func TestModelUpdateWindowSize(t *testing.T) {
 
 		assert.Equal(t, 5, m.width)
 		assert.Equal(t, 10, m.height)
-		assert.Equal(t, 1, m.progress.Width) // clamped to 1
+		assert.Equal(t, 1, m.progress.Width()) // clamped to 1
 		assert.Nil(t, cmd)
 	})
 
@@ -372,7 +376,7 @@ func TestModelUpdateWindowSize(t *testing.T) {
 		m2, _ := m.Update(tea.WindowSizeMsg{Width: 0, Height: 10})
 		m = m2.(model)
 
-		assert.Equal(t, 1, m.progress.Width) // clamped to 1
+		assert.Equal(t, 1, m.progress.Width()) // clamped to 1
 	})
 }
 
@@ -522,7 +526,7 @@ func TestModelHandleKeyInCleaningState(t *testing.T) {
 	m := newModel(cfg, []string{"p1"}, false, false, nil)
 	m.state = stateCleaning
 
-	m2, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}})
+	m2, cmd := m.Update(keyPress('q'))
 	m = m2.(model)
 
 	assert.Equal(t, stateCleaning, m.state)
@@ -540,7 +544,7 @@ func TestModelConfirmationModeToggle(t *testing.T) {
 		m := newModel(cfg, []string{"p1"}, false, true, nil)
 		m.state = stateConfirmation
 
-		m2, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'f'}})
+		m2, _ := m.Update(keyPress('f'))
 		m = m2.(model)
 
 		assert.False(t, m.smartMode)
@@ -550,7 +554,7 @@ func TestModelConfirmationModeToggle(t *testing.T) {
 		m := newModel(cfg, []string{"p1"}, false, false, nil)
 		m.state = stateConfirmation
 
-		m2, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}})
+		m2, _ := m.Update(keyPress('s'))
 		m = m2.(model)
 
 		assert.True(t, m.smartMode)
@@ -560,7 +564,7 @@ func TestModelConfirmationModeToggle(t *testing.T) {
 		m := newModel(cfg, []string{"p1"}, false, true, nil)
 		m.state = stateConfirmation
 
-		m2, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'F'}})
+		m2, _ := m.Update(keyPress('F'))
 		m = m2.(model)
 
 		assert.False(t, m.smartMode)
@@ -570,7 +574,7 @@ func TestModelConfirmationModeToggle(t *testing.T) {
 		m := newModel(cfg, []string{"p1"}, false, false, nil)
 		m.state = stateConfirmation
 
-		m2, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'S'}})
+		m2, _ := m.Update(keyPress('S'))
 		m = m2.(model)
 
 		assert.True(t, m.smartMode)
@@ -589,7 +593,7 @@ func TestModelConfirmationStartsCleaning(t *testing.T) {
 	m.selected[0] = struct{}{}
 	m.providers[0].available = true
 
-	m2, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
+	m2, cmd := m.Update(keyPress('y'))
 	m = m2.(model)
 
 	assert.Equal(t, stateCleaning, m.state)
@@ -651,7 +655,7 @@ func TestViewSelection(t *testing.T) {
 	t.Run("shows unavailable provider with error", func(t *testing.T) {
 		m := newModel(cfg, []string{"p1"}, false, false, nil)
 		m.providers[0].available = false
-		m.providers[0].errMsg = "unavailable" // as set by scanProviderCmd
+		m.providers[0].errMsg = "unavailable"
 		view := m.viewSelection()
 
 		assert.Contains(t, view, "unavailable")
@@ -943,7 +947,7 @@ func TestCtrlCHandling(t *testing.T) {
 		m := newModel(cfg, []string{"p1"}, false, false, nil)
 		m.state = stateSelection
 
-		m2, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+		m2, cmd := m.Update(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
 		m = m2.(model)
 
 		assert.True(t, m.quitting)
@@ -954,7 +958,7 @@ func TestCtrlCHandling(t *testing.T) {
 		m := newModel(cfg, []string{"p1"}, false, false, nil)
 		m.state = stateConfirmation
 
-		m2, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+		m2, _ := m.Update(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
 		m = m2.(model)
 
 		assert.Equal(t, stateSelection, m.state)
@@ -964,7 +968,7 @@ func TestCtrlCHandling(t *testing.T) {
 		m := newModel(cfg, []string{"p1"}, false, false, nil)
 		m.state = stateDone
 
-		m2, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+		m2, cmd := m.Update(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
 		m = m2.(model)
 
 		assert.True(t, m.quitting)

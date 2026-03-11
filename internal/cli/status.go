@@ -6,11 +6,11 @@ import (
 	"os"
 	"sync"
 
+	"charm.land/lipgloss/v2"
+	"charm.land/lipgloss/v2/table"
 	"github.com/Automaat/cache-buster/internal/cache"
 	"github.com/Automaat/cache-buster/internal/config"
 	"github.com/Automaat/cache-buster/pkg/size"
-	"github.com/charmbracelet/lipgloss"
-	"github.com/charmbracelet/lipgloss/table"
 	"github.com/charmbracelet/x/term"
 	"github.com/spf13/cobra"
 )

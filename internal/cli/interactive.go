@@ -8,13 +8,13 @@ import (
 	"strings"
 	"syscall"
 
+	"charm.land/bubbles/v2/progress"
+	"charm.land/bubbles/v2/spinner"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/Automaat/cache-buster/internal/config"
 	"github.com/Automaat/cache-buster/internal/provider"
 	"github.com/Automaat/cache-buster/pkg/size"
-	"github.com/charmbracelet/bubbles/progress"
-	"github.com/charmbracelet/bubbles/spinner"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 	"github.com/mattn/go-runewidth"
 	"github.com/spf13/cobra"
 )
@@ -43,12 +43,12 @@ type providerItem struct {
 }
 
 type model struct {
-	cfg        *config.Config
+	progress   progress.Model
 	ctx        context.Context
+	cfg        *config.Config
 	selected   map[int]struct{}
 	providers  []providerItem
 	spinner    spinner.Model
-	progress   progress.Model
 	totalFreed int64
 	cursor     int
 	cleanIdx   int
@@ -107,7 +107,7 @@ func RunInteractiveWithLoader(loader *config.Loader, dryRun, smart bool) error {
 	defer stop()
 
 	m := newModel(cfg, providers, dryRun, smart, ctx)
-	p := tea.NewProgram(m, tea.WithAltScreen())
+	p := tea.NewProgram(m)
 
 	go func() {
 		<-ctx.Done()
@@ -127,11 +127,12 @@ func newModel(cfg *config.Config, providerNames []string, dryRun, smart bool, ct
 		items[i] = providerItem{name: name}
 	}
 
-	s := spinner.New()
-	s.Spinner = spinner.Dot
-	s.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("205"))
+	s := spinner.New(
+		spinner.WithSpinner(spinner.Dot),
+		spinner.WithStyle(lipgloss.NewStyle().Foreground(lipgloss.Color("205"))),
+	)
 
-	prog := progress.New(progress.WithDefaultGradient())
+	prog := progress.New(progress.WithDefaultBlend())
 
 	if ctx == nil {
 		ctx = context.Background()
@@ -198,7 +199,7 @@ func (m model) scanProviderCmd(idx int) tea.Cmd {
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		return m.handleKey(msg)
 
 	case tea.WindowSizeMsg:
@@ -208,7 +209,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if progressWidth < 1 {
 			progressWidth = 1
 		}
-		m.progress.Width = progressWidth
+		m.progress.SetWidth(progressWidth)
 		return m, nil
 
 	case scanResultMsg:
@@ -229,15 +230,15 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, cmd
 
 	case progress.FrameMsg:
-		progressModel, cmd := m.progress.Update(msg)
-		m.progress = progressModel.(progress.Model)
+		var cmd tea.Cmd
+		m.progress, cmd = m.progress.Update(msg)
 		return m, cmd
 	}
 
 	return m, nil
 }
 
-func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch m.state {
 	case stateSelection:
 		return m.handleSelectionKey(msg)
@@ -249,7 +250,7 @@ func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m model) handleSelectionKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m model) handleSelectionKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "q", "esc", "ctrl+c":
 		m.quitting = true
@@ -265,7 +266,7 @@ func (m model) handleSelectionKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.cursor--
 		}
 
-	case " ":
+	case "space":
 		if m.providers[m.cursor].available {
 			if _, ok := m.selected[m.cursor]; ok {
 				delete(m.selected, m.cursor)
@@ -301,7 +302,7 @@ func (m model) handleSelectionKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m model) handleConfirmationKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m model) handleConfirmationKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "y", "Y":
 		m.state = stateCleaning
@@ -321,7 +322,7 @@ func (m model) handleConfirmationKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m model) handleDoneKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m model) handleDoneKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "enter", "q", "esc", "ctrl+c":
 		m.quitting = true
@@ -366,9 +367,11 @@ func (m model) cleanProviderCmd(idx int) tea.Cmd {
 	}
 }
 
-func (m model) View() string {
+func (m model) View() tea.View {
 	if m.quitting {
-		return ""
+		v := tea.NewView("")
+		v.AltScreen = true
+		return v
 	}
 
 	var b strings.Builder
@@ -434,7 +437,9 @@ func (m model) View() string {
 		content = strings.Join(bgLines, "\n")
 	}
 
-	return content
+	v := tea.NewView(content)
+	v.AltScreen = true
+	return v
 }
 
 func (m model) viewSelection() string {
@@ -511,7 +516,7 @@ func (m model) viewSelection() string {
 	}
 
 	b.WriteString("\n")
-	b.WriteString(fmt.Sprintf("Selected: %d provider(s)", len(m.selected)))
+	fmt.Fprintf(&b, "Selected: %d provider(s)", len(m.selected))
 	b.WriteString("\n\n")
 
 	hint := dimStyle.Render("space=toggle  a=all  n=none  o=over-limit  enter=confirm  q=quit")
@@ -532,10 +537,10 @@ func (m model) viewConfirmationPopup() string {
 		mode += " (dry-run)"
 	}
 
-	b.WriteString(fmt.Sprintf("Clean %d provider(s) [%s]?\n\n", len(names), mode))
+	fmt.Fprintf(&b, "Clean %d provider(s) [%s]?\n\n", len(names), mode)
 
 	for _, name := range names {
-		b.WriteString(fmt.Sprintf("  • %s\n", name))
+		fmt.Fprintf(&b, "  • %s\n", name)
 	}
 
 	b.WriteString("\n")
@@ -555,7 +560,7 @@ func (m model) viewCleaning() string {
 
 	if m.cleanIdx >= 0 && m.cleanIdx < len(m.providers) {
 		p := m.providers[m.cleanIdx]
-		b.WriteString(fmt.Sprintf("Cleaning %s... %s\n\n", p.name, m.spinner.View()))
+		fmt.Fprintf(&b, "Cleaning %s... %s\n\n", p.name, m.spinner.View())
 	}
 
 	selectedCount := len(m.selected)
@@ -580,10 +585,10 @@ func (m model) viewCleaning() string {
 			}
 			if p.cleanResult != nil {
 				if p.cleanErr != nil {
-					b.WriteString(fmt.Sprintf("  %-14s %s\n", p.name, errorStyle.Render("error")))
+					fmt.Fprintf(&b, "  %-14s %s\n", p.name, errorStyle.Render("error"))
 				} else {
 					freed := size.FormatSize(p.cleanResult.BytesCleaned)
-					b.WriteString(fmt.Sprintf("  %-14s freed %10s\n", p.name, freed))
+					fmt.Fprintf(&b, "  %-14s freed %10s\n", p.name, freed)
 				}
 			}
 		}
@@ -610,10 +615,10 @@ func (m model) viewDone() string {
 		if p.cleanResult != nil {
 			if p.cleanErr != nil {
 				errors = append(errors, fmt.Sprintf("%s: %v", p.name, p.cleanErr))
-				b.WriteString(fmt.Sprintf("  %s   %s\n", p.name, errorStyle.Render("✗")))
+				fmt.Fprintf(&b, "  %s   %s\n", p.name, errorStyle.Render("✗"))
 			} else {
 				freed := size.FormatSize(p.cleanResult.BytesCleaned)
-				b.WriteString(fmt.Sprintf("  %-14s %10s  %s\n", p.name, freed, okStyle.Render("✓")))
+				fmt.Fprintf(&b, "  %-14s %10s  %s\n", p.name, freed, okStyle.Render("✓"))
 			}
 		}
 	}
@@ -623,7 +628,7 @@ func (m model) viewDone() string {
 		b.WriteString(errorStyle.Render("Errors:"))
 		b.WriteString("\n")
 		for _, e := range errors {
-			b.WriteString(fmt.Sprintf("  %s\n", e))
+			fmt.Fprintf(&b, "  %s\n", e)
 		}
 	}
 
