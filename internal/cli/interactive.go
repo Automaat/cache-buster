@@ -511,7 +511,7 @@ func (m model) viewSelection() string {
 	}
 
 	b.WriteString("\n")
-	b.WriteString(fmt.Sprintf("Selected: %d provider(s)", len(m.selected)))
+	fmt.Fprintf(&b, "Selected: %d provider(s)", len(m.selected))
 	b.WriteString("\n\n")
 
 	hint := dimStyle.Render("space=toggle  a=all  n=none  o=over-limit  enter=confirm  q=quit")
@@ -532,10 +532,10 @@ func (m model) viewConfirmationPopup() string {
 		mode += " (dry-run)"
 	}
 
-	b.WriteString(fmt.Sprintf("Clean %d provider(s) [%s]?\n\n", len(names), mode))
+	fmt.Fprintf(&b, "Clean %d provider(s) [%s]?\n\n", len(names), mode)
 
 	for _, name := range names {
-		b.WriteString(fmt.Sprintf("  • %s\n", name))
+		fmt.Fprintf(&b, "  • %s\n", name)
 	}
 
 	b.WriteString("\n")
@@ -555,7 +555,7 @@ func (m model) viewCleaning() string {
 
 	if m.cleanIdx >= 0 && m.cleanIdx < len(m.providers) {
 		p := m.providers[m.cleanIdx]
-		b.WriteString(fmt.Sprintf("Cleaning %s... %s\n\n", p.name, m.spinner.View()))
+		fmt.Fprintf(&b, "Cleaning %s... %s\n\n", p.name, m.spinner.View())
 	}
 
 	selectedCount := len(m.selected)
@@ -580,10 +580,10 @@ func (m model) viewCleaning() string {
 			}
 			if p.cleanResult != nil {
 				if p.cleanErr != nil {
-					b.WriteString(fmt.Sprintf("  %-14s %s\n", p.name, errorStyle.Render("error")))
+					fmt.Fprintf(&b, "  %-14s %s\n", p.name, errorStyle.Render("error"))
 				} else {
 					freed := size.FormatSize(p.cleanResult.BytesCleaned)
-					b.WriteString(fmt.Sprintf("  %-14s freed %10s\n", p.name, freed))
+					fmt.Fprintf(&b, "  %-14s freed %10s\n", p.name, freed)
 				}
 			}
 		}
@@ -610,10 +610,10 @@ func (m model) viewDone() string {
 		if p.cleanResult != nil {
 			if p.cleanErr != nil {
 				errors = append(errors, fmt.Sprintf("%s: %v", p.name, p.cleanErr))
-				b.WriteString(fmt.Sprintf("  %s   %s\n", p.name, errorStyle.Render("✗")))
+				fmt.Fprintf(&b, "  %s   %s\n", p.name, errorStyle.Render("✗"))
 			} else {
 				freed := size.FormatSize(p.cleanResult.BytesCleaned)
-				b.WriteString(fmt.Sprintf("  %-14s %10s  %s\n", p.name, freed, okStyle.Render("✓")))
+				fmt.Fprintf(&b, "  %-14s %10s  %s\n", p.name, freed, okStyle.Render("✓"))
 			}
 		}
 	}
@@ -623,7 +623,7 @@ func (m model) viewDone() string {
 		b.WriteString(errorStyle.Render("Errors:"))
 		b.WriteString("\n")
 		for _, e := range errors {
-			b.WriteString(fmt.Sprintf("  %s\n", e))
+			fmt.Fprintf(&b, "  %s\n", e)
 		}
 	}
 
