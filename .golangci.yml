@@ -2,7 +2,7 @@ version: "2"
 
 run:
   timeout: 5m
-  go: "1.25.6"
+  go: "1.26.1"
 
 linters:
   enable:
@@ -28,6 +28,7 @@ linters:
       excludes:
         - G204
         - G302
+        - G702
 
 formatters:
   enable:
