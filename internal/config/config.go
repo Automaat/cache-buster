@@ -25,7 +25,7 @@ type Provider struct {
 func (c *Config) Validate() error {
 	for name, p := range c.Providers {
 		if strings.Contains(name, ".") {
-			return fmt.Errorf("provider name %q: must not contain '.' (reserved as Viper key delimiter)", name)
+			return fmt.Errorf("provider %q: must not contain '.' (reserved as Viper key delimiter)", name)
 		}
 		if len(p.Paths) == 0 {
 			return fmt.Errorf("provider %q: at least one path is required", name)
