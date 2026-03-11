@@ -96,9 +96,7 @@ func (p *DockerProvider) dockerDataSize() (int64, error) {
 		return 0, fmt.Errorf("docker system df: no parsable output")
 	}
 
-	if firstErr != nil {
-		return 0, firstErr
-	}
+	// Some rows parsed successfully; treat partial parse errors as non-fatal.
 	return total, nil
 }
 
