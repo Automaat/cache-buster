@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"sort"
+	"strings"
 )
 
 // Config holds cache-buster configuration.
@@ -23,6 +24,9 @@ type Provider struct {
 // Validate checks config for required fields.
 func (c *Config) Validate() error {
 	for name, p := range c.Providers {
+		if strings.Contains(name, ".") {
+			return fmt.Errorf("provider name %q: must not contain '.' (reserved as Viper key delimiter)", name)
+		}
 		if len(p.Paths) == 0 {
 			return fmt.Errorf("provider %q: at least one path is required", name)
 		}
