@@ -97,6 +97,7 @@ func TestScanProvider_InvalidMaxSize(t *testing.T) {
 	status := scanProvider(cfg, "cargo")
 
 	assert.Contains(t, status.Error, "load provider")
+	assert.Contains(t, status.Error, "parse max_size")
 }
 
 func TestScanProvider_EmptyDir(t *testing.T) {
