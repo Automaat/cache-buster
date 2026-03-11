@@ -390,4 +390,5 @@ func TestScanProvider_InvalidGlobPattern(t *testing.T) {
 	status := scanProvider(cfg, "cargo")
 
 	assert.Contains(t, status.Error, "load provider")
+	assert.Contains(t, status.Error, "expand paths")
 }
