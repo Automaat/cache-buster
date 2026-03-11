@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"time"
 
 	"github.com/Automaat/cache-buster/internal/config"
 	"github.com/Automaat/cache-buster/pkg/size"
@@ -39,40 +40,57 @@ type dockerDFRow struct {
 }
 
 // CurrentSize returns actual Docker data usage from docker system df.
-// Falls back to path-based size when the daemon is not available.
+// Falls back to path-based size if docker system df fails.
 func (p *DockerProvider) CurrentSize() (int64, error) {
-	if !p.Available() {
-		return p.BaseProvider.CurrentSize()
+	if b, err := p.dockerDataSize(); err == nil {
+		return b, nil
 	}
-	return p.dockerDataSize()
+	return p.BaseProvider.CurrentSize()
 }
 
-// DiskImageSize returns the size of the Docker VM disk image on the filesystem.
+// DiskImageSize returns the path-based filesystem size of the configured Docker paths.
 func (p *DockerProvider) DiskImageSize() (int64, error) {
 	return p.BaseProvider.CurrentSize()
 }
 
 func (p *DockerProvider) dockerDataSize() (int64, error) {
-	cmd := exec.Command("docker", "system", "df", "--format", "{{json .}}")
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "docker", "system", "df", "--format", "{{json .}}")
 	out, err := cmd.Output()
 	if err != nil {
 		return 0, fmt.Errorf("docker system df: %w", err)
 	}
 
 	var total int64
+	var firstErr error
+	var rowsParsed int
+
 	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
 		if line == "" {
 			continue
 		}
 		var row dockerDFRow
 		if jsonErr := json.Unmarshal([]byte(line), &row); jsonErr != nil {
+			if firstErr == nil {
+				firstErr = fmt.Errorf("unmarshal docker df line %q: %w", line, jsonErr)
+			}
 			continue
 		}
 		b, parseErr := size.ParseSize(row.Size)
 		if parseErr != nil {
+			if firstErr == nil {
+				firstErr = fmt.Errorf("parse docker size %q: %w", row.Size, parseErr)
+			}
 			continue
 		}
 		total += b
+		rowsParsed++
+	}
+
+	if rowsParsed == 0 && firstErr != nil {
+		return 0, firstErr
 	}
 	return total, nil
 }

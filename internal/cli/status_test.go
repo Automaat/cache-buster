@@ -205,6 +205,46 @@ func TestOutputTable(t *testing.T) {
 	assert.Contains(t, output, "-")
 }
 
+func TestOutputTable_DiskImageAnnotation(t *testing.T) {
+	statuses := []ProviderStatus{
+		{
+			Name: "docker", Current: 1024, CurrentFmt: "1.0 KiB",
+			Max: 10240, MaxFmt: "10 KiB", OverLimit: false,
+			DiskImageFmt: "5.0 KiB", DiskImageBytes: 5120,
+		},
+	}
+
+	var err error
+	output := captureStdout(t, func() {
+		err = outputTable(statuses)
+	})
+	require.NoError(t, err)
+
+	assert.Contains(t, output, "1.0 KiB (5.0 KiB on disk)")
+}
+
+func TestOutputJSON_DiskImageFields(t *testing.T) {
+	statuses := []ProviderStatus{
+		{
+			Name: "docker", Current: 1024, CurrentFmt: "1.0 KiB",
+			Max: 10240, MaxFmt: "10 KiB", OverLimit: false,
+			DiskImageFmt: "5.0 KiB", DiskImageBytes: 5120,
+		},
+	}
+
+	var err error
+	output := captureStdout(t, func() {
+		err = outputJSON(statuses)
+	})
+	require.NoError(t, err)
+
+	var out StatusOutput
+	require.NoError(t, json.Unmarshal([]byte(output), &out))
+
+	assert.Equal(t, int64(5120), out.Providers[0].DiskImageBytes)
+	assert.Equal(t, "5.0 KiB", out.Providers[0].DiskImageFmt)
+}
+
 func TestOutputTable_Empty(t *testing.T) {
 	var err error
 	output := captureStdout(t, func() {

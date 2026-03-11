@@ -100,7 +100,7 @@ func scanProvider(cfg *config.Config, name string) ProviderStatus {
 
 	current, err := p.CurrentSize()
 	if err != nil {
-		status.Error = fmt.Sprintf("calculate size: %v", err)
+		status.Error = fmt.Sprintf("get current size: %v", err)
 		return status
 	}
 
@@ -151,7 +151,7 @@ func outputTable(statuses []ProviderStatus) error {
 
 		currentFmt := s.CurrentFmt
 		if s.DiskImageFmt != "" {
-			currentFmt = fmt.Sprintf("%s (%s disk image)", s.CurrentFmt, s.DiskImageFmt)
+			currentFmt = fmt.Sprintf("%s (%s on disk)", s.CurrentFmt, s.DiskImageFmt)
 		}
 		maxFmt := s.MaxFmt
 		if s.Error != "" {
