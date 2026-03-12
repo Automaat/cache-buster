@@ -141,6 +141,47 @@ providers:
 		}
 	})
 
+	t.Run("override max_size only keeps provider enabled with default paths", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		configPath := filepath.Join(tmpDir, "config.yaml")
+
+		content := "version: \"1\"\nproviders:\n  go-build:\n    max_size: 20G\n"
+		if err := os.WriteFile(configPath, []byte(content), 0o600); err != nil {
+			t.Fatalf("write config: %v", err)
+		}
+
+		loader := NewLoader()
+		loader.SetConfigPath(configPath)
+
+		cfg, _, err := loader.LoadOrCreate()
+		if err != nil {
+			t.Fatalf("LoadOrCreate() error = %v", err)
+		}
+
+		goBuild, ok := cfg.Providers["go-build"]
+		if !ok {
+			t.Fatal("go-build provider missing")
+		}
+		if !goBuild.Enabled {
+			t.Error("go-build should remain enabled when only max_size is overridden")
+		}
+		if goBuild.MaxSize != "20G" {
+			t.Errorf("go-build MaxSize = %v, want 20G", goBuild.MaxSize)
+		}
+		defaults := DefaultProviders()
+		defaultGoBuild := defaults["go-build"]
+		if len(goBuild.Paths) != len(defaultGoBuild.Paths) {
+			t.Errorf("go-build Paths length = %d, want %d (default paths)", len(goBuild.Paths), len(defaultGoBuild.Paths))
+		} else {
+			for i, p := range defaultGoBuild.Paths {
+				if goBuild.Paths[i] != p {
+					t.Errorf("go-build Paths[%d] = %q, want %q (default paths %v)", i, goBuild.Paths[i], p, defaultGoBuild.Paths)
+					break
+				}
+			}
+		}
+	})
+
 	t.Run("user can disable default provider", func(t *testing.T) {
 		tmpDir := t.TempDir()
 		configPath := filepath.Join(tmpDir, "config.yaml")

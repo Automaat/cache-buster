@@ -38,6 +38,17 @@ func TestConfig_Validate(t *testing.T) {
 			cfg: &Config{
 				Version: "1",
 				Providers: map[string]Provider{
+					"my.tool": {Enabled: true, Paths: []string{"~/test"}, MaxSize: "1G"},
+				},
+			},
+			name:    "provider name with dot",
+			errMsg:  "must not contain '.'",
+			wantErr: true,
+		},
+		{
+			cfg: &Config{
+				Version: "1",
+				Providers: map[string]Provider{
 					"test": {Enabled: true, Paths: []string{"~/test"}, MaxSize: ""},
 				},
 			},
