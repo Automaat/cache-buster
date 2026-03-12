@@ -39,6 +39,11 @@ type Provider interface {
 	Available() bool
 }
 
+// DiskSizer is implemented by providers that track a VM disk image separately from actual data usage.
+type DiskSizer interface {
+	DiskImageSize() (int64, error)
+}
+
 // CleanOptions configures cleaning behavior.
 type CleanOptions struct {
 	DryRun bool

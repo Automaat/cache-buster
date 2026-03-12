@@ -8,8 +8,8 @@ import (
 
 	"charm.land/lipgloss/v2"
 	"charm.land/lipgloss/v2/table"
-	"github.com/Automaat/cache-buster/internal/cache"
 	"github.com/Automaat/cache-buster/internal/config"
+	"github.com/Automaat/cache-buster/internal/provider"
 	"github.com/Automaat/cache-buster/pkg/size"
 	"github.com/charmbracelet/x/term"
 	"github.com/spf13/cobra"
@@ -17,13 +17,15 @@ import (
 
 // ProviderStatus holds scan result for a single provider.
 type ProviderStatus struct {
-	Name       string `json:"name"`
-	CurrentFmt string `json:"current"`
-	MaxFmt     string `json:"max"`
-	Error      string `json:"error,omitempty"`
-	Current    int64  `json:"current_bytes"`
-	Max        int64  `json:"max_bytes"`
-	OverLimit  bool   `json:"over_limit"`
+	Name           string `json:"name"`
+	CurrentFmt     string `json:"current"`
+	MaxFmt         string `json:"max"`
+	Error          string `json:"error,omitempty"`
+	DiskImageFmt   string `json:"disk_image,omitempty"`
+	Current        int64  `json:"current_bytes"`
+	Max            int64  `json:"max_bytes"`
+	DiskImageBytes int64  `json:"disk_image_bytes,omitempty"`
+	OverLimit      bool   `json:"over_limit"`
 }
 
 // StatusOutput holds full status output for JSON serialization.
@@ -85,32 +87,35 @@ func scanProviders(cfg *config.Config, names []string) []ProviderStatus {
 }
 
 func scanProvider(cfg *config.Config, name string) ProviderStatus {
-	prov, _ := cfg.GetProvider(name)
 	status := ProviderStatus{Name: name}
 
-	maxBytes, err := size.ParseSize(prov.MaxSize)
+	p, err := provider.LoadProvider(name, cfg)
 	if err != nil {
-		status.Error = fmt.Sprintf("parse max_size: %v", err)
-		return status
-	}
-	status.Max = maxBytes
-	status.MaxFmt = size.FormatSize(maxBytes)
-
-	paths, err := config.ExpandPaths(prov.Paths)
-	if err != nil {
-		status.Error = fmt.Sprintf("expand paths: %v", err)
+		status.Error = fmt.Sprintf("load provider: %v", err)
 		return status
 	}
 
-	result, err := cache.CalculateSize(paths)
+	maxSize := p.MaxSize()
+	status.Max = maxSize
+	status.MaxFmt = size.FormatSize(maxSize)
+
+	current, err := p.CurrentSize()
 	if err != nil {
-		status.Error = fmt.Sprintf("calculate size: %v", err)
+		status.Error = fmt.Sprintf("get current size: %v", err)
 		return status
 	}
 
-	status.Current = result.Size
-	status.CurrentFmt = size.FormatSize(result.Size)
-	status.OverLimit = result.Size > maxBytes
+	status.Current = current
+	status.CurrentFmt = size.FormatSize(current)
+	status.OverLimit = current > maxSize
+
+	if ds, ok := p.(provider.DiskSizer); ok {
+		if diskSize, diskErr := ds.DiskImageSize(); diskErr == nil && diskSize > 0 && diskSize != current {
+			status.DiskImageBytes = diskSize
+			status.DiskImageFmt = size.FormatSize(diskSize)
+		}
+	}
+
 	return status
 }
 
@@ -146,6 +151,9 @@ func outputTable(statuses []ProviderStatus) error {
 		}
 
 		currentFmt := s.CurrentFmt
+		if s.DiskImageFmt != "" {
+			currentFmt = fmt.Sprintf("%s (%s on disk)", s.CurrentFmt, s.DiskImageFmt)
+		}
 		maxFmt := s.MaxFmt
 		if s.Error != "" {
 			if currentFmt == "" {

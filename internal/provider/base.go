@@ -1,6 +1,7 @@
 package provider
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/Automaat/cache-buster/internal/cache"
@@ -20,17 +21,17 @@ type BaseProvider struct {
 func NewBaseProvider(name string, cfg config.Provider) (*BaseProvider, error) {
 	paths, err := config.ExpandPaths(cfg.Paths)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("expand paths: %w", err)
 	}
 
 	maxBytes, err := size.ParseSize(cfg.MaxSize)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("parse max_size: %w", err)
 	}
 
 	maxAge, err := config.ParseDuration(cfg.MaxAge)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("parse max_age: %w", err)
 	}
 
 	return &BaseProvider{

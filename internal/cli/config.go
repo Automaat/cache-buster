@@ -105,7 +105,7 @@ func runConfigEditWithLoader(loader *config.Loader, editor string) error {
 		return fmt.Errorf("invalid editor: %s", editor)
 	}
 
-	cmd := exec.Command(parts[0], append(parts[1:], configPath)...)
+	cmd := exec.Command(parts[0], append(parts[1:], configPath)...) //nolint:gosec // G204: user-provided $EDITOR command; arguments are shell-split and executed without a shell
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr

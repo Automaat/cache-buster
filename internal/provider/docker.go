@@ -3,12 +3,15 @@ package provider
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
 	"strings"
+	"time"
 
 	"github.com/Automaat/cache-buster/internal/config"
+	"github.com/Automaat/cache-buster/pkg/size"
 	"github.com/kballard/go-shellquote"
 )
 
@@ -29,6 +32,76 @@ func NewDockerProvider(name string, cfg config.Provider) (*DockerProvider, error
 		BaseProvider: base,
 		cleanCmd:     cfg.CleanCmd,
 	}, nil
+}
+
+// dockerDFRow is one line of docker system df --format '{{json .}}' output.
+type dockerDFRow struct {
+	Size string `json:"Size"`
+}
+
+// CurrentSize returns actual Docker data usage from docker system df.
+// Falls back to path-based size if docker system df fails.
+func (p *DockerProvider) CurrentSize() (int64, error) {
+	if b, err := p.dockerDataSize(); err == nil {
+		return b, nil
+	}
+	return p.BaseProvider.CurrentSize()
+}
+
+// DiskImageSize returns the path-based filesystem size of the configured Docker paths.
+func (p *DockerProvider) DiskImageSize() (int64, error) {
+	return p.BaseProvider.CurrentSize()
+}
+
+func (p *DockerProvider) dockerDataSize() (int64, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "docker", "system", "df", "--format", "{{json .}}")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		msg := strings.TrimSpace(string(out))
+		if msg != "" {
+			return 0, fmt.Errorf("docker system df: %w: %s", err, msg)
+		}
+		return 0, fmt.Errorf("docker system df: %w", err)
+	}
+
+	var total int64
+	var firstErr error
+	var rowsParsed int
+
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		if line == "" {
+			continue
+		}
+		var row dockerDFRow
+		if jsonErr := json.Unmarshal([]byte(line), &row); jsonErr != nil {
+			if firstErr == nil {
+				firstErr = fmt.Errorf("unmarshal docker df line %q: %w", line, jsonErr)
+			}
+			continue
+		}
+		b, parseErr := size.ParseSize(row.Size)
+		if parseErr != nil {
+			if firstErr == nil {
+				firstErr = fmt.Errorf("parse docker size %q: %w", row.Size, parseErr)
+			}
+			continue
+		}
+		total += b
+		rowsParsed++
+	}
+
+	if rowsParsed == 0 {
+		if firstErr != nil {
+			return 0, firstErr
+		}
+		return 0, fmt.Errorf("docker system df: no parsable output")
+	}
+
+	// Some rows parsed successfully; treat partial parse errors as non-fatal.
+	return total, nil
 }
 
 // Available implements Provider.
