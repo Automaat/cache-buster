@@ -42,6 +42,17 @@ echo '{"Size":"500MB"}'
 	assert.Equal(t, int64(1.5*1024*1024*1024)+int64(500*1024*1024), total)
 }
 
+func TestDockerDataSize_IncludesVolumesAndBuildCacheRows(t *testing.T) {
+	fakeDockerBin(t, `echo '{"Type":"Local Volumes","TotalCount":"2","Size":"2GB"}'
+echo '{"Type":"Build Cache","TotalCount":"8","Size":"750MB"}'
+`)
+
+	p := newTestDockerProvider(t, []string{t.TempDir()})
+	total, err := p.dockerDataSize()
+	require.NoError(t, err)
+	assert.Equal(t, int64(2*1024*1024*1024)+int64(750*1024*1024), total)
+}
+
 func TestDockerDataSize_SkipsInvalidLines(t *testing.T) {
 	fakeDockerBin(t, `echo 'not json'
 echo '{"Size":"1GB"}'
@@ -93,4 +104,16 @@ func TestDockerCurrentSize_FallsBackToPathBased(t *testing.T) {
 	size, err := p.CurrentSize()
 	require.NoError(t, err)
 	assert.Equal(t, int64(5), size)
+}
+
+func TestDockerSmartCleanDryRun_IncludesVolumes(t *testing.T) {
+	fakeDockerBin(t, `exit 0`)
+
+	p := newTestDockerProvider(t, []string{t.TempDir()})
+	result, err := p.Clean(t.Context(), CleanOptions{
+		Mode:   CleanModeSmart,
+		DryRun: true,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "would run: docker system prune -af --volumes --filter until=720h", result.Output)
 }

@@ -102,7 +102,7 @@ Providers are auto-detected — only tools installed on your system appear in th
 | **Tools** | | |
 | homebrew | 5G | `brew cleanup` |
 | mise | 8G | `mise prune` |
-| docker | 50G | `docker system prune -af` |
+| docker | 50G | `docker system prune -af --volumes` |
 | jetbrains | 3G | file-based |
 
 ## Commands

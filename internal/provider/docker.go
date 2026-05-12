@@ -134,7 +134,7 @@ func (p *DockerProvider) smartClean(ctx context.Context, opts CleanOptions) (Cle
 		hours = 1
 	}
 	filterArg := fmt.Sprintf("until=%dh", hours)
-	smartCmd := fmt.Sprintf("docker system prune -af --filter %s", filterArg)
+	smartCmd := fmt.Sprintf("docker system prune -af --volumes --filter %s", filterArg)
 
 	if opts.DryRun {
 		return CleanResult{
@@ -144,7 +144,7 @@ func (p *DockerProvider) smartClean(ctx context.Context, opts CleanOptions) (Cle
 
 	sizeBefore, _ := p.CurrentSize()
 
-	cmd := exec.CommandContext(ctx, "docker", "system", "prune", "-af", "--filter", filterArg)
+	cmd := exec.CommandContext(ctx, "docker", "system", "prune", "-af", "--volumes", "--filter", filterArg)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr

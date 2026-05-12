@@ -66,7 +66,7 @@ func DefaultProviders() map[string]Provider {
 			Paths:    []string{"~/Library/Containers/com.docker.docker"},
 			MaxSize:  "50G",
 			MaxAge:   "30d",
-			CleanCmd: "docker system prune -af",
+			CleanCmd: "docker system prune -af --volumes",
 		},
 		// macOS-only: Xcode and iOS Simulator providers
 		"xcode-deriveddata": {
