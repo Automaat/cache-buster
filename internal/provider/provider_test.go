@@ -217,7 +217,7 @@ func TestDockerProvider_Available(t *testing.T) {
 	cfg := config.Provider{
 		Paths:    []string{t.TempDir()},
 		MaxSize:  "50G",
-		CleanCmd: "docker system prune -af",
+		CleanCmd: "docker system prune -af --volumes",
 		Enabled:  true,
 	}
 
@@ -270,7 +270,7 @@ func TestNewProvider_Docker(t *testing.T) {
 	cfg := config.Provider{
 		Paths:    []string{t.TempDir()},
 		MaxSize:  "50G",
-		CleanCmd: "docker system prune -af",
+		CleanCmd: "docker system prune -af --volumes",
 		Enabled:  true,
 	}
 
@@ -491,7 +491,7 @@ func TestDockerProvider_DryRun(t *testing.T) {
 	cfg := config.Provider{
 		Paths:    []string{t.TempDir()},
 		MaxSize:  "50G",
-		CleanCmd: "docker system prune -af",
+		CleanCmd: "docker system prune -af --volumes",
 		Enabled:  true,
 	}
 
@@ -509,8 +509,8 @@ func TestDockerProvider_DryRun(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if result.Output != "would run: docker system prune -af" {
-		t.Errorf("output = %q, want %q", result.Output, "would run: docker system prune -af")
+	if result.Output != "would run: docker system prune -af --volumes" {
+		t.Errorf("output = %q, want %q", result.Output, "would run: docker system prune -af --volumes")
 	}
 }
 
@@ -1391,7 +1391,7 @@ func TestDockerProvider_SmartClean_NotAvailable(t *testing.T) {
 	cfg := config.Provider{
 		Paths:    []string{t.TempDir()},
 		MaxSize:  "50G",
-		CleanCmd: "docker system prune -af",
+		CleanCmd: "docker system prune -af --volumes",
 		Enabled:  true,
 	}
 
@@ -1418,7 +1418,7 @@ func TestDockerProvider_SmartClean_DryRun(t *testing.T) {
 	cfg := config.Provider{
 		Paths:    []string{t.TempDir()},
 		MaxSize:  "50G",
-		CleanCmd: "docker system prune -af",
+		CleanCmd: "docker system prune -af --volumes",
 		Enabled:  true,
 	}
 
