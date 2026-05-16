@@ -205,10 +205,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-		progressWidth := msg.Width - 10
-		if progressWidth < 1 {
-			progressWidth = 1
-		}
+		progressWidth := max(msg.Width-10, 1)
 		m.progress.SetWidth(progressWidth)
 		return m, nil
 
@@ -246,6 +243,8 @@ func (m model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m.handleConfirmationKey(msg)
 	case stateDone:
 		return m.handleDoneKey(msg)
+	case stateCleaning:
+		// Key input ignored while cleaning is in progress.
 	}
 	return m, nil
 }
@@ -276,8 +275,8 @@ func (m model) handleSelectionKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 
 	case "a":
-		for i, p := range m.providers {
-			if p.available {
+		for i := range m.providers {
+			if m.providers[i].available {
 				m.selected[i] = struct{}{}
 			}
 		}
@@ -287,8 +286,8 @@ func (m model) handleSelectionKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 	case "o":
 		m.selected = make(map[int]struct{})
-		for i, p := range m.providers {
-			if p.available && p.overLimit {
+		for i := range m.providers {
+			if m.providers[i].available && m.providers[i].overLimit {
 				m.selected[i] = struct{}{}
 			}
 		}
@@ -406,11 +405,7 @@ func (m model) View() tea.View {
 		popupLines := strings.Split(popup, "\n")
 
 		startY := (len(bgLines) - popupHeight) / 2
-		startX := (m.width - popupWidth) / 2
-
-		if startX < 0 {
-			startX = 0
-		}
+		startX := max((m.width-popupWidth)/2, 0)
 		if startY < 0 {
 			startY = 0
 		}
@@ -449,16 +444,15 @@ func (m model) viewSelection() string {
 
 	// Calculate column widths based on terminal width
 	// Layout: cursor(2) + checkbox(4) + name + gap + size + gap + status
-	contentWidth := m.width - 8 // box border + padding
-	if contentWidth < 40 {
-		contentWidth = 40
-	}
+	contentWidth := max(
+		// box border + padding
+		m.width-8, 40)
 
 	// Find max provider name length
 	maxNameLen := 0
-	for _, p := range m.providers {
-		if len(p.name) > maxNameLen {
-			maxNameLen = len(p.name)
+	for i := range m.providers {
+		if len(m.providers[i].name) > maxNameLen {
+			maxNameLen = len(m.providers[i].name)
 		}
 	}
 	if maxNameLen < 10 {
@@ -467,16 +461,14 @@ func (m model) viewSelection() string {
 
 	// Column widths: prefix(6) + name + size(24) + status(6)
 	fixedWidth := 6 + 24 + 6
-	nameWidth := contentWidth - fixedWidth
-	if nameWidth < maxNameLen {
-		nameWidth = maxNameLen
-	}
+	nameWidth := max(contentWidth-fixedWidth, maxNameLen)
 	const maxNameWidth = 50
 	if nameWidth > maxNameWidth {
 		nameWidth = maxNameWidth
 	}
 
-	for i, p := range m.providers {
+	for i := range m.providers {
+		p := &m.providers[i]
 		cursor := "  "
 		if i == m.cursor {
 			cursor = "> "
@@ -579,7 +571,8 @@ func (m model) viewCleaning() string {
 
 	if completed > 0 {
 		b.WriteString("Completed:\n")
-		for i, p := range m.providers {
+		for i := range m.providers {
+			p := &m.providers[i]
 			if _, ok := m.selected[i]; !ok {
 				continue
 			}
@@ -608,7 +601,8 @@ func (m model) viewDone() string {
 	b.WriteString("\n\n")
 
 	var errors []string
-	for i, p := range m.providers {
+	for i := range m.providers {
+		p := &m.providers[i]
 		if _, ok := m.selected[i]; !ok {
 			continue
 		}

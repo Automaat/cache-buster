@@ -25,7 +25,7 @@ func fakeDockerBin(t *testing.T, script string) string {
 	t.Helper()
 	dir := t.TempDir()
 	bin := filepath.Join(dir, "docker")
-	require.NoError(t, os.WriteFile(bin, []byte("#!/bin/sh\n"+script), 0o755)) //nolint:gosec // G306: test binary must be executable
+	require.NoError(t, os.WriteFile(bin, []byte("#!/bin/sh\n"+script), 0o755))
 	t.Setenv("PATH", dir+":"+os.Getenv("PATH"))
 	return dir
 }

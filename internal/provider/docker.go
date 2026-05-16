@@ -71,7 +71,7 @@ func (p *DockerProvider) dockerDataSize() (int64, error) {
 	var firstErr error
 	var rowsParsed int
 
-	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+	for line := range strings.SplitSeq(strings.TrimSpace(string(out)), "\n") {
 		if line == "" {
 			continue
 		}
@@ -129,10 +129,7 @@ func (p *DockerProvider) Clean(ctx context.Context, opts CleanOptions) (CleanRes
 }
 
 func (p *DockerProvider) smartClean(ctx context.Context, opts CleanOptions) (CleanResult, error) {
-	hours := int64(p.maxAge.Hours())
-	if hours < 1 {
-		hours = 1
-	}
+	hours := max(int64(p.maxAge.Hours()), 1)
 	filterArg := fmt.Sprintf("until=%dh", hours)
 	smartCmd := fmt.Sprintf("docker system prune -af --volumes --filter %s", filterArg)
 

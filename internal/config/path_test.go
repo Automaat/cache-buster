@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 )
 
@@ -74,13 +75,7 @@ func TestExpandPaths(t *testing.T) {
 				t.Errorf("ExpandPaths() len = %d, want %d", len(got), tt.wantLen)
 			}
 			if tt.contains != "" {
-				found := false
-				for _, p := range got {
-					if p == tt.contains {
-						found = true
-						break
-					}
-				}
+				found := slices.Contains(got, tt.contains)
 				if !found {
 					t.Errorf("ExpandPaths() missing %v in %v", tt.contains, got)
 				}
