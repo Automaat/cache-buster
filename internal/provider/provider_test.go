@@ -936,6 +936,52 @@ func TestJetBrainsProvider_FullClean(t *testing.T) {
 	}
 }
 
+// TestJetBrainsProvider_OutOfRangeVersionDir uses a version directory whose
+// minor segment overflows int. The clean must complete deterministically
+// instead of treating the overflowed segment as 0.
+func TestJetBrainsProvider_OutOfRangeVersionDir(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	for _, dir := range []string{"GoLand2024.1", "GoLand2024.99999999999999999999"} {
+		dirPath := filepath.Join(tmpDir, dir)
+		if err := os.MkdirAll(dirPath, 0o750); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dirPath, "data.bin"), make([]byte, 100), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	cfg := config.Provider{
+		Paths:   []string{tmpDir},
+		MaxSize: "3G",
+		Enabled: true,
+	}
+
+	p, err := provider.NewJetBrainsProvider("jetbrains", cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := p.Clean(context.Background(), provider.CleanOptions{
+		Mode: provider.CleanModeFull,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.BytesCleaned == 0 {
+		t.Error("expected bytes cleaned > 0")
+	}
+
+	// Exactly one of the two version dirs is kept; both must not survive
+	// and both must not be removed.
+	_, err1 := os.Stat(filepath.Join(tmpDir, "GoLand2024.1"))
+	_, err2 := os.Stat(filepath.Join(tmpDir, "GoLand2024.99999999999999999999"))
+	if os.IsNotExist(err1) == os.IsNotExist(err2) {
+		t.Error("expected exactly one version directory to remain")
+	}
+}
+
 func TestNewProvider_NoCleanCmd(t *testing.T) {
 	cfg := config.Provider{
 		Paths:   []string{t.TempDir()},
