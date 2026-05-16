@@ -193,6 +193,10 @@ func (p *JetBrainsProvider) findRemovableDirs() ([]string, error) {
 
 // compareVersions compares semantic versions like "2024.1" and "2024.10".
 // Returns -1 if v1 < v2, 0 if equal, 1 if v1 > v2.
+//
+// A missing segment counts as 0. A segment that is non-numeric or out of
+// int range is compared lexically rather than silently coerced to 0, so
+// malformed versions order deterministically instead of collapsing together.
 func compareVersions(v1, v2 string) int {
 	parts1 := strings.Split(v1, ".")
 	parts2 := strings.Split(v2, ".")
@@ -200,12 +204,14 @@ func compareVersions(v1, v2 string) int {
 	maxLen := max(len(parts2), len(parts1))
 
 	for i := range maxLen {
-		var n1, n2 int
-		if i < len(parts1) {
-			n1, _ = strconv.Atoi(parts1[i])
-		}
-		if i < len(parts2) {
-			n2, _ = strconv.Atoi(parts2[i])
+		n1, raw1, ok1 := versionSegment(parts1, i)
+		n2, raw2, ok2 := versionSegment(parts2, i)
+
+		if !ok1 || !ok2 {
+			if c := strings.Compare(raw1, raw2); c != 0 {
+				return c
+			}
+			continue
 		}
 
 		if n1 < n2 {
@@ -217,4 +223,17 @@ func compareVersions(v1, v2 string) int {
 	}
 
 	return 0
+}
+
+// versionSegment returns the i-th dot-separated version segment as an int.
+// A missing segment is treated as 0 with ok=true; a present segment that
+// fails to parse (non-numeric or out of range) returns ok=false along with
+// its raw text for lexical fallback comparison.
+func versionSegment(parts []string, i int) (n int, raw string, ok bool) {
+	if i >= len(parts) {
+		return 0, "", true
+	}
+	raw = parts[i]
+	n, err := strconv.Atoi(raw)
+	return n, raw, err == nil
 }
