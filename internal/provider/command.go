@@ -1,12 +1,8 @@
 package provider
 
 import (
-	"bytes"
 	"context"
 	"fmt"
-	"os"
-	"os/exec"
-	"strings"
 
 	"github.com/Automaat/cache-buster/internal/cache"
 	"github.com/Automaat/cache-buster/internal/config"
@@ -64,37 +60,10 @@ func (p *CommandProvider) fullClean(ctx context.Context, opts CleanOptions) (Cle
 		}, nil
 	}
 
-	sizeBefore, _ := p.CurrentSize()
-
 	parts, err := shellquote.Split(p.cleanCmd)
 	if err != nil {
 		return CleanResult{}, fmt.Errorf("invalid command: %w", err)
 	}
-	if len(parts) == 0 {
-		return CleanResult{}, nil
-	}
 
-	cmd := exec.CommandContext(ctx, parts[0], parts[1:]...)
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-
-	err = cmd.Run()
-	output := strings.TrimSpace(stdout.String() + stderr.String())
-
-	if err != nil {
-		return CleanResult{Output: output}, err
-	}
-
-	sizeAfter, _ := p.CurrentSize()
-	bytesCleaned := sizeBefore - sizeAfter
-	if bytesCleaned < 0 {
-		fmt.Fprintf(os.Stderr, "warning: %s cache size increased during clean\n", p.name)
-		bytesCleaned = 0
-	}
-
-	return CleanResult{
-		BytesCleaned: bytesCleaned,
-		Output:       output,
-	}, nil
+	return runMeasuredClean(ctx, p.name, parts, p.CurrentSize)
 }
