@@ -117,3 +117,66 @@ func TestDockerSmartCleanDryRun_IncludesVolumes(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "would run: docker system prune -af --volumes --filter until=720h", result.Output)
 }
+
+func TestDockerSmartClean_DaemonUnavailable(t *testing.T) {
+	// docker ps fails => daemon down => Clean returns without pruning.
+	fakeDockerBin(t, `case "$1 $2" in
+"ps --quiet") exit 1 ;;
+esac
+exit 1`)
+
+	p := newTestDockerProvider(t, []string{t.TempDir()})
+	result, err := p.Clean(t.Context(), CleanOptions{Mode: CleanModeSmart})
+	require.NoError(t, err)
+	assert.Equal(t, "docker not available", result.Output)
+}
+
+func TestDockerSmartClean_NothingToPrune(t *testing.T) {
+	// Size unchanged before/after prune => zero bytes cleaned.
+	fakeDockerBin(t, `case "$1 $2" in
+"ps --quiet") exit 0 ;;
+"system df") echo '{"Size":"2GB"}'; exit 0 ;;
+"system prune") echo "Total reclaimed space: 0B"; exit 0 ;;
+esac`)
+
+	p := newTestDockerProvider(t, []string{t.TempDir()})
+	result, err := p.Clean(t.Context(), CleanOptions{Mode: CleanModeSmart})
+	require.NoError(t, err)
+	assert.Equal(t, int64(0), result.BytesCleaned)
+	assert.Contains(t, result.Output, "Total reclaimed space: 0B")
+}
+
+func TestDockerSmartClean_FreesSpace(t *testing.T) {
+	// docker system df reports 5GB before the prune and 1GB after it,
+	// keyed off a marker file the fake prune drops.
+	marker := filepath.Join(t.TempDir(), "pruned")
+	fakeDockerBin(t, `case "$1 $2" in
+"ps --quiet") exit 0 ;;
+"system df")
+  if [ -f "`+marker+`" ]; then echo '{"Size":"1GB"}'; else echo '{"Size":"5GB"}'; fi
+  exit 0 ;;
+"system prune")
+  touch "`+marker+`"
+  echo "Total reclaimed space: 4GB"
+  exit 0 ;;
+esac`)
+
+	p := newTestDockerProvider(t, []string{t.TempDir()})
+	result, err := p.Clean(t.Context(), CleanOptions{Mode: CleanModeSmart})
+	require.NoError(t, err)
+	assert.Equal(t, int64(4*1024*1024*1024), result.BytesCleaned)
+	assert.Contains(t, result.Output, "Total reclaimed space: 4GB")
+}
+
+func TestDockerSmartClean_PruneFails(t *testing.T) {
+	fakeDockerBin(t, `case "$1 $2" in
+"ps --quiet") exit 0 ;;
+"system df") echo '{"Size":"2GB"}'; exit 0 ;;
+"system prune") echo "Error response from daemon: prune failed" >&2; exit 1 ;;
+esac`)
+
+	p := newTestDockerProvider(t, []string{t.TempDir()})
+	result, err := p.Clean(t.Context(), CleanOptions{Mode: CleanModeSmart})
+	require.Error(t, err)
+	assert.Contains(t, result.Output, "prune failed")
+}
