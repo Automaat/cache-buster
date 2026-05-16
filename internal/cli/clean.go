@@ -115,10 +115,7 @@ func resolveProviders(cfg *config.Config, args []string, allFlag bool) ([]string
 	return args, nil
 }
 
-func loadAndFilterProviders(cfg *config.Config, names []string) ([]provider.Provider, []string) {
-	var providers []provider.Provider
-	var unavailable []string
-
+func loadAndFilterProviders(cfg *config.Config, names []string) (providers []provider.Provider, unavailable []string) {
 	for _, name := range names {
 		p, err := provider.LoadProvider(name, cfg)
 		if err != nil {

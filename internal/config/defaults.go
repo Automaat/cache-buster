@@ -1,9 +1,25 @@
 package config
 
+import "maps"
+
 const currentVersion = "1"
 
 // DefaultProviders returns builtin provider definitions.
 func DefaultProviders() map[string]Provider {
+	all := make(map[string]Provider)
+	for _, group := range []map[string]Provider{
+		goProviders(),
+		jsProviders(),
+		systemProviders(),
+		xcodeProviders(),
+		otherProviders(),
+	} {
+		maps.Copy(all, group)
+	}
+	return all
+}
+
+func goProviders() map[string]Provider {
 	return map[string]Provider{
 		"go-build": {
 			Enabled:  true,
@@ -19,6 +35,11 @@ func DefaultProviders() map[string]Provider {
 			MaxAge:   "30d",
 			CleanCmd: "go clean -modcache",
 		},
+	}
+}
+
+func jsProviders() map[string]Provider {
+	return map[string]Provider{
 		"npm": {
 			Enabled:  true,
 			Paths:    []string{"~/.npm"},
@@ -33,6 +54,18 @@ func DefaultProviders() map[string]Provider {
 			MaxAge:   "30d",
 			CleanCmd: "yarn cache clean",
 		},
+		"pnpm": {
+			Enabled:  true,
+			Paths:    []string{"~/.local/share/pnpm/store", "~/Library/pnpm/store"},
+			MaxSize:  "5G",
+			MaxAge:   "30d",
+			CleanCmd: "pnpm store prune",
+		},
+	}
+}
+
+func systemProviders() map[string]Provider {
+	return map[string]Provider{
 		"homebrew": {
 			Enabled:  true,
 			Paths:    []string{"~/Library/Caches/Homebrew"},
@@ -47,20 +80,6 @@ func DefaultProviders() map[string]Provider {
 			MaxAge:   "30d",
 			CleanCmd: "mise prune",
 		},
-		"uv": {
-			Enabled:  true,
-			Paths:    []string{"~/.cache/uv"},
-			MaxSize:  "4G",
-			MaxAge:   "30d",
-			CleanCmd: "",
-		},
-		"jetbrains": {
-			Enabled:  true,
-			Paths:    []string{"~/Library/Caches/JetBrains"},
-			MaxSize:  "3G",
-			MaxAge:   "30d",
-			CleanCmd: "",
-		},
 		"docker": {
 			Enabled:  true,
 			Paths:    []string{"~/Library/Containers/com.docker.docker"},
@@ -68,7 +87,12 @@ func DefaultProviders() map[string]Provider {
 			MaxAge:   "30d",
 			CleanCmd: "docker system prune -af --volumes",
 		},
-		// macOS-only: Xcode and iOS Simulator providers
+	}
+}
+
+// xcodeProviders are macOS-only: Xcode and iOS Simulator caches.
+func xcodeProviders() map[string]Provider {
+	return map[string]Provider{
 		"xcode-deriveddata": {
 			Enabled:  true,
 			Paths:    []string{"~/Library/Developer/Xcode/DerivedData"},
@@ -90,6 +114,25 @@ func DefaultProviders() map[string]Provider {
 			MaxAge:   "30d",
 			CleanCmd: "xcrun simctl delete unavailable",
 		},
+	}
+}
+
+func otherProviders() map[string]Provider {
+	return map[string]Provider{
+		"uv": {
+			Enabled:  true,
+			Paths:    []string{"~/.cache/uv"},
+			MaxSize:  "4G",
+			MaxAge:   "30d",
+			CleanCmd: "",
+		},
+		"jetbrains": {
+			Enabled:  true,
+			Paths:    []string{"~/Library/Caches/JetBrains"},
+			MaxSize:  "3G",
+			MaxAge:   "30d",
+			CleanCmd: "",
+		},
 		"cargo": {
 			Enabled:  true,
 			Paths:    []string{"~/.cargo/registry", "~/.cargo/git"},
@@ -103,13 +146,6 @@ func DefaultProviders() map[string]Provider {
 			MaxSize:  "10G",
 			MaxAge:   "30d",
 			CleanCmd: "",
-		},
-		"pnpm": {
-			Enabled:  true,
-			Paths:    []string{"~/.local/share/pnpm/store", "~/Library/pnpm/store"},
-			MaxSize:  "5G",
-			MaxAge:   "30d",
-			CleanCmd: "pnpm store prune",
 		},
 		"pip": {
 			Enabled:  true,
