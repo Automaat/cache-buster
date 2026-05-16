@@ -1,6 +1,6 @@
 module github.com/Automaat/cache-buster
 
-go 1.25.6
+go 1.26.3
 
 require (
 	charm.land/bubbles/v2 v2.1.0
