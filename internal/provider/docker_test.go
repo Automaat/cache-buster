@@ -36,7 +36,7 @@ echo '{"Size":"500MB"}'
 `)
 
 	p := newTestDockerProvider(t, []string{t.TempDir()})
-	total, err := p.dockerDataSize()
+	total, err := p.dockerDataSize(t.Context())
 	require.NoError(t, err)
 	// 1.5GB = 1.5 * 1024^3, 500MB = 500 * 1024^2
 	assert.Equal(t, int64(1.5*1024*1024*1024)+int64(500*1024*1024), total)
@@ -48,7 +48,7 @@ echo '{"Type":"Build Cache","TotalCount":"8","Size":"750MB"}'
 `)
 
 	p := newTestDockerProvider(t, []string{t.TempDir()})
-	total, err := p.dockerDataSize()
+	total, err := p.dockerDataSize(t.Context())
 	require.NoError(t, err)
 	assert.Equal(t, int64(2*1024*1024*1024)+int64(750*1024*1024), total)
 }
@@ -59,7 +59,7 @@ echo '{"Size":"1GB"}'
 `)
 
 	p := newTestDockerProvider(t, []string{t.TempDir()})
-	total, err := p.dockerDataSize()
+	total, err := p.dockerDataSize(t.Context())
 	require.NoError(t, err)
 	// 1GB = 1 * 1024^3 (size package treats GB as binary)
 	assert.Equal(t, int64(1024*1024*1024), total)
@@ -71,7 +71,7 @@ echo 'also not json'
 `)
 
 	p := newTestDockerProvider(t, []string{t.TempDir()})
-	_, err := p.dockerDataSize()
+	_, err := p.dockerDataSize(t.Context())
 	require.Error(t, err)
 }
 
@@ -79,7 +79,7 @@ func TestDockerDataSize_EmptyOutput_ReturnsError(t *testing.T) {
 	fakeDockerBin(t, `exit 0`)
 
 	p := newTestDockerProvider(t, []string{t.TempDir()})
-	_, err := p.dockerDataSize()
+	_, err := p.dockerDataSize(t.Context())
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "no parsable output")
 }
@@ -88,7 +88,7 @@ func TestDockerDataSize_CommandFails_IncludesStderr(t *testing.T) {
 	fakeDockerBin(t, `echo "daemon not running" >&2; exit 1`)
 
 	p := newTestDockerProvider(t, []string{t.TempDir()})
-	_, err := p.dockerDataSize()
+	_, err := p.dockerDataSize(t.Context())
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "daemon not running")
 }
@@ -101,7 +101,7 @@ func TestDockerCurrentSize_FallsBackToPathBased(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "data.bin"), []byte("hello"), 0o600))
 
 	p := newTestDockerProvider(t, []string{tmpDir})
-	size, err := p.CurrentSize()
+	size, err := p.CurrentSize(t.Context())
 	require.NoError(t, err)
 	assert.Equal(t, int64(5), size)
 }

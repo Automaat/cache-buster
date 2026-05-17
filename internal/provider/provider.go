@@ -23,7 +23,8 @@ type Provider interface {
 	Paths() []string
 
 	// CurrentSize returns the total size of cached files in bytes.
-	CurrentSize() (int64, error)
+	// The scan stops early if ctx is cancelled.
+	CurrentSize(ctx context.Context) (int64, error)
 
 	// MaxSize returns the configured maximum size in bytes.
 	MaxSize() int64
@@ -41,7 +42,7 @@ type Provider interface {
 
 // DiskSizer is implemented by providers that track a VM disk image separately from actual data usage.
 type DiskSizer interface {
-	DiskImageSize() (int64, error)
+	DiskImageSize(ctx context.Context) (int64, error)
 }
 
 // CleanOptions configures cleaning behavior.

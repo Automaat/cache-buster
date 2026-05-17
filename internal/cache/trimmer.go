@@ -32,7 +32,7 @@ const trimBufferFactor = 0.9 // Keep 10% headroom below max_size
 // - older than MaxAge, OR
 // - oldest files until total ≤ MaxSize (with 10% buffer).
 func Trim(ctx context.Context, paths []string, opts TrimOptions) (TrimResult, error) {
-	listResult, err := ListFiles(paths)
+	listResult, err := ListFilesContext(ctx, paths)
 	if err != nil {
 		return TrimResult{}, err
 	}

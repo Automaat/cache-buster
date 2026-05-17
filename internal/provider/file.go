@@ -61,7 +61,7 @@ func (p *FileProvider) smartClean(ctx context.Context, opts CleanOptions) (Clean
 }
 
 func (p *FileProvider) fullClean(ctx context.Context, opts CleanOptions) (CleanResult, error) {
-	currentSize, err := p.CurrentSize()
+	currentSize, err := p.CurrentSize(ctx)
 	if err != nil {
 		return CleanResult{}, err
 	}
@@ -72,7 +72,7 @@ func (p *FileProvider) fullClean(ctx context.Context, opts CleanOptions) (CleanR
 		}, nil
 	}
 
-	listResult, err := cache.ListFiles(p.paths)
+	listResult, err := cache.ListFilesContext(ctx, p.paths)
 	if err != nil {
 		return CleanResult{}, err
 	}

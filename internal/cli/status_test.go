@@ -51,7 +51,7 @@ func TestScanProvider(t *testing.T) {
 		},
 	}
 
-	status := scanProvider(cfg, "cargo")
+	status := scanProvider(t.Context(), cfg, "cargo")
 
 	assert.Equal(t, "cargo", status.Name)
 	assert.Equal(t, int64(5), status.Current)
@@ -77,7 +77,7 @@ func TestScanProvider_OverLimit(t *testing.T) {
 		},
 	}
 
-	status := scanProvider(cfg, "cargo")
+	status := scanProvider(t.Context(), cfg, "cargo")
 
 	assert.True(t, status.OverLimit)
 	assert.Greater(t, status.Current, status.Max)
@@ -94,7 +94,7 @@ func TestScanProvider_InvalidMaxSize(t *testing.T) {
 		},
 	}
 
-	status := scanProvider(cfg, "cargo")
+	status := scanProvider(t.Context(), cfg, "cargo")
 
 	assert.Contains(t, status.Error, "load provider")
 	assert.Contains(t, status.Error, "parse max_size")
@@ -113,7 +113,7 @@ func TestScanProvider_EmptyDir(t *testing.T) {
 		},
 	}
 
-	status := scanProvider(cfg, "cargo")
+	status := scanProvider(t.Context(), cfg, "cargo")
 
 	assert.Equal(t, int64(0), status.Current)
 	assert.False(t, status.OverLimit)
@@ -133,7 +133,7 @@ func TestScanProviders_Parallel(t *testing.T) {
 		},
 	}
 
-	statuses := scanProviders(cfg, []string{"cargo", "gradle"})
+	statuses := scanProviders(t.Context(), cfg, []string{"cargo", "gradle"})
 
 	assert.Len(t, statuses, 2)
 	assert.Equal(t, "cargo", statuses[0].Name)
@@ -387,7 +387,7 @@ func TestScanProvider_InvalidGlobPattern(t *testing.T) {
 		},
 	}
 
-	status := scanProvider(cfg, "cargo")
+	status := scanProvider(t.Context(), cfg, "cargo")
 
 	assert.Contains(t, status.Error, "load provider")
 	assert.Contains(t, status.Error, "expand paths")

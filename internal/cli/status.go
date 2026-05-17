@@ -1,10 +1,13 @@
 package cli
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/signal"
 	"sync"
+	"syscall"
 
 	"charm.land/lipgloss/v2"
 	"charm.land/lipgloss/v2/table"
@@ -63,7 +66,10 @@ func runStatusWithLoader(loader *config.Loader, jsonOutput bool) error {
 		return nil
 	}
 
-	statuses := scanProviders(cfg, providers)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	statuses := scanProviders(ctx, cfg, providers)
 
 	if jsonOutput {
 		return outputJSON(statuses)
@@ -71,7 +77,7 @@ func runStatusWithLoader(loader *config.Loader, jsonOutput bool) error {
 	return outputTable(statuses)
 }
 
-func scanProviders(cfg *config.Config, names []string) []ProviderStatus {
+func scanProviders(ctx context.Context, cfg *config.Config, names []string) []ProviderStatus {
 	statuses := make([]ProviderStatus, len(names))
 	var wg sync.WaitGroup
 
@@ -79,14 +85,14 @@ func scanProviders(cfg *config.Config, names []string) []ProviderStatus {
 		wg.Add(1)
 		go func(idx int, provName string) {
 			defer wg.Done()
-			statuses[idx] = scanProvider(cfg, provName)
+			statuses[idx] = scanProvider(ctx, cfg, provName)
 		}(i, name)
 	}
 	wg.Wait()
 	return statuses
 }
 
-func scanProvider(cfg *config.Config, name string) ProviderStatus {
+func scanProvider(ctx context.Context, cfg *config.Config, name string) ProviderStatus {
 	status := ProviderStatus{Name: name}
 
 	p, err := provider.LoadProvider(name, cfg)
@@ -99,7 +105,7 @@ func scanProvider(cfg *config.Config, name string) ProviderStatus {
 	status.Max = maxSize
 	status.MaxFmt = size.FormatSize(maxSize)
 
-	current, err := p.CurrentSize()
+	current, err := p.CurrentSize(ctx)
 	if err != nil {
 		status.Error = fmt.Sprintf("get current size: %v", err)
 		return status
@@ -110,7 +116,7 @@ func scanProvider(cfg *config.Config, name string) ProviderStatus {
 	status.OverLimit = current > maxSize
 
 	if ds, ok := p.(provider.DiskSizer); ok {
-		if diskSize, diskErr := ds.DiskImageSize(); diskErr == nil && diskSize > 0 && diskSize != current {
+		if diskSize, diskErr := ds.DiskImageSize(ctx); diskErr == nil && diskSize > 0 && diskSize != current {
 			status.DiskImageBytes = diskSize
 			status.DiskImageFmt = size.FormatSize(diskSize)
 		}

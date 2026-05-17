@@ -39,20 +39,20 @@ type dockerDFRow struct {
 
 // CurrentSize returns actual Docker data usage from docker system df.
 // Falls back to path-based size if docker system df fails.
-func (p *DockerProvider) CurrentSize() (int64, error) {
-	if b, err := p.dockerDataSize(); err == nil {
+func (p *DockerProvider) CurrentSize(ctx context.Context) (int64, error) {
+	if b, err := p.dockerDataSize(ctx); err == nil {
 		return b, nil
 	}
-	return p.BaseProvider.CurrentSize()
+	return p.BaseProvider.CurrentSize(ctx)
 }
 
 // DiskImageSize returns the path-based filesystem size of the configured Docker paths.
-func (p *DockerProvider) DiskImageSize() (int64, error) {
-	return p.BaseProvider.CurrentSize()
+func (p *DockerProvider) DiskImageSize(ctx context.Context) (int64, error) {
+	return p.BaseProvider.CurrentSize(ctx)
 }
 
-func (p *DockerProvider) dockerDataSize() (int64, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+func (p *DockerProvider) dockerDataSize(ctx context.Context) (int64, error) {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, "docker", "system", "df", "--format", "{{json .}}")

@@ -1,6 +1,7 @@
 package cache
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -25,9 +26,16 @@ type ScanResult struct {
 }
 
 // CalculateSize calculates total size of all files under given paths.
+// It is the uncancellable form of CalculateSizeContext.
+func CalculateSize(paths []string) (ScanResult, error) {
+	return CalculateSizeContext(context.Background(), paths)
+}
+
+// CalculateSizeContext calculates total size of all files under given paths.
 // Walks directories in parallel. Returns 0 if paths is empty.
 // Access errors are collected as warnings rather than stopping the scan.
-func CalculateSize(paths []string) (ScanResult, error) {
+// The walk stops early and returns ctx.Err() once ctx is cancelled.
+func CalculateSizeContext(ctx context.Context, paths []string) (ScanResult, error) {
 	var total atomic.Int64
 	var firstErr atomic.Value
 	var mu sync.Mutex
@@ -39,6 +47,9 @@ func CalculateSize(paths []string) (ScanResult, error) {
 		go func(p string) {
 			defer wg.Done()
 			err := filepath.WalkDir(p, func(path string, d fs.DirEntry, err error) error {
+				if ctxErr := ctx.Err(); ctxErr != nil {
+					return ctxErr
+				}
 				if err != nil {
 					if !errors.Is(err, os.ErrNotExist) {
 						accessErr := ClassifyError(path, err)
@@ -87,9 +98,16 @@ type ListResult struct {
 }
 
 // ListFiles returns file info for all files under given paths.
+// It is the uncancellable form of ListFilesContext.
+func ListFiles(paths []string) (ListResult, error) {
+	return ListFilesContext(context.Background(), paths)
+}
+
+// ListFilesContext returns file info for all files under given paths.
 // Walks directories in parallel. Returns empty slice if paths is empty.
 // Access errors are collected as warnings rather than stopping the scan.
-func ListFiles(paths []string) (ListResult, error) {
+// The walk stops early and returns ctx.Err() once ctx is cancelled.
+func ListFilesContext(ctx context.Context, paths []string) (ListResult, error) {
 	var mu sync.Mutex
 	var files []FileInfo
 	var warnings []AccessError
@@ -101,6 +119,9 @@ func ListFiles(paths []string) (ListResult, error) {
 		go func(p string) {
 			defer wg.Done()
 			err := filepath.WalkDir(p, func(path string, d fs.DirEntry, err error) error {
+				if ctxErr := ctx.Err(); ctxErr != nil {
+					return ctxErr
+				}
 				if err != nil {
 					if !errors.Is(err, os.ErrNotExist) {
 						accessErr := ClassifyError(path, err)
