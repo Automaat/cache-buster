@@ -103,7 +103,7 @@ func (p *JetBrainsProvider) cleanDirs(ctx context.Context, removable []string, o
 		default:
 		}
 
-		dirSize, err := cache.CalculateSize([]string{dir})
+		dirSize, err := cache.CalculateSizeContext(ctx, []string{dir})
 		if err != nil {
 			fmt.Fprintf(&output, "warning: size calculation failed for %s: %v\n", filepath.Base(dir), err)
 		}

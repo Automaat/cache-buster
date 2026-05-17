@@ -155,14 +155,14 @@ func TestTrim_ContextCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // Cancel immediately
 
-	result, err := Trim(ctx, []string{dir}, TrimOptions{
+	_, err := Trim(ctx, []string{dir}, TrimOptions{
 		MaxSize: 100,
 		MaxAge:  30 * 24 * time.Hour,
 		DryRun:  false,
 	})
 
+	// A cancelled context aborts the file scan before any deletion.
 	assert.ErrorIs(t, err, context.Canceled)
-	assert.Contains(t, result.Output, "interrupted")
 }
 
 func TestTrim_MultiplePaths(t *testing.T) {

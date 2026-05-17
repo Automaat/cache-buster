@@ -1,6 +1,7 @@
 package provider
 
 import (
+	"context"
 	"fmt"
 	"time"
 
@@ -53,8 +54,8 @@ func (b *BaseProvider) Paths() []string {
 }
 
 // CurrentSize implements Provider.
-func (b *BaseProvider) CurrentSize() (int64, error) {
-	result, err := cache.CalculateSize(b.paths)
+func (b *BaseProvider) CurrentSize(ctx context.Context) (int64, error) {
+	result, err := cache.CalculateSizeContext(ctx, b.paths)
 	return result.Size, err
 }
 

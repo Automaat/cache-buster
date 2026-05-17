@@ -1,6 +1,9 @@
 package cache
 
 import (
+	"context"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -8,6 +11,25 @@ import (
 
 	"github.com/Automaat/cache-buster/internal/config"
 )
+
+// buildNestedTree creates dirs nested directories, each holding files files.
+func buildNestedTree(t *testing.T, dirs, files int) string {
+	t.Helper()
+	root := t.TempDir()
+	for i := range dirs {
+		sub := filepath.Join(root, fmt.Sprintf("dir%04d", i))
+		if err := os.MkdirAll(sub, 0o750); err != nil {
+			t.Fatal(err)
+		}
+		for j := range files {
+			f := filepath.Join(sub, fmt.Sprintf("file%04d", j))
+			if err := os.WriteFile(f, make([]byte, 64), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	return root
+}
 
 func TestExpandPaths(t *testing.T) {
 	home, err := os.UserHomeDir()
@@ -357,5 +379,62 @@ func TestListFiles_NonExistentPath(t *testing.T) {
 	// Non-existent paths are silently skipped
 	if len(result.Files) != 0 {
 		t.Errorf("ListFiles() len = %d, want 0", len(result.Files))
+	}
+}
+
+func TestCalculateSizeContext_CancelledBeforeWalk(t *testing.T) {
+	root := buildNestedTree(t, 5, 5)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	result, err := CalculateSizeContext(ctx, []string{root})
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("err = %v, want context.Canceled", err)
+	}
+	// The walk aborts on the first callback, so nothing is summed.
+	if result.Size != 0 {
+		t.Errorf("Size = %d, want 0", result.Size)
+	}
+}
+
+func TestListFilesContext_CancelledBeforeWalk(t *testing.T) {
+	root := buildNestedTree(t, 5, 5)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	result, err := ListFilesContext(ctx, []string{root})
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("err = %v, want context.Canceled", err)
+	}
+	if len(result.Files) != 0 {
+		t.Errorf("Files len = %d, want 0", len(result.Files))
+	}
+}
+
+func TestCalculateSizeContext_CancelDuringWalk(t *testing.T) {
+	// A tree large enough that the walk does not finish before the
+	// concurrently issued cancel lands inside a nested directory.
+	root := buildNestedTree(t, 200, 50)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	go cancel()
+
+	_, err := CalculateSizeContext(ctx, []string{root})
+	if err != nil && !errors.Is(err, context.Canceled) {
+		t.Errorf("err = %v, want nil or context.Canceled", err)
+	}
+}
+
+func TestCalculateSizeContext_NoCancellationCompletes(t *testing.T) {
+	root := buildNestedTree(t, 4, 5)
+
+	result, err := CalculateSizeContext(context.Background(), []string{root})
+	if err != nil {
+		t.Fatalf("CalculateSizeContext() error = %v", err)
+	}
+	if want := int64(4 * 5 * 64); result.Size != want {
+		t.Errorf("Size = %d, want %d", result.Size, want)
 	}
 }

@@ -2,6 +2,7 @@ package provider_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -47,7 +48,7 @@ func TestBaseProvider(t *testing.T) {
 		t.Error("available = false, want true")
 	}
 
-	size, err := base.CurrentSize()
+	size, err := base.CurrentSize(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -450,13 +451,9 @@ func TestFileProvider_ContextCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	result, err := p.Clean(ctx, provider.CleanOptions{})
-	if err == nil {
-		t.Error("expected context cancellation error")
-	}
-
-	if result.Output != "interrupted" {
-		t.Errorf("output = %q, want %q", result.Output, "interrupted")
+	// A cancelled context aborts the size scan before any deletion.
+	if _, err := p.Clean(ctx, provider.CleanOptions{}); !errors.Is(err, context.Canceled) {
+		t.Errorf("err = %v, want context.Canceled", err)
 	}
 }
 

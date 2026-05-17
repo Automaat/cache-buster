@@ -181,7 +181,7 @@ func (m model) scanProviderCmd(idx int) tea.Cmd {
 			return scanResultMsg{idx: idx, item: item}
 		}
 
-		currentSize, err := p.CurrentSize()
+		currentSize, err := p.CurrentSize(m.ctx)
 		if err != nil {
 			item.errMsg = fmt.Sprintf("scan error: %v", err)
 			return scanResultMsg{idx: idx, item: item}
