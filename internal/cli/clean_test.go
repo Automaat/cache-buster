@@ -294,7 +294,7 @@ providers:
     paths:
       - ` + cacheDir + `
     max_size: 1GB
-    clean_cmd: "/nonexistent-command-that-does-not-exist"
+    clean_cmd: "false"
   working-provider:
     enabled: true
     paths:
