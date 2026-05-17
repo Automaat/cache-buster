@@ -2,5 +2,43 @@
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": [
     "config:recommended"
+  ],
+  "customManagers": [
+    {
+      "customType": "regex",
+      "description": "Go tools pinned inline in CI workflows and mise tasks",
+      "managerFilePatterns": [
+        "/^\\.github/workflows/.+\\.ya?ml$/",
+        "/^\\.mise\\.toml$/"
+      ],
+      "matchStrings": [
+        "(?<depName>[a-z0-9.\\-/]+?)/cmd/[a-z0-9-]+@(?<currentValue>v[0-9][^\\s\"']*)"
+      ],
+      "datasourceTemplate": "go"
+    },
+    {
+      "customType": "regex",
+      "description": "golangci-lint version used by golangci-lint-action",
+      "managerFilePatterns": [
+        "/^\\.github/workflows/ci\\.ya?ml$/"
+      ],
+      "matchStrings": [
+        "version: (?<currentValue>v2[0-9.]+)\\s"
+      ],
+      "depNameTemplate": "golangci/golangci-lint",
+      "datasourceTemplate": "github-releases"
+    },
+    {
+      "customType": "regex",
+      "description": "GoReleaser version used by goreleaser-action",
+      "managerFilePatterns": [
+        "/^\\.github/workflows/release\\.ya?ml$/"
+      ],
+      "matchStrings": [
+        "version: (?<currentValue>v[0-9][^\\s]*)"
+      ],
+      "depNameTemplate": "goreleaser/goreleaser",
+      "datasourceTemplate": "github-releases"
+    }
   ]
 }
