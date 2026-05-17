@@ -32,6 +32,10 @@ run = "go test -race ./..."
 description = "Run linter"
 run = "golangci-lint run"
 
+[tasks.vuln]
+description = "Scan for known vulnerabilities"
+run = "go run golang.org/x/vuln/cmd/govulncheck@v1.3.0 ./..."
+
 [tasks.cover]
 description = "Generate coverage report"
 run = """
