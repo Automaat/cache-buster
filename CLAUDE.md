@@ -16,7 +16,7 @@ pkg/size/             - Human-readable size parsing/formatting
 
 ## Tech Stack
 
-**Language:** Go 1.25
+**Language:** Go 1.25 source (`go` directive); 1.26.3 toolchain
 **CLI Framework:** Cobra + Viper
 **Terminal UI:** Lipgloss (tables, styling)
 **Testing:** testify (assert/require)
@@ -78,8 +78,9 @@ go test -v -race ./...              # with race detection
 type Provider interface {
     Name() string
     Paths() []string
-    CurrentSize() (int64, error)
+    CurrentSize(ctx context.Context) (int64, error)
     MaxSize() int64
+    MaxAge() time.Duration
     Clean(ctx context.Context, opts CleanOptions) (CleanResult, error)
     Available() bool
 }
@@ -153,12 +154,14 @@ Before committing:
 - [ ] `golangci-lint run` passes
 - [ ] `go test -race ./...` passes
 - [ ] `go build ./cmd/cache-buster` succeeds
+- [ ] `mise run vuln` (govulncheck) reports no vulnerabilities
 - [ ] Manual test of changed commands
 
 ```bash
 golangci-lint run
 go test -race ./...
 go build -o cache-buster ./cmd/cache-buster
+mise run vuln
 ```
 
 ## Common Commands
