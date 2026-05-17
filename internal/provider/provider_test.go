@@ -1021,13 +1021,8 @@ func TestCommandProvider_InvalidShellQuote(t *testing.T) {
 		Enabled:  true,
 	}
 
-	p, err := provider.NewCommandProvider("test", cfg)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	_, err = p.Clean(context.Background(), provider.CleanOptions{})
-	if err == nil {
+	// clean_cmd is parsed at construction, so the error surfaces here.
+	if _, err := provider.NewCommandProvider("test", cfg); err == nil {
 		t.Error("expected error for invalid shell quote")
 	}
 }
@@ -1052,6 +1047,44 @@ func TestCommandProvider_QuotedArgs(t *testing.T) {
 
 	if result.Output != "hello world" {
 		t.Errorf("output = %q, want %q", result.Output, "hello world")
+	}
+}
+
+func TestCommandProvider_Available(t *testing.T) {
+	// Temporary PATH containing exactly one fake executable.
+	binDir := t.TempDir()
+	const binName = "fakecleantool"
+	if err := os.WriteFile(filepath.Join(binDir, binName), []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", binDir)
+
+	tests := []struct {
+		name     string
+		cleanCmd string
+		want     bool
+	}{
+		{"binary on PATH", binName + " clean", true},
+		{"binary on PATH with quoted args", binName + ` "arg with spaces"`, true},
+		{"missing binary", "definitely-not-installed-xyz clean", false},
+		{"empty clean_cmd", "", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p, err := provider.NewCommandProvider("test", config.Provider{
+				Paths:    []string{t.TempDir()},
+				MaxSize:  "1G",
+				CleanCmd: tt.cleanCmd,
+				Enabled:  true,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := p.Available(); got != tt.want {
+				t.Errorf("Available() = %v, want %v", got, tt.want)
+			}
+		})
 	}
 }
 

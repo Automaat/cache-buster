@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"fmt"
+	"os/exec"
 
 	"github.com/Automaat/cache-buster/internal/cache"
 	"github.com/Automaat/cache-buster/internal/config"
@@ -12,7 +13,8 @@ import (
 // CommandProvider cleans caches by running an external command.
 type CommandProvider struct {
 	*BaseProvider
-	cleanCmd string
+	cleanCmd string   // original clean_cmd, kept for dry-run display
+	cmdArgs  []string // clean_cmd parsed once at construction
 }
 
 // NewCommandProvider creates a provider that cleans via external command.
@@ -22,10 +24,27 @@ func NewCommandProvider(name string, cfg config.Provider) (*CommandProvider, err
 		return nil, err
 	}
 
+	args, err := shellquote.Split(cfg.CleanCmd)
+	if err != nil {
+		return nil, fmt.Errorf("invalid clean_cmd: %w", err)
+	}
+
 	return &CommandProvider{
 		BaseProvider: base,
 		cleanCmd:     cfg.CleanCmd,
+		cmdArgs:      args,
 	}, nil
+}
+
+// Available reports whether the clean command's executable is on PATH.
+// A configured cache path is not enough: the tool itself must be installed
+// for a clean to succeed.
+func (p *CommandProvider) Available() bool {
+	if len(p.cmdArgs) == 0 {
+		return false
+	}
+	_, err := exec.LookPath(p.cmdArgs[0])
+	return err == nil
 }
 
 // Clean implements Provider.
@@ -60,10 +79,5 @@ func (p *CommandProvider) fullClean(ctx context.Context, opts CleanOptions) (Cle
 		}, nil
 	}
 
-	parts, err := shellquote.Split(p.cleanCmd)
-	if err != nil {
-		return CleanResult{}, fmt.Errorf("invalid command: %w", err)
-	}
-
-	return runMeasuredClean(ctx, p.name, parts, p.CurrentSize)
+	return runMeasuredClean(ctx, p.name, p.cmdArgs, p.CurrentSize)
 }
