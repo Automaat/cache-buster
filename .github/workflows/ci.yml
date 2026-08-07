@@ -40,7 +40,7 @@ jobs:
           go-version: "1.26.4"
 
       - name: Install nilaway
-        run: go install go.uber.org/nilaway/cmd/nilaway@v0.0.0-20260807005220-a166d2f0e942
+        run: go install go.uber.org/nilaway/cmd/nilaway@v0.0.0-20260807080650-10f479b6bb41
 
       - name: Run nilaway
         run: |
