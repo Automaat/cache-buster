@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os/exec"
+	"regexp"
 	"strings"
 	"time"
 
@@ -34,6 +35,8 @@ func NewDockerProvider(name string, cfg config.Provider) (*DockerProvider, error
 	}, nil
 }
 
+var embeddedVolumesFlag = regexp.MustCompile(`\s--volumes(=\S*)?`)
+
 // stripVolumesFlag drops --volumes from configs written by older versions,
 // whose saved clean_cmd would otherwise keep deleting volumes.
 func stripVolumesFlag(cmd string) string {
@@ -47,7 +50,7 @@ func stripVolumesFlag(cmd string) string {
 			continue
 		}
 		// Wrapped commands such as sh -c carry the flag inside one token.
-		kept = append(kept, strings.ReplaceAll(part, " --volumes", ""))
+		kept = append(kept, embeddedVolumesFlag.ReplaceAllString(part, ""))
 	}
 	return shellquote.Join(kept...)
 }

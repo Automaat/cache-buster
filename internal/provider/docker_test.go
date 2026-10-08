@@ -266,11 +266,12 @@ func TestDockerVolumesSize_NoVolumesRow_NoPathFallback(t *testing.T) {
 
 func TestStripVolumesFlag(t *testing.T) {
 	tests := map[string]string{
-		"docker system prune -af --volumes":         "docker system prune -af",
-		"docker system prune --volumes=true -af":    "docker system prune -af",
-		`sh -c "docker system prune -af --volumes"`: "sh -c 'docker system prune -af'",
-		"docker system prune -af":                   "docker system prune -af",
-		"docker volume prune -f":                    "docker volume prune -f",
+		"docker system prune -af --volumes":          "docker system prune -af",
+		"docker system prune --volumes=true -af":     "docker system prune -af",
+		`sh -c "docker system prune -af --volumes"`:  "sh -c 'docker system prune -af'",
+		"sh -c 'docker system prune -af\t--volumes'": "sh -c 'docker system prune -af'",
+		"docker system prune -af":                    "docker system prune -af",
+		"docker volume prune -f":                     "docker volume prune -f",
 	}
 	for in, want := range tests {
 		assert.Equal(t, want, stripVolumesFlag(in), in)
