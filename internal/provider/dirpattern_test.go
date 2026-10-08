@@ -159,6 +159,28 @@ func TestDirPatternSkipRules(t *testing.T) {
 			wantReason: "contains .git",
 		},
 		{
+			name: ".GIT directory in another letter case",
+			setup: func(t *testing.T, root string) string {
+				t.Helper()
+				dir := makeDir(t, root, "sail-gitcase", 10, 10*time.Hour)
+				require.NoError(t, os.Mkdir(filepath.Join(dir, ".GIT"), 0o750))
+				ageTree(t, dir, 10*time.Hour)
+				return dir
+			},
+			wantReason: "contains .git",
+		},
+		{
+			name: ".Git file nested deeper",
+			setup: func(t *testing.T, root string) string {
+				t.Helper()
+				dir := makeDir(t, root, "sail-gitcasefile", 10, 10*time.Hour)
+				require.NoError(t, os.WriteFile(filepath.Join(dir, "sub", ".Git"), []byte("gitdir: x"), 0o600))
+				ageTree(t, dir, 10*time.Hour)
+				return dir
+			},
+			wantReason: "contains .git",
+		},
+		{
 			name: "regular file matching the glob",
 			setup: func(t *testing.T, root string) string {
 				t.Helper()

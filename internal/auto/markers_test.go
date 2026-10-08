@@ -490,3 +490,28 @@ func TestCheckProtected_AnyCaseMarkerProtectsProvider(t *testing.T) {
 
 	assert.Equal(t, verdictProtected, v.kind)
 }
+
+func TestInsideGitCheckout_AnyCaseMarkerOnAncestor(t *testing.T) {
+	for _, name := range []string{".GIT", ".Git"} {
+		for _, kind := range []string{"dir", "worktree file"} {
+			t.Run(name+" "+kind, func(t *testing.T) {
+				home := t.TempDir()
+				repo := filepath.Join(home, "proj")
+				require.NoError(t, os.MkdirAll(filepath.Join(repo, "node_modules", ".cache"), 0o750))
+				marker := filepath.Join(repo, name)
+				if kind == "dir" {
+					require.NoError(t, os.Mkdir(marker, 0o750))
+				} else {
+					require.NoError(t, os.WriteFile(marker, []byte("gitdir: x\n"), 0o600))
+				}
+				if _, err := os.Lstat(marker); err != nil {
+					t.Skipf("cannot create %s on this filesystem: %v", name, err)
+				}
+
+				assert.True(t, insideGitCheckout(filepath.Join(repo, "node_modules", ".cache"), home))
+				assert.True(t, insideGitCheckout(repo, home))
+				assert.False(t, insideGitCheckout(filepath.Join(home, "other"), home))
+			})
+		}
+	}
+}

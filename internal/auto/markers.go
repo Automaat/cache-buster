@@ -7,8 +7,9 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
+
+	"github.com/smykla-skalski/bilgie/internal/provider"
 )
 
 // scanLimits bound the git marker scan of one provider path. Depth counts the
@@ -123,7 +124,7 @@ func listDir(ctx, parent context.Context, dir string, budget, dirBudget int, wan
 			return out
 		}
 		for _, e := range batch {
-			if strings.EqualFold(e.Name(), ".git") {
+			if provider.IsGitMarkerName(e.Name()) {
 				out.found = true
 				return out
 			}

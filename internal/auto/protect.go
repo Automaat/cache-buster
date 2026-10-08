@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/smykla-skalski/bilgie/internal/config"
+	"github.com/smykla-skalski/bilgie/internal/provider"
 )
 
 // protectedRoots returns the home-relative locations auto never touches.
@@ -82,7 +83,7 @@ func insideGitCheckout(path, home string) bool {
 			if dir == string(filepath.Separator) || dir == "." || isHome(dir) {
 				break
 			}
-			if _, err := os.Lstat(filepath.Join(dir, ".git")); err == nil {
+			if hasGitMarker(dir) {
 				return true
 			}
 			if filepath.Dir(dir) == dir {
@@ -204,4 +205,30 @@ func withoutDataAlias(paths []string) []string {
 func within(path, root string) bool {
 	root = strings.TrimRight(root, string(filepath.Separator))
 	return root == "" || path == root || strings.HasPrefix(path, root+string(filepath.Separator))
+}
+
+// hasGitMarker reports whether dir holds a .git entry in any letter case.
+// An exact Lstat settles the common hit cheaply; the name listing catches a
+// differently cased marker on a case-sensitive volume. An unreadable dir
+// without an exact marker is not a checkout root.
+func hasGitMarker(dir string) bool {
+	if _, err := os.Lstat(filepath.Join(dir, ".git")); err == nil {
+		return true
+	}
+	f, err := os.Open(dir)
+	if err != nil {
+		return false
+	}
+	defer func() { _ = f.Close() }()
+	for {
+		batch, readErr := f.ReadDir(listBatch)
+		for _, e := range batch {
+			if provider.IsGitMarkerName(e.Name()) {
+				return true
+			}
+		}
+		if readErr != nil {
+			return false
+		}
+	}
 }
