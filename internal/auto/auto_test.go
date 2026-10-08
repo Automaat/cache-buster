@@ -833,8 +833,8 @@ func TestIsProtected_FilesystemRootAndDataAlias(t *testing.T) {
 		assert.True(t, isProtected("/System/Volumes/Data", home, scan))
 	}
 	assert.True(t, isProtected("/", home, true))
-	assert.True(t, within("/Users/me", "/"))
-	assert.False(t, within("/Users/me2", "/Users/me"))
+	assert.True(t, within(filepath.FromSlash("/Users/me"), string(filepath.Separator)))
+	assert.False(t, within(filepath.FromSlash("/Users/me2"), filepath.FromSlash("/Users/me")))
 }
 
 func TestRun_SkipsUncleanXcodeArchivesPathOutsideHome(t *testing.T) {

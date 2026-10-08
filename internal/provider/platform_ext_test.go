@@ -1,9 +1,10 @@
 package provider_test
 
 import (
-	"github.com/Automaat/cache-buster/internal/config"
 	"runtime"
 	"testing"
+
+	"github.com/Automaat/cache-buster/internal/config"
 )
 
 // skipWithoutModeBits skips tests that need the OS to deny access through
