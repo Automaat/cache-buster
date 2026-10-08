@@ -557,8 +557,10 @@ Dot entries are ignored. In full mode providers with a `clean_cmd` run it.
    plugin clones under `plugins/` (`lua`, `make`, `teleport-ent`, ...) are real git checkouts, and
    they are never touched.
 2. Skips with a reason when `mise` is running or any process command line names a file below
-   `<mise dir>/installs/`, or the process list cannot be read. `mise prune` itself does not know
-   about every running process, so the check comes first.
+   `<mise dir>/installs/`, or the process list cannot be read. The check sees only what the process
+   list shows: a binary started by bare name from `PATH` (`node server.js`), or any binary on Windows
+   (image names only), is not visible to it. `mise prune` itself keeps the version a running process
+   started from, so mise is the backstop there.
 3. Runs `mise prune --dry-run` and reads its `rm -rf <installs>/<tool>/<version>` (or `tool@version`)
    lines. A failing, timed out or unparseable listing, or a path outside `installs/<tool>/<version>`,
    skips the provider and deletes nothing.
