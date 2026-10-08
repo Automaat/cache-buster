@@ -347,6 +347,21 @@ func scanDir(ctx context.Context, dir string, rootMod time.Time) (sc dirScan, sk
 			}
 			return err
 		}
+		var (
+			id     osshim.FileID
+			nlink  uint64
+			shared bool
+		)
+		if info.Mode().IsRegular() {
+			id, nlink, shared = osshim.SharedFileID(path, info)
+			if shared {
+				// Directory entries of hard-linked files can carry stale
+				// times on Windows; the open above refreshes them.
+				if fresh, statErr := os.Lstat(path); statErr == nil {
+					info = fresh
+				}
+			}
+		}
 		if info.ModTime().After(sc.newest) {
 			sc.newest = info.ModTime()
 		}
@@ -361,7 +376,7 @@ func scanDir(ctx context.Context, dir string, rootMod time.Time) (sc dirScan, sk
 
 		if info.Mode().IsRegular() {
 			sc.files++
-			if id, nlink, shared := osshim.SharedFileID(path, info); shared {
+			if shared {
 				if sc.links == nil {
 					sc.links = make(map[osshim.FileID]linkInfo)
 				}

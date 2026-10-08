@@ -466,3 +466,18 @@ func TestCalculateSize_CountsHardlinkedFilesOnce(t *testing.T) {
 		t.Fatalf("size = %d, want 1050 (shared inode counted once)", res.Size)
 	}
 }
+
+func TestCalculateSize_DuplicatePathsCountOnce(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "a.bin"), make([]byte, 400), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := CalculateSize([]string{dir, dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Size != 400 {
+		t.Fatalf("size = %d, want 400", res.Size)
+	}
+}
