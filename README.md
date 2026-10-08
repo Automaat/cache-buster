@@ -310,8 +310,10 @@ terminal.
 only used for `status`. `lsof` run as a non-root user cannot see other users'
 processes.
 
-The built-in `sail-dirs` provider (`sail*` in the OS temp dir) uses `dir-pattern` and is
-disabled by default. Enable it with `enabled: true` after reviewing
+The built-in `sail-dirs` provider (`sail*` in the OS temp dir and in the fixed system
+temp dir, `/tmp` or `/private/tmp` on macOS, listed once when both resolve to the same directory)
+uses `dir-pattern` and is disabled by default. The paths follow the machine and are not saved to
+the config file. Enable it with `enabled: true` after reviewing
 `cache-buster clean sail-dirs --dry-run`, which lists each directory with its size,
 idle time and the reason it would be skipped.
 

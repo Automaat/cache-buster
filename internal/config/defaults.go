@@ -298,7 +298,7 @@ func tempDirProviders(p Platform) map[string]Provider {
 		"sail-dirs": {
 			Enabled: false,
 			Type:    TypeDirPattern,
-			Paths:   []string{p.tempGlob("sail*")},
+			Paths:   p.tempGlobs("sail*"),
 			MaxSize: "20G",
 			MinIdle: "2h",
 		},

@@ -203,6 +203,9 @@ func (c *Config) Validate() error {
 		if len(p.Paths) == 0 {
 			return fmt.Errorf("provider %q: at least one path is required", name)
 		}
+		if slices.ContainsFunc(p.Paths, func(path string) bool { return strings.TrimSpace(path) == "" }) {
+			return fmt.Errorf("provider %q: paths must not be blank", name)
+		}
 		if p.MaxSize == "" {
 			return fmt.Errorf("provider %q: max_size is required", name)
 		}

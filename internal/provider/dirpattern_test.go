@@ -358,7 +358,8 @@ func TestDefaultSailProviderIsOptIn(t *testing.T) {
 	require.True(t, ok)
 
 	assert.False(t, sail.Enabled, "destructive provider must be opt-in")
-	assert.Equal(t, []string{filepath.Join(os.TempDir(), "sail*")}, sail.Paths)
+	assert.Contains(t, sail.Paths, filepath.Join(os.TempDir(), "sail*"))
+	assert.LessOrEqual(t, len(sail.Paths), 2, "OS temp dir plus the system temp dir at most")
 	assert.Equal(t, config.TypeDirPattern, sail.Type)
 	assert.NotContains(t, cfg.AllEnabledProviders(), "sail-dirs")
 }
@@ -451,4 +452,19 @@ func TestDirPatternNeverRemovesGitDirectoryItself(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, exists(gitDir))
 	assert.Contains(t, res.Output, "is a .git directory")
+}
+
+func TestDirPatternSkipsTheTempDirInUse(t *testing.T) {
+	root := t.TempDir()
+	inUse := makeDir(t, root, "sailbox", 10, 10*time.Hour)
+	other := makeDir(t, root, "sail-old", 10, 10*time.Hour)
+	p := newTestDirProvider(t, root, nil)
+	p.keep = []string{filepath.Join(inUse, "sub")}
+
+	res, err := p.Clean(context.Background(), CleanOptions{})
+
+	require.NoError(t, err)
+	assert.DirExists(t, inUse, "an ancestor of the temp dir in use is never removed")
+	assert.NoDirExists(t, other)
+	assert.Contains(t, res.Output, "contains the temp dir in use")
 }
