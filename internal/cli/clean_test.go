@@ -205,7 +205,7 @@ func TestResolveProviders_All(t *testing.T) {
 		},
 	}
 
-	names, err := resolveProviders(cfg, nil, true)
+	names, err := resolveProviders(cfg, nil, true, false)
 	require.NoError(t, err)
 
 	assert.Len(t, names, 2)
@@ -222,7 +222,7 @@ func TestResolveProviders_Specific(t *testing.T) {
 		},
 	}
 
-	names, err := resolveProviders(cfg, []string{"prov1"}, false)
+	names, err := resolveProviders(cfg, []string{"prov1"}, false, false)
 	require.NoError(t, err)
 
 	assert.Equal(t, []string{"prov1"}, names)
@@ -235,7 +235,7 @@ func TestResolveProviders_InvalidProvider(t *testing.T) {
 		},
 	}
 
-	_, err := resolveProviders(cfg, []string{"invalid"}, false)
+	_, err := resolveProviders(cfg, []string{"invalid"}, false, false)
 
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "unknown providers: invalid")
@@ -381,4 +381,25 @@ providers:
 
 	assert.Contains(t, output, "Cleaning test-provider")
 	assert.Contains(t, output, "done")
+}
+
+func TestResolveProviders_AllSmartSkipsDockerVolumes(t *testing.T) {
+	cfg := &config.Config{
+		Providers: map[string]config.Provider{
+			"prov1":          {Enabled: true, Paths: []string{"/tmp"}, MaxSize: "1GB"},
+			"docker-volumes": {Enabled: true, Paths: []string{"/tmp"}, MaxSize: "1GB"},
+		},
+	}
+
+	smart, err := resolveProviders(cfg, nil, true, true)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"prov1"}, smart)
+
+	full, err := resolveProviders(cfg, nil, true, false)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"docker-volumes", "prov1"}, full)
+
+	named, err := resolveProviders(cfg, []string{"docker-volumes"}, false, true)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"docker-volumes"}, named)
 }
