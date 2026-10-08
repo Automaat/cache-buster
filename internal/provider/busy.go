@@ -72,8 +72,11 @@ func processLister(wanted []string) func(context.Context) ([]string, error) {
 }
 
 // excludeSelf drops the process with pid self and its ancestors, except an
-// ancestor whose executable is itself a wanted tool ("cargo run -- clean"):
-// that tool is really running. A zero pid is unknown and never matches.
+// ancestor that is a wanted tool: its executable is the tool, or its command
+// line names the tool without embedding cache-buster's own arguments
+// ("cargo run -- clean", "ruby brew.rb bundle"). A wrapper such as
+// "sh -c cache-buster clean cargo" embeds them and is dropped. A zero pid is
+// unknown and never matches.
 func excludeSelf(procs []osshim.Process, self int, wanted []string) []string {
 	byPID := make(map[int]*osshim.Process, len(procs))
 	for i := range procs {
@@ -82,13 +85,21 @@ func excludeSelf(procs []osshim.Process, self int, wanted []string) []string {
 		}
 	}
 
+	var selfArgs string
+	if p, ok := byPID[self]; ok {
+		_, selfArgs, _ = strings.Cut(strings.TrimSpace(p.CommandLine), " ")
+		selfArgs = strings.TrimSpace(selfArgs)
+	}
+
 	skip := map[int]bool{}
-	for pid := self; pid != 0 && !skip[pid]; {
+	seen := map[int]bool{}
+	for pid := self; pid != 0 && !seen[pid]; {
+		seen[pid] = true
 		p, ok := byPID[pid]
 		if !ok {
 			break
 		}
-		if pid == self || matchProcess(firstToken(p.CommandLine), wanted) == "" {
+		if pid == self || !keepAncestor(p.CommandLine, selfArgs, wanted) {
 			skip[pid] = true
 		}
 		pid = p.PPID
@@ -102,6 +113,14 @@ func excludeSelf(procs []osshim.Process, self int, wanted []string) []string {
 		lines = append(lines, procs[i].CommandLine)
 	}
 	return lines
+}
+
+func keepAncestor(commandLine, selfArgs string, wanted []string) bool {
+	if matchProcess(firstToken(commandLine), wanted) != "" {
+		return true
+	}
+	embedsSelf := selfArgs != "" && strings.Contains(commandLine, selfArgs)
+	return !embedsSelf && matchProcess(commandLine, wanted) != ""
 }
 
 func firstToken(commandLine string) string {

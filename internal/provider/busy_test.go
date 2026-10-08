@@ -88,6 +88,34 @@ func TestExcludeSelf(t *testing.T) {
 		assert.Equal(t, "cargo is running", g.busyReason(context.Background()))
 	})
 
+	t.Run("tool named later in the ancestor line stays visible", func(t *testing.T) {
+		brew := []osshim.Process{
+			{PID: 1, PPID: 0, CommandLine: "/sbin/launchd"},
+			{PID: 50, PPID: 1, CommandLine: "/opt/homebrew/ruby -W1 /opt/homebrew/Library/Homebrew/brew.rb bundle"},
+			{PID: 55, PPID: 50, CommandLine: "/bin/sh -c cache-buster clean homebrew"},
+			{PID: 60, PPID: 55, CommandLine: "cache-buster clean homebrew"},
+		}
+		g := fakeGuard(excludeSelf(brew, 60, []string{"brew"}), nil, nil)
+		g.processes = []string{"brew"}
+		assert.Equal(t, "brew is running", g.busyReason(context.Background()))
+
+		spaced := []osshim.Process{
+			{PID: 50, PPID: 0, CommandLine: "/Users/John Smith/.cargo/bin/cargo run"},
+			{PID: 60, PPID: 50, CommandLine: "cache-buster clean cargo"},
+		}
+		g = fakeGuard(excludeSelf(spaced, 60, wanted), nil, nil)
+		assert.Equal(t, "cargo is running", g.busyReason(context.Background()))
+	})
+
+	t.Run("cycle among kept ancestors terminates", func(t *testing.T) {
+		cyc := []osshim.Process{
+			{PID: 60, PPID: 5, CommandLine: "cache-buster clean cargo"},
+			{PID: 5, PPID: 6, CommandLine: "cargo.exe"},
+			{PID: 6, PPID: 5, CommandLine: "cargo.exe"},
+		}
+		assert.Len(t, excludeSelf(cyc, 60, wanted), 2)
+	})
+
 	t.Run("unknown pids and cycles are safe", func(t *testing.T) {
 		got := excludeSelf([]osshim.Process{{CommandLine: "cargo build"}}, 0, wanted)
 		assert.Equal(t, []string{"cargo build"}, got)

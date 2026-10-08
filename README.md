@@ -290,7 +290,8 @@ failure. If the check itself fails, the provider is skipped too.
 
 Busy detection errs toward skipping: any process whose command line contains
 the tool name counts, including wrappers such as `sudo` or `sh -c`. The
-cache-buster process itself and its parent are never counted. A hung
+cache-buster process and its wrapper ancestors are not counted, but an
+ancestor that is the tool itself, such as `cargo run -- clean cargo`, is. A hung
 `clean_cmd` is killed with its whole process group, so it must not need a
 terminal.
 
