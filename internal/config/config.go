@@ -30,6 +30,8 @@ type Provider struct {
 	SkipIfOpen *bool `mapstructure:"skip_if_open" yaml:"skip_if_open,omitempty"`
 	// SkipIfGitWorktree guards directory-pattern matches containing .git (default true).
 	SkipIfGitWorktree *bool `mapstructure:"skip_if_git_worktree" yaml:"skip_if_git_worktree,omitempty"`
+	// SkipPrefixes lists entry-name prefixes that whole-entry providers never evict.
+	SkipPrefixes []string `mapstructure:"skip_prefixes" yaml:"skip_prefixes,omitempty"`
 }
 
 // TypeDirPattern is the provider type that removes whole stale directories matching a glob.

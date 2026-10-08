@@ -21,12 +21,13 @@ func TestDefaultProviders_ExtraCaches(t *testing.T) {
 		{"chrome-devtools-mcp", "~/.cache/chrome-devtools-mcp"},
 		{"vscode-shipit", "~/Library/Caches/com.microsoft.VSCode.ShipIt"},
 	}
+	optIn := map[string]bool{"huggingface": true, "playwright": true, "chrome-devtools-mcp": true}
 	defaults := DefaultProviders()
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			p, ok := defaults[tt.name]
 			require.True(t, ok)
-			assert.True(t, p.Enabled)
+			assert.Equal(t, !optIn[tt.name], p.Enabled)
 			assert.Equal(t, []string{tt.path}, p.Paths)
 			assert.Empty(t, p.CleanCmd)
 			assert.NotEmpty(t, p.MaxSize)
@@ -48,4 +49,10 @@ func TestDefaultProviders_HomebrewScrubsCache(t *testing.T) {
 
 func TestDefaultConfig_Validates(t *testing.T) {
 	require.NoError(t, DefaultConfig().Validate())
+}
+
+func TestDefaultProviders_ChromeDevtoolsProtectsProfiles(t *testing.T) {
+	p := DefaultProviders()["chrome-devtools-mcp"]
+	assert.False(t, p.Enabled)
+	assert.Contains(t, p.SkipPrefixes, "chrome-profile-")
 }

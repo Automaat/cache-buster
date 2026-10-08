@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -20,11 +21,20 @@ nightly-2024-01-01-aarch64-apple-darwin
 beta-aarch64-apple-darwin (active)
 `
 
+// rustupRealListing is the format plain `rustup toolchain list` prints:
+// names and markers only, never paths.
+const rustupRealListing = `stable-aarch64-apple-darwin (active, default)
+1.99.0-aarch64-apple-darwin
+1.75.0-aarch64-apple-darwin
+mylinked
+`
+
 func TestRemovableToolchains(t *testing.T) {
 	tests := []struct {
 		name      string
 		listing   string
 		overrides string
+		linked    map[string]bool
 		want      []string
 		wantErr   bool
 	}{
@@ -54,9 +64,16 @@ func TestRemovableToolchains(t *testing.T) {
 			wantErr: true,
 		},
 		{
-			name:    "linked toolchain is kept and its path is not a marker",
-			listing: "stable-aarch64-apple-darwin\nnightly (default)\nmytc /Users/me/default-build\n1.75.0\n",
+			name:    "linked toolchain is kept",
+			listing: "stable-aarch64-apple-darwin\nnightly (default)\nmytc\n1.75.0\n",
+			linked:  map[string]bool{"mytc": true},
 			want:    []string{"1.75.0"},
+		},
+		{
+			name:      "no overrides is not a pin",
+			listing:   "nightly (default)\noverrides\n1.75.0\n",
+			overrides: "no overrides\n",
+			want:      []string{"overrides", "1.75.0"},
 		},
 		{
 			name:    "stderr noise is not a toolchain",
@@ -90,7 +107,7 @@ func TestRemovableToolchains(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := removableToolchains(tt.listing, tt.overrides)
+			got, err := removableToolchains(tt.listing, tt.overrides, func(n string) bool { return tt.linked[n] })
 			if tt.wantErr {
 				require.Error(t, err)
 				return
@@ -128,6 +145,11 @@ func newFakeRustupProvider(t *testing.T, f *fakeRustup) *RustupProvider {
 	t.Helper()
 	dir := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "blob"), make([]byte, 2048), 0o600))
+	for line := range strings.SplitSeq(f.list, "\n") {
+		if fields := strings.Fields(line); len(fields) > 0 && toolchainNamePattern.MatchString(fields[0]) {
+			require.NoError(t, os.MkdirAll(filepath.Join(dir, fields[0]), 0o750))
+		}
+	}
 	p, err := NewRustupProvider("rustup", config.Provider{
 		Paths:   []string{dir},
 		MaxSize: "1K",
@@ -279,4 +301,50 @@ func TestRustupProvider_ForeignRustupHomeRemovesNothing(t *testing.T) {
 	t.Setenv("RUSTUP_HOME", filepath.Dir(p.paths[0]))
 	_, err = p.Clean(context.Background(), CleanOptions{DryRun: true})
 	require.NoError(t, err)
+}
+
+func TestRustupProvider_SymlinkedToolchainNeverUninstalled(t *testing.T) {
+	home := t.TempDir()
+	toolchains := filepath.Join(home, "toolchains")
+	require.NoError(t, os.MkdirAll(toolchains, 0o750))
+	require.NoError(t, os.WriteFile(filepath.Join(toolchains, "blob"), make([]byte, 2048), 0o600))
+	for _, name := range []string{"stable-aarch64-apple-darwin", "1.99.0-aarch64-apple-darwin", "1.75.0-aarch64-apple-darwin"} {
+		require.NoError(t, os.MkdirAll(filepath.Join(toolchains, name), 0o750))
+	}
+	own := t.TempDir()
+	require.NoError(t, os.Symlink(own, filepath.Join(toolchains, "mylinked")))
+	t.Setenv("RUSTUP_HOME", home)
+
+	f := &fakeRustup{list: rustupRealListing}
+	p, err := NewRustupProvider("rustup", config.Provider{Paths: []string{toolchains}, MaxSize: "1K", Enabled: true})
+	require.NoError(t, err)
+	p.run = f.run
+	p.busy = nil
+
+	res, err := p.Clean(context.Background(), CleanOptions{DryRun: true})
+	require.NoError(t, err)
+	assert.NotContains(t, res.Output, "mylinked")
+	assert.Contains(t, res.Output, "1.99.0-aarch64-apple-darwin")
+	assert.Contains(t, res.Output, "1.75.0-aarch64-apple-darwin")
+
+	_, err = p.Clean(context.Background(), CleanOptions{})
+	require.NoError(t, err)
+	for _, call := range f.calls {
+		assert.NotContains(t, call, "mylinked")
+	}
+}
+
+func TestRustupProvider_MissingToolchainDirIsKept(t *testing.T) {
+	p := newFakeRustupProvider(t, &fakeRustup{list: "nightly (default)\n"})
+	assert.True(t, p.isLinked("ghost"), "unverifiable toolchains fail closed")
+}
+
+func TestRustupProvider_DryRunReportsProjectedBytes(t *testing.T) {
+	f := &fakeRustup{list: rustupRealListing}
+	p := newFakeRustupProvider(t, f)
+	require.NoError(t, os.WriteFile(filepath.Join(p.paths[0], "1.99.0-aarch64-apple-darwin", "lib"), make([]byte, 4096), 0o600))
+
+	res, err := p.Clean(context.Background(), CleanOptions{DryRun: true})
+	require.NoError(t, err)
+	assert.Equal(t, int64(4096), res.BytesCleaned)
 }
