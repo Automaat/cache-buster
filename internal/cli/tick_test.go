@@ -311,3 +311,17 @@ func TestInstallAgent_ReplacesTheV010AutoAgent(t *testing.T) {
 	assert.Equal(t, []string{"launchctl", "bootout", "gui/501/" + auto.AgentLabel}, f.launchd[1])
 	assert.Equal(t, "bootstrap", f.launchd[2][1])
 }
+
+func TestTick_PreviewRunsLeaveTheRealStateAlone(t *testing.T) {
+	r := newTickRig(t, "")
+	free, err := assumedFree("3G", r.env.free)
+	require.NoError(t, err)
+	r.env.free = free
+
+	require.NoError(t, runTickWithLoader(t.Context(), r.loader, r.env, true))
+	require.NoError(t, runAutoWithLoader(t.Context(), r.loader, r.env, true))
+
+	assert.NoFileExists(t, filepath.Join(r.env.stateDir, "tick.json"))
+	assert.NoFileExists(t, filepath.Join(r.env.stateDir, "pass.json"))
+	assert.Len(t, readRecords(t, r.autoFixture), 2)
+}

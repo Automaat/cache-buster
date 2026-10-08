@@ -345,3 +345,17 @@ func TestRun_StopsOnlyAfterFreeSpaceClearsTheHysteresisBand(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, []string{"npm"}, h.calls, "151GB is inside the band above the 150GB threshold; 153GB clears it")
 }
+
+func TestDecide_FuturePassTimeCountsAsNoPass(t *testing.T) {
+	d := decide(t, 3*gib, func(in *TickInput) { in.Pass = PassState{Time: t0.Add(48 * time.Hour), Tier: "ok"} })
+	assert.True(t, d.Run, d.Reason)
+}
+
+func TestAddSample_KeepsEnoughReadingsForSlowTickIntervals(t *testing.T) {
+	tick := 10 * time.Minute
+	var samples []Sample
+	for i := range 6 {
+		samples = addSample(samples, Sample{Time: t0.Add(time.Duration(i) * tick), Free: int64(100-i) * gib}, tick)
+	}
+	assert.Len(t, samples, 6)
+}

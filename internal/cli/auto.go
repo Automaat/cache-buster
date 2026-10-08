@@ -181,11 +181,12 @@ func runAutoWithLoader(ctx context.Context, loader *config.Loader, env autoEnv, 
 	}
 	defer lock.Release()
 
-	return env.pass(ctx, cfg, dryRun, passOptions{})
+	return env.pass(ctx, cfg, dryRun, passOptions{preview: dryRun})
 }
 
 // passOptions carries what a tick knows about why it started a pass.
 type passOptions struct {
+	preview   bool
 	minTier   auto.Tier
 	predicted bool
 }
@@ -210,7 +211,7 @@ func (e autoEnv) pass(ctx context.Context, cfg *config.Config, dryRun bool, opts
 		MinTier:     opts.minTier,
 		Predicted:   opts.predicted,
 	})
-	e.recordRun(ctx, cfg.Auto, report, err)
+	e.recordRun(ctx, cfg.Auto, report, err, opts.preview)
 	if err != nil {
 		return err
 	}
@@ -233,7 +234,7 @@ func (e autoEnv) clock() time.Time {
 // recordRun notifies when space is still low, appends the run record and
 // stores the pass state the tick schedules from. None of these failures
 // changes the run's outcome: they are reported and the run keeps its own result.
-func (e autoEnv) recordRun(ctx context.Context, cfg config.Auto, report auto.Report, runErr error) {
+func (e autoEnv) recordRun(ctx context.Context, cfg config.Auto, report auto.Report, runErr error, preview bool) {
 	pass, err := auto.ReadPassState(e.stateDir)
 	if err != nil {
 		fmt.Fprintf(e.out, "warning: %v\n", err)
@@ -253,6 +254,9 @@ func (e autoEnv) recordRun(ctx context.Context, cfg config.Auto, report auto.Rep
 	now := e.clock()
 	if err := auto.AppendRun(e.stateDir, auto.NewRunRecord(report, now, runErr, notified)); err != nil {
 		fmt.Fprintf(e.out, "warning: record run: %v\n", err)
+	}
+	if preview {
+		return
 	}
 	pass.Time, pass.Tier, pass.DryRun = now.UTC(), report.Tier.String(), report.DryRun
 	if err := auto.WritePassState(e.stateDir, pass); err != nil {

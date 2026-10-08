@@ -97,7 +97,9 @@ func runTickWithLoader(ctx context.Context, loader *config.Loader, env autoEnv, 
 	if d.Run {
 		state.Action = auto.ActionPass
 	}
-	env.saveTick(state)
+	if !dryRun {
+		env.saveTick(state)
+	}
 
 	if !d.Run {
 		env.explainf("tick: free %s of %s, %s", size.FormatSize(fs.Free), size.FormatSize(fs.Total), d.Reason)
@@ -110,14 +112,16 @@ func runTickWithLoader(ctx context.Context, loader *config.Loader, env autoEnv, 
 	}
 	if !ok {
 		state.Action, state.Reason = auto.ActionSkip, "another pass holds the run lock"
-		env.saveTick(state)
+		if !dryRun {
+			env.saveTick(state)
+		}
 		env.explainf("tick: %s", state.Reason)
 		return nil
 	}
 	defer lock.Release()
 
 	env.explainf("tick: free %s of %s, %s", size.FormatSize(fs.Free), size.FormatSize(fs.Total), d.Reason)
-	return env.pass(ctx, cfg, dryRun, passOptions{minTier: d.Tier, predicted: d.Predicted})
+	return env.pass(ctx, cfg, dryRun, passOptions{minTier: d.Tier, predicted: d.Predicted, preview: dryRun})
 }
 
 func (e autoEnv) saveTick(state auto.TickState) {

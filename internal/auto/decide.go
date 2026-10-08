@@ -20,6 +20,7 @@ const (
 	escalationGap    = 30 * time.Second
 	staleTierMemory  = time.Hour
 	gapTickMultiples = 5
+	ageTickMultiples = 6
 )
 
 // Tick actions recorded in the tick state.
@@ -63,7 +64,7 @@ func Decide(in TickInput) Decision {
 
 	sinceLast := time.Duration(1<<62 - 1)
 	lastTier := TierOK
-	if !in.Pass.Time.IsZero() {
+	if !in.Pass.Time.IsZero() && !in.Pass.Time.After(in.Now) {
 		sinceLast = in.Now.Sub(in.Pass.Time)
 		lastTier = ParseTier(in.Pass.Tier)
 	}
@@ -102,9 +103,10 @@ func Decide(in TickInput) Decision {
 // before a long gap (sleep, agent down): a trend across a gap means nothing.
 func addSample(old []Sample, s Sample, tick time.Duration) []Sample {
 	gap := max(sampleGapFloor, gapTickMultiples*tick)
+	maxAge := max(maxSampleAge, ageTickMultiples*tick)
 	out := make([]Sample, 0, len(old)+1)
 	for _, o := range old {
-		if s.Time.Sub(o.Time) <= maxSampleAge && o.Time.Before(s.Time) {
+		if s.Time.Sub(o.Time) <= maxAge && o.Time.Before(s.Time) {
 			out = append(out, o)
 		}
 	}

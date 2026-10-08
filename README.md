@@ -433,7 +433,7 @@ auto:
   notify_cooldown: 3h       # minimum gap between notifications of one tier
 ```
 
-A config that sets `min_free_pct: 15` keeps that value (the cap still limits it to 100G).
+A config that sets `min_free_pct: 15` keeps that value, but the percentage part is still limited by `min_free_cap` (100G by default): on a 2 TB volume the low threshold is 100G, not 300G. Raise `min_free_cap` to restore the old threshold.
 
 The optional top-level `protected` list names paths that `auto` never deletes from and that `status`
 reports under "needs a human":
