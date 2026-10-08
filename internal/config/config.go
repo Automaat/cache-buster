@@ -58,6 +58,12 @@ func (c *Config) Validate() error {
 			}
 		}
 		if p.CleanTimeout != "" {
+			if strings.TrimSpace(p.CleanTimeout) == "" {
+				return fmt.Errorf("provider %q: clean_timeout must not be blank", name)
+			}
+			if p.CleanCmd == "" {
+				return fmt.Errorf("provider %q: clean_timeout requires clean_cmd", name)
+			}
 			d, err := ParseDuration(p.CleanTimeout)
 			if err != nil {
 				return fmt.Errorf("provider %q: clean_timeout: %w", name, err)

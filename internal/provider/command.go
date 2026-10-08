@@ -2,9 +2,9 @@ package provider
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os/exec"
+	"strings"
 	"time"
 
 	"github.com/Automaat/cache-buster/internal/cache"
@@ -37,6 +37,9 @@ func NewCommandProvider(name string, cfg config.Provider) (*CommandProvider, err
 
 	timeout := DefaultCleanTimeout
 	if cfg.CleanTimeout != "" {
+		if strings.TrimSpace(cfg.CleanTimeout) == "" {
+			return nil, fmt.Errorf("clean_timeout must not be blank")
+		}
 		timeout, err = config.ParseDuration(cfg.CleanTimeout)
 		if err != nil {
 			return nil, fmt.Errorf("parse clean_timeout: %w", err)
@@ -100,12 +103,5 @@ func (p *CommandProvider) fullClean(ctx context.Context, opts CleanOptions) (Cle
 		}, nil
 	}
 
-	runCtx, cancel := context.WithTimeout(ctx, p.timeout)
-	defer cancel()
-
-	result, err := runMeasuredClean(runCtx, p.name, p.cmdArgs, p.CurrentSize)
-	if err != nil && ctx.Err() == nil && errors.Is(runCtx.Err(), context.DeadlineExceeded) {
-		return result, fmt.Errorf("clean command timed out after %s: %w", p.timeout, err)
-	}
-	return result, err
+	return runMeasuredCleanTimeout(ctx, p.name, p.cmdArgs, p.CurrentSize, p.timeout)
 }

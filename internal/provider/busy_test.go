@@ -25,6 +25,13 @@ func TestMatchProcess(t *testing.T) {
 		{"absolute path", "/usr/local/go/bin/go test ./...", []string{"go"}, "go"},
 		{"second wanted", "/Users/me/.cargo/bin/rustc --crate-name x", []string{"cargo", "rustc"}, "rustc"},
 		{"homebrew ruby script", "/opt/homebrew/ruby -W1 /opt/homebrew/Library/Homebrew/brew.rb cleanup", []string{"brew"}, "brew"},
+		{"sudo wrapper", "sudo cargo build", []string{"cargo"}, "cargo"},
+		{"env wrapper", "env X=1 go test ./...", []string{"go"}, "go"},
+		{"nice wrapper with flag", "nice -n 5 go build", []string{"go"}, "go"},
+		{"shell -c", `bash -c "cargo build"`, []string{"cargo"}, "cargo"},
+		{"shell without -c", "bash script.sh", []string{"go"}, ""},
+		{"uvx belongs to uv", "/opt/homebrew/bin/uvx ruff check", []string{"uv"}, "uv"},
+		{"script named go.sh is not go", "vim ~/bin/go.sh", []string{"go"}, ""},
 		{"argument is not a tool", "vim go", []string{"go"}, ""},
 		{"prefix is not a match", "gopls serve", []string{"go"}, ""},
 		{"empty line", "", []string{"go"}, ""},
@@ -220,6 +227,25 @@ func TestCommandProvider_CleanTimeout(t *testing.T) {
 	assert.Less(t, elapsed, 15*time.Second, "hung command must be cancelled")
 }
 
+func TestCommandProvider_TimeoutKillsDescendants(t *testing.T) {
+	marker := filepath.Join(t.TempDir(), "survivor")
+	script := "(sleep 3; touch " + marker + ") & wait"
+	p, err := NewCommandProvider("group-test", config.Provider{
+		Enabled:      true,
+		Paths:        []string{t.TempDir()},
+		MaxSize:      "1G",
+		CleanCmd:     "sh -c '" + script + "'",
+		CleanTimeout: "1s",
+	})
+	require.NoError(t, err)
+
+	_, err = p.Clean(context.Background(), CleanOptions{})
+	require.Error(t, err)
+
+	time.Sleep(3500 * time.Millisecond)
+	assert.NoFileExists(t, marker, "grandchild must die with the timed-out command")
+}
+
 func TestCommandProvider_ParentCancelIsNotTimeout(t *testing.T) {
 	p, err := NewCommandProvider("cancel-test", config.Provider{
 		Enabled:  true,
@@ -249,7 +275,7 @@ func TestCommandProvider_TimeoutConfig(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 90*time.Second, p.timeout)
 
-	for _, bad := range []string{"0", "abc"} {
+	for _, bad := range []string{"0", "abc", " "} {
 		cfg.CleanTimeout = bad
 		_, err = NewCommandProvider("t", cfg)
 		assert.Error(t, err, bad)

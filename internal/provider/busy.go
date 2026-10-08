@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 )
@@ -91,20 +92,56 @@ func (g *busyGuard) busyReason(ctx context.Context) string {
 	return ""
 }
 
-// matchProcess reports which wanted tool a process command line belongs to.
-// It checks the executable and script tokens (brew.rb, brew.sh) but not
-// arbitrary arguments, so "vim go" does not count as the go tool.
+// wrapperCommands launch another command; matching looks past them.
+var wrapperCommands = map[string]bool{
+	"sudo": true, "env": true, "nice": true, "nohup": true, "time": true, "caffeinate": true, "ruby": true,
+}
+
+// shellCommands run a command string given after -c.
+var shellCommands = map[string]bool{"sh": true, "bash": true, "zsh": true}
+
+// toolAliases maps a sibling binary to the tool it belongs to.
+var toolAliases = map[string]string{"uvx": "uv"}
+
+// matchProcess reports which wanted tool a process command line runs. It
+// looks at the executable after wrappers (sudo, env, nice), inside "sh -c"
+// strings, and at brew's ruby script, but not at arbitrary arguments, so
+// "vim go" does not count as the go tool.
 func matchProcess(commandLine string, wanted []string) string {
 	fields := strings.Fields(commandLine)
-	for i, field := range fields {
+	for i := range fields {
+		field := strings.Trim(fields[i], `"'`)
 		base := filepath.Base(field)
-		for _, want := range wanted {
-			if i == 0 && base == want {
-				return want
+
+		switch {
+		case wrapperCommands[base], strings.HasPrefix(field, "-"), strings.Contains(field, "="), isNumber(field):
+			continue
+		case base == "brew.rb":
+			return matchWanted("brew", wanted)
+		case shellCommands[base]:
+			if i+2 < len(fields) && fields[i+1] == "-c" {
+				return matchProcess(strings.Join(fields[i+2:], " "), wanted)
 			}
-			if base == want+".rb" || base == want+".sh" {
-				return want
-			}
+			return ""
+		}
+
+		if alias, ok := toolAliases[base]; ok {
+			base = alias
+		}
+		return matchWanted(base, wanted)
+	}
+	return ""
+}
+
+func isNumber(s string) bool {
+	_, err := strconv.Atoi(s)
+	return err == nil
+}
+
+func matchWanted(tool string, wanted []string) string {
+	for _, want := range wanted {
+		if tool == want {
+			return want
 		}
 	}
 	return ""
