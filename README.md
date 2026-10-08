@@ -1,6 +1,6 @@
 # cache-buster
 
-Developer cache manager for macOS. Interactive TUI, 26 built-in providers, auto-discovery, smart LRU cleaning.
+Developer cache manager for macOS. Interactive TUI, 27 built-in providers, auto-discovery, smart LRU cleaning.
 
 ![demo](./doc/demo.gif)
 <!-- Generate with: brew install vhs && vhs doc/demo.tape -->
