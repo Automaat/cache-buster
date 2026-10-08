@@ -320,3 +320,36 @@ func TestValidateProtectedEntry_DriveLetterPaths(t *testing.T) {
 		assert.Contains(t, err.Error(), tt.wantErr, tt.path)
 	}
 }
+
+func TestLoader_MacOnlyEntriesSavedWithoutPathsStayValidElsewhere(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	saver := NewLoader()
+	saver.SetConfigPath(path)
+	saver.SetPlatform(macPlatform)
+	require.NoError(t, saver.Save(DefaultConfigFor(macPlatform)))
+
+	for _, p := range []Platform{linPlatform, winPlatform} {
+		loader := NewLoader()
+		loader.SetConfigPath(path)
+		loader.SetPlatform(p)
+
+		cfg, err := loader.Load()
+		require.NoError(t, err, p.OS)
+
+		require.NoError(t, cfg.Validate(), p.OS)
+		assert.Equal(t, []string{"~/Library/Developer/Xcode/DerivedData"}, cfg.Providers["xcode-deriveddata"].Paths)
+		assert.False(t, cfg.Applies("xcode-deriveddata"))
+	}
+}
+
+func TestTempGlob_EscapesMetacharactersInTempDir(t *testing.T) {
+	dir := t.TempDir()
+	odd := filepath.Join(dir, "a [PC] b")
+	require.NoError(t, os.MkdirAll(filepath.Join(odd, "sail-1"), 0o750))
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "a P b", "sail-2"), 0o750))
+
+	matches, err := filepath.Glob(Platform{TempDir: odd}.tempGlob("sail*"))
+
+	require.NoError(t, err)
+	assert.Equal(t, []string{filepath.Join(odd, "sail-1")}, matches)
+}

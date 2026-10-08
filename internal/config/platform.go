@@ -103,7 +103,14 @@ func (p Platform) tempGlob(pattern string) string {
 	if dir == "" {
 		dir = "/tmp"
 	}
-	return filepath.Join(dir, pattern)
+	return filepath.Join(escapeGlob(dir), pattern)
+}
+
+// escapeGlob wraps glob metacharacters in a bracket class, the one escape
+// that works with both separators, so a temp dir such as C:\Users\a [PC]\Temp
+// matches itself.
+func escapeGlob(dir string) string {
+	return strings.NewReplacer("[", "[[]", "*", "[*]", "?", "[?]").Replace(dir)
 }
 
 func hasDrive(path string) bool {

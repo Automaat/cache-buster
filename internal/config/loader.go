@@ -89,6 +89,9 @@ func (l *Loader) Load() (*Config, error) {
 		defaultP, hasDefault := cfg.Providers[name]
 		if !hasDefault {
 			// New provider not in defaults: use as-is; do not auto-enable when `enabled` is omitted.
+			if len(userP.Paths) == 0 {
+				userP.Paths = l.otherOSDefaultPaths(name)
+			}
 			cfg.Providers[name] = userP
 			continue
 		}
@@ -261,4 +264,21 @@ func (l *Loader) portableProviders(providers map[string]Provider) map[string]Pro
 		out[name] = p
 	}
 	return out
+}
+
+// otherOSDefaultPaths returns the built-in paths of a provider that exists
+// only on another OS. A config saved there omits them, so they are restored
+// to keep the entry valid here.
+func (l *Loader) otherOSDefaultPaths(name string) []string {
+	for _, goos := range []string{OSDarwin, OSLinux, OSWindows} {
+		if goos == l.platform.OS {
+			continue
+		}
+		p := l.platform
+		p.OS = goos
+		if def, ok := DefaultProvidersFor(p)[name]; ok {
+			return def.Paths
+		}
+	}
+	return nil
 }
