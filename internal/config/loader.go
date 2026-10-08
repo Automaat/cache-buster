@@ -230,10 +230,17 @@ func (l *Loader) Exists() (bool, error) {
 	return false, err
 }
 
+// legacySailPaths is the sail-dirs default that releases before the per-OS
+// defaults wrote into every saved config.
+var legacySailPaths = []string{"/private/tmp/sail*"}
+
 // isForeignDefault reports whether paths are the built-in paths of another
 // OS, as a config saved there and synced here holds. The current OS's own
 // defaults win then, so one config file works on every machine.
 func (l *Loader) isForeignDefault(name string, paths []string) bool {
+	if name == "sail-dirs" && l.platform.OS != OSDarwin && slices.Equal(paths, legacySailPaths) {
+		return true
+	}
 	for _, goos := range []string{OSDarwin, OSLinux, OSWindows} {
 		if goos == l.platform.OS {
 			continue

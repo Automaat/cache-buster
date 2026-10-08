@@ -371,3 +371,37 @@ func TestDefaultProvidersFor_NoPathContainsAProtectedEntry(t *testing.T) {
 		}
 	}
 }
+
+func TestLoader_LegacySailDefaultFollowsTheOSTempDir(t *testing.T) {
+	path := savedConfig(t, `version: "1"
+providers:
+  sail-dirs:
+    enabled: true
+    type: dir-pattern
+    max_size: 20G
+    min_idle: 2h
+    paths:
+      - /private/tmp/sail*
+`)
+	tests := map[string]struct {
+		platform Platform
+		want     string
+	}{
+		"linux":                         {linPlatform, filepath.Join("/tmp", "sail*")},
+		"windows":                       {winPlatform, filepath.Join(`C:\Temp`, "sail*")},
+		"macOS keeps the explicit path": {macPlatform, "/private/tmp/sail*"},
+	}
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			loader := NewLoader()
+			loader.SetConfigPath(path)
+			loader.SetPlatform(tt.platform)
+
+			cfg, err := loader.Load()
+			require.NoError(t, err)
+
+			assert.Equal(t, []string{tt.want}, cfg.Providers["sail-dirs"].Paths)
+			assert.True(t, cfg.Providers["sail-dirs"].Enabled)
+		})
+	}
+}
