@@ -759,13 +759,145 @@ func TestRun_SkipsAncestorOfDeeplyNestedWorktrees(t *testing.T) {
 	assert.Empty(t, h.calls)
 }
 
-func TestHasDefaultPaths(t *testing.T) {
-	def := config.DefaultProviders()["npm"]
+func TestRun_DefaultPathProviderWithProtectedSubdirIsSkipped(t *testing.T) {
+	for _, sub := range []string{"worktrees", "Downloads", "opencode"} {
+		h := newHarness(t)
+		root := h.dir("npm-cache")
+		require.NoError(t, os.MkdirAll(filepath.Join(root, "a", sub, "x"), 0o750))
+		def := config.DefaultProviders()["npm"]
+		h.add("npm", true, true, func(f *fakeProvider, pc *config.Provider) {
+			*pc = def
+			pc.Paths = []string{root}
+			f.paths = []string{root}
+		})
 
-	assert.True(t, hasDefaultPaths("npm", def))
-	def.Paths = []string{"/elsewhere"}
-	assert.False(t, hasDefaultPaths("npm", def))
-	assert.False(t, hasDefaultPaths("custom", config.Provider{Paths: []string{"~/x"}}))
+		_, err := h.run(false, 1*gib)
+
+		require.NoError(t, err)
+		assert.Empty(t, h.calls, sub)
+		assert.Contains(t, h.out.String(), "protected path", sub)
+	}
+}
+
+func TestRun_NeverRunsXcodeArchives(t *testing.T) {
+	for _, free := range []int64{1 * gib, 8 * gib, 100 * gib} {
+		h := newHarness(t)
+		h.add("xcode-archives", true, true)
+		h.add("my-archives", true, true, func(f *fakeProvider, pc *config.Provider) {
+			p := filepath.Join(h.home, "Library", "Developer", "Xcode", "archives")
+			pc.Paths = []string{p}
+			f.paths = []string{p}
+		})
+		h.add("npm", true, true)
+
+		_, err := h.run(false, free)
+
+		require.NoError(t, err)
+		assert.Equal(t, []string{"npm"}, h.calls, "free=%d", free)
+	}
+}
+
+func TestIsXcodeArchives(t *testing.T) {
+	assert.True(t, isXcodeArchives("~/Library/Developer/Xcode/Archives"))
+	assert.True(t, isXcodeArchives("/Users/me/Library/Developer/Xcode/Archives/2026-01-01"))
+	assert.False(t, isXcodeArchives("/Users/me/Library/Developer/Xcode/DerivedData"))
+	assert.False(t, isXcodeArchives("/Users/me/Archives"))
+}
+
+func TestIsProtected_XcodeArchivesAndAncestors(t *testing.T) {
+	home := "/Users/me"
+	assert.True(t, isProtected("/Users/me/Library/Developer/Xcode/Archives", home, false))
+	assert.True(t, isProtected("/Users/me/Library/Developer/Xcode/Archives/x", home, false))
+	assert.True(t, isProtected("/Users/me/Library/Developer", home, false))
+	assert.False(t, isProtected("/Users/me/Library/Developer/Xcode/DerivedData", home, false))
+}
+
+func TestIsProtected_FilesystemRootAndDataAlias(t *testing.T) {
+	home := "/Users/me"
+	for _, scan := range []bool{true, false} {
+		if !scan {
+			assert.True(t, isProtected("/", home, scan), "root, scan=%v", scan)
+		}
+		assert.True(t, isProtected("/System/Volumes/Data/Users/me/.cache/opencode", home, scan))
+		assert.True(t, isProtected("/System/Volumes/Data/Users/me/Library/Developer/Xcode/Archives", home, scan))
+		assert.True(t, isProtected("/System/Volumes/Data", home, scan))
+	}
+	assert.True(t, isProtected("/", home, true))
+	assert.True(t, within("/Users/me", "/"))
+	assert.False(t, within("/Users/me2", "/Users/me"))
+}
+
+func TestRun_SkipsUncleanXcodeArchivesPathOutsideHome(t *testing.T) {
+	for _, spelling := range []string{"Xcode/./Archives", "Xcode/Foo/../Archives", "Xcode//Archives"} {
+		h := newHarness(t)
+		h.dir("o", "Xcode", "Archives")
+		p := h.home + "/o/" + spelling
+		h.add("renamed", true, true, func(f *fakeProvider, pc *config.Provider) { f.paths = []string{p}; pc.Paths = []string{p} })
+		h.home = "/nonexistent-home"
+
+		_, err := h.run(false, 1*gib)
+
+		require.NoError(t, err)
+		assert.Empty(t, h.calls, spelling)
+	}
+}
+
+func TestIsProtected_RootWithoutHome(t *testing.T) {
+	for _, scan := range []bool{true, false} {
+		assert.True(t, isProtected("/", "", scan))
+		assert.True(t, isProtected("/System/Volumes/Data", "", scan))
+	}
+}
+
+func TestReport_Previewed(t *testing.T) {
+	ran := []Result{{Status: StatusDryRun}}
+	assert.False(t, Report{Tier: TierOK, Results: ran}.Previewed(), "ok tier previews nothing")
+	assert.False(t, Report{Tier: TierLow, Results: []Result{{Status: StatusError}, {Status: StatusSkipped}}}.Previewed())
+	assert.False(t, Report{Tier: TierLow}.Previewed())
+	assert.True(t, Report{Tier: TierLow, Results: []Result{{Status: StatusError}, {Status: StatusDryRun}}}.Previewed())
+	assert.True(t, Report{Tier: TierCritical, Results: ran}.Previewed())
+}
+
+func TestAgentUninstall_UnrecognisedBootoutAndPrintFailureKeepsState(t *testing.T) {
+	rec := &recorder{}
+	a := newAgent(t, rec)
+	require.NoError(t, a.Install(t.Context()))
+	rec.fail = map[string]error{
+		"bootout": errors.New("exit status 5"),
+		"print":   errors.New("permission denied"),
+	}
+
+	require.ErrorContains(t, a.Uninstall(t.Context()), "launchctl bootout")
+
+	assert.FileExists(t, a.PlistPath())
+	assert.True(t, FirstRunPending(a.StateDir))
+}
+
+func TestWithoutDataAlias_CaseInsensitive(t *testing.T) {
+	got := withoutDataAlias([]string{"/system/volumes/data/Users/me", "/System/Volumes/DataX/y"})
+	assert.Contains(t, got, "/Users/me")
+	assert.NotContains(t, got, "X/y")
+	assert.Len(t, got, 3)
+}
+
+func TestAgentUninstall_UnrecognisedBootoutWithFailingPrintStillRemoves(t *testing.T) {
+	rec := &recorder{}
+	a := newAgent(t, rec)
+	require.NoError(t, a.Install(t.Context()))
+	rec.calls = nil
+	rec.fail = map[string]error{
+		"bootout": errors.New("exit status 5"),
+		"print":   errors.New("Could not find service"),
+	}
+
+	require.NoError(t, a.Uninstall(t.Context()))
+
+	assert.NoFileExists(t, a.PlistPath())
+	assert.False(t, FirstRunPending(a.StateDir))
+	assert.Equal(t, [][]string{
+		{"launchctl", "bootout", "gui/501/" + AgentLabel},
+		{"launchctl", "print", "gui/501/" + AgentLabel},
+	}, rec.calls)
 }
 
 func TestRun_DockerProviderWithVolumesFlagStillRuns(t *testing.T) {
