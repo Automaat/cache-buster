@@ -412,7 +412,7 @@ func TestMise_TrimsDownloadsAndCacheByAgeNotInstalls(t *testing.T) {
 }
 
 func TestMise_CleanCmdValidation(t *testing.T) {
-	for _, cmd := range []string{"mise ls", "mise", "mise prune --dry-run", "mise prune --yes"} {
+	for _, cmd := range []string{"mise ls", "mise", "mise run prune", "mise exec node -- npm prune", "mise prune --dry-run", "mise prune --yes"} {
 		_, err := NewMiseProvider("mise", config.Provider{Paths: []string{t.TempDir()}, MaxSize: "1G", CleanCmd: cmd})
 		require.Error(t, err, cmd)
 	}
@@ -509,4 +509,18 @@ func TestMise_DataDirWithoutDownloadsIsNeverTrimmedWhole(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.FileExists(t, state)
+}
+
+func TestMise_StderrListingAmongWarningsIsRead(t *testing.T) {
+	f := newMiseFixture(t)
+	installFakeTool(t, "mise", fakeToolSpec{
+		Replies: map[string]fakeReply{"prune --dry-run": {Stderr: "mise WARN deprecated\nmise rm -rf " + f.node + "\n"}},
+	})
+	p := newMise(t, f.root, config.Provider{})
+
+	res, err := p.Clean(context.Background(), CleanOptions{DryRun: true})
+
+	require.NoError(t, err)
+	require.Len(t, res.Entries, 1)
+	assert.Equal(t, "node@20.0.0", res.Entries[0].Detail)
 }

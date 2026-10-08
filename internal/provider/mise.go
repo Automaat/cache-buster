@@ -56,7 +56,7 @@ func NewMiseProvider(name string, cfg config.Provider) (*MiseProvider, error) {
 	if err != nil {
 		return nil, fmt.Errorf("invalid clean_cmd: %w", err)
 	}
-	if len(args) < 2 || !slices.Contains(args[1:], "prune") {
+	if len(args) < 2 || args[1] != "prune" {
 		return nil, fmt.Errorf("clean_cmd must be a mise prune command, got %q", cfg.CleanCmd)
 	}
 	for _, a := range args {
@@ -315,9 +315,9 @@ func (p *MiseProvider) listPrunable(ctx context.Context) (list []prunable, skipR
 		}
 		return nil, reason
 	}
-	list, bad := p.parsePrunable(ctx, stdout)
+	list, bad := p.parsePrunable(ctx, stdout, false)
 	if bad == "" && len(list) == 0 {
-		list, _ = p.parsePrunable(ctx, stderr)
+		list, _ = p.parsePrunable(ctx, stderr, true)
 	}
 	if bad != "" {
 		return nil, fmt.Sprintf("cannot parse %s --dry-run output: %q", p.cleanCmd, bad)
@@ -326,8 +326,9 @@ func (p *MiseProvider) listPrunable(ctx context.Context) (list []prunable, skipR
 }
 
 // parsePrunable reads the dry-run listing: `rm -rf <installs>/<tool>/<version>`
-// lines, or `tool@version` lines. It returns the first unreadable line.
-func (p *MiseProvider) parsePrunable(ctx context.Context, stdout string) (list []prunable, badLine string) {
+// lines, or `tool@version` lines. It returns the first unreadable line,
+// unless lenient, which skips lines it cannot read (stderr carries warnings).
+func (p *MiseProvider) parsePrunable(ctx context.Context, stdout string, lenient bool) (list []prunable, badLine string) {
 	var (
 		out  []prunable
 		seen = map[string]bool{}
@@ -339,6 +340,9 @@ func (p *MiseProvider) parsePrunable(ctx context.Context, stdout string) (list [
 		}
 		v, ok := p.parseLine(line)
 		if !ok {
+			if lenient {
+				continue
+			}
 			return nil, line
 		}
 		if seen[v.label] {
@@ -356,7 +360,7 @@ func (p *MiseProvider) parsePrunable(ctx context.Context, stdout string) (list [
 }
 
 func (p *MiseProvider) parseLine(line string) (prunable, bool) {
-	if rest, ok := strings.CutPrefix(line, "rm -rf "); ok {
+	if rest, ok := strings.CutPrefix(strings.TrimPrefix(line, "mise "), "rm -rf "); ok {
 		target := strings.Trim(strings.TrimSpace(rest), `"'`)
 		if strings.HasPrefix(target, "~/") && p.home != "" {
 			target = filepath.Join(p.home, target[2:])
