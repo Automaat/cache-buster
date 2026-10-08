@@ -33,12 +33,15 @@ const trashPrefix = ".bilgie-trash-"
 // removed whole, never file by file. modules makes every directory named like
 // name@version, except below the top-level cache directory, a whole entry.
 // verify runs after files were trimmed to repair what the trim left dangling;
-// its failure is reported, not fatal.
+// its failure is reported, not fatal. imaged lists tools whose running
+// process holds every tree where only image names are visible (Windows), so
+// a tree cannot be matched by path.
 type treeSpec struct {
 	files   []string
 	entries []string
 	verify  []string
 	modules bool
+	imaged  []string
 }
 
 // treeSpecs lists providers whose cache holds trees that are only valid
@@ -48,13 +51,14 @@ var treeSpecs = map[string]treeSpec{
 		files:   []string{"_cacache"},
 		entries: []string{"_npx/*"},
 		verify:  []string{"npm", "cache", "verify"},
+		imaged:  []string{"node", "npm", "npx"},
 	},
 	"cargo": {
 		files:   []string{"cache"},
 		entries: []string{"src/*/*", "checkouts/*/*", "db/*"},
 	},
-	"yarn":              {entries: []string{"v*/*"}},
-	"gradle":            {entries: []string{"*"}},
+	"yarn":              {entries: []string{"v*/*"}, imaged: []string{"node", "yarn"}},
+	"gradle":            {entries: []string{"*"}, imaged: []string{"java"}},
 	"go-mod":            {modules: true},
 	"mise":              {files: []string{"downloads"}},
 	"xcode-deriveddata": {entries: []string{"*"}},
@@ -78,6 +82,7 @@ type TreeProvider struct {
 	now       func() time.Time
 	procLines func(ctx context.Context) ([]string, error)
 	evict     func(path string) error
+	imageOnly bool
 }
 
 // NewTreeProvider creates a provider that never deletes inside a whole-unit tree.
@@ -103,6 +108,7 @@ func NewTreeProvider(name string, cfg config.Provider, spec treeSpec) (*TreeProv
 		now:          time.Now,
 		procLines:    processLister(nil),
 		evict:        evictTree,
+		imageOnly:    runtime.GOOS == "windows",
 	}, nil
 }
 
@@ -295,6 +301,12 @@ func (p *TreeProvider) markHeld(ctx context.Context, units []treeUnit) {
 		}
 		if listErr != nil {
 			u.hold = "cannot list processes: " + listErr.Error()
+			continue
+		}
+		if p.imageOnly {
+			if proc := firstMatch(lines, p.spec.imaged); proc != "" {
+				u.hold = proc + " is running"
+			}
 			continue
 		}
 		for _, line := range lines {
@@ -573,4 +585,13 @@ func foldPath(s string) string {
 		s = strings.ToLower(s)
 	}
 	return s
+}
+
+func firstMatch(lines, wanted []string) string {
+	for _, line := range lines {
+		if proc := matchProcess(line, wanted); proc != "" {
+			return proc
+		}
+	}
+	return ""
 }

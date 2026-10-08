@@ -675,3 +675,26 @@ func TestTreeProvider_GoModSymlinkedRootStillEvicts(t *testing.T) {
 	assert.NoDirExists(t, oldMod)
 	assert.DirExists(t, newMod)
 }
+
+func TestTreeProvider_ImageOnlyProcessTableHoldsEveryTree(t *testing.T) {
+	root := t.TempDir()
+	for i, name := range []string{"a", "b", "c"} {
+		makePackage(t, filepath.Join(root, "_npx", name), 4, time.Duration(90-10*i)*day)
+	}
+	p := newTree(t, "npm", config.Provider{Paths: []string{root}, MaxSize: "1", MaxAge: "30d"})
+	p.imageOnly = true
+	p.procLines = func(context.Context) ([]string, error) { return []string{"node"}, nil }
+
+	res, err := p.Clean(context.Background(), CleanOptions{Mode: CleanModeSmart})
+	require.NoError(t, err)
+
+	for _, name := range []string{"a", "b", "c"} {
+		assert.DirExists(t, filepath.Join(root, "_npx", name))
+	}
+	assert.Contains(t, res.Output, "node is running")
+
+	p.procLines = func(context.Context) ([]string, error) { return []string{"explorer"}, nil }
+	_, err = p.Clean(context.Background(), CleanOptions{Mode: CleanModeSmart})
+	require.NoError(t, err)
+	assert.NoDirExists(t, filepath.Join(root, "_npx", "a"))
+}
