@@ -690,3 +690,23 @@ func TestProjectArtifacts_DryRunListsProcessesOnce(t *testing.T) {
 
 	assert.Equal(t, 1, calls)
 }
+
+func TestProjectArtifacts_DryRunListsOpenFilesOnceHoweverLongItTakes(t *testing.T) {
+	h := newArtifactHarness(t, nil)
+	for i := range 5 {
+		nodeProject(t, h.path(fmt.Sprintf("p%d", i)), 10, 90*day)
+	}
+	clock := time.Now()
+	h.p.now = func() time.Time { return clock }
+	h.p.passBudget = 0
+	calls := 0
+	h.p.openMany = func(context.Context, []string) (map[string]bool, error) {
+		calls++
+		clock = clock.Add(time.Hour)
+		return map[string]bool{}, nil
+	}
+
+	h.clean(CleanOptions{DryRun: true, Mode: CleanModeFull})
+
+	assert.Equal(t, 1, calls)
+}

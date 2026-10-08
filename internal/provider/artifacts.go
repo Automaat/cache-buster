@@ -206,6 +206,7 @@ func (p *ProjectArtifactsProvider) Clean(ctx context.Context, opts CleanOptions)
 
 	pass := p.newPass(ctx, scan)
 	pass.cands = pass.candidates(ctx)
+	pass.dryRun = opts.DryRun
 	remaining := scan.total()
 	var freed int64
 	started := p.now()
@@ -318,6 +319,7 @@ type pass struct {
 	dirty    map[string]string
 
 	cands    []*candidate
+	dryRun   bool
 	openSnap map[string]bool
 	openErr  error
 	openAt   time.Time
@@ -356,7 +358,7 @@ func (ps *pass) openReason(ctx context.Context, c *candidate) string {
 
 func (ps *pass) openInSnapshot(ctx context.Context, path string) (bool, error) {
 	p := ps.p
-	if ps.openAt.IsZero() || p.now().Sub(ps.openAt) > openSnapshotTTL {
+	if ps.openAt.IsZero() || (!ps.dryRun && p.now().Sub(ps.openAt) > openSnapshotTTL) {
 		seen := map[string]bool{}
 		var dirs []string
 		for _, c := range ps.cands {
