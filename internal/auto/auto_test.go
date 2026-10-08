@@ -323,7 +323,6 @@ func TestRun_SkipsProtectedPaths(t *testing.T) {
 		{"downloads root", []string{"Downloads"}},
 		{"opencode data", []string{".local", "share", "opencode", "x"}},
 		{"opencode config", []string{".config", "opencode"}},
-		{"worktrees", []string{"sideprojects", "worktrees", "repo-a"}},
 		{"home itself", nil},
 	}
 	for _, tt := range tests {
@@ -707,9 +706,16 @@ func TestIsProtected_CaseInsensitiveAndCacheLocations(t *testing.T) {
 		"/Users/me/.cache/opencode/models",
 		"/Users/me/Library/Caches/opencode",
 		"/Users/me/.cache/OpenCode",
-		"/Users/me/work/Worktrees/a",
 	} {
 		assert.True(t, isProtected(p, home, true), p)
+	}
+	for _, p := range []string{
+		"/Users/me/work/Worktrees/a",
+		"/Users/me/.cache/mise/downloads/opencode",
+		"/Users/me/.local/share/mise/downloads/opencode",
+		"/Users/me/.cache/tool/Downloads",
+	} {
+		assert.False(t, isProtected(p, home, false), p)
 	}
 	assert.False(t, isProtected("/Users/me/.cache/uv", home, true))
 	assert.False(t, isProtected("/Users/me/Library/Caches/Homebrew", home, true))
@@ -731,7 +737,7 @@ func TestAgentUninstall_RealBootoutFailureKeepsPlistAndMarker(t *testing.T) {
 func TestRun_SkipsProviderWhoseTreeContainsWorktrees(t *testing.T) {
 	h := newHarness(t)
 	root := h.dir("proj")
-	require.NoError(t, os.MkdirAll(filepath.Join(root, "a", "worktrees", "w"), 0o750))
+	writeWorktreeMarker(t, filepath.Join(root, "a", "worktrees", "w"))
 	h.add("ancestor", true, true, func(f *fakeProvider, pc *config.Provider) {
 		pc.Paths = []string{root}
 		f.paths = []string{root}
@@ -742,6 +748,8 @@ func TestRun_SkipsProviderWhoseTreeContainsWorktrees(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, h.calls)
 	assert.Contains(t, h.out.String(), "protected path")
+	assert.Contains(t, h.out.String(), "git checkout at ")
+	assert.Contains(t, h.out.String(), filepath.Join("a", "worktrees", "w")+")")
 }
 
 func TestRun_AncestorWithHomebrewStyleDownloadsDirIsNotProtected(t *testing.T) {
@@ -775,10 +783,10 @@ func TestRun_InterruptDuringProbeStopsRun(t *testing.T) {
 	assert.Empty(t, h.calls)
 }
 
-func TestRun_SkipsAncestorOfDeeplyNestedWorktrees(t *testing.T) {
+func TestRun_AncestorOfWorktreeBuriedBeyondScanDepthIsAcceptedAsClear(t *testing.T) {
 	h := newHarness(t)
 	root := h.dir("far")
-	require.NoError(t, os.MkdirAll(filepath.Join(root, "a", "b", "c", "d", "e", "worktrees", "w"), 0o750))
+	writeWorktreeMarker(t, filepath.Join(root, "a", "b", "c", "d", "e", "w"))
 	h.add("ancestor", true, true, func(f *fakeProvider, pc *config.Provider) {
 		pc.Paths = []string{root}
 		f.paths = []string{root}
@@ -787,11 +795,11 @@ func TestRun_SkipsAncestorOfDeeplyNestedWorktrees(t *testing.T) {
 	_, err := h.run(false, 1*gib)
 
 	require.NoError(t, err)
-	assert.Empty(t, h.calls)
+	assert.Equal(t, []string{"ancestor"}, h.calls)
 }
 
-func TestRun_DefaultPathProviderWithProtectedSubdirIsSkipped(t *testing.T) {
-	for _, sub := range []string{"worktrees", "Downloads", "opencode"} {
+func TestRun_DefaultPathProviderIgnoresProtectedNamesInsideTheCache(t *testing.T) {
+	for _, sub := range []string{"worktrees", "Downloads", "opencode", "downloads/opencode"} {
 		h := newHarness(t)
 		root := h.dir("npm-cache")
 		require.NoError(t, os.MkdirAll(filepath.Join(root, "a", sub, "x"), 0o750))
@@ -805,8 +813,8 @@ func TestRun_DefaultPathProviderWithProtectedSubdirIsSkipped(t *testing.T) {
 		_, err := h.run(false, 1*gib)
 
 		require.NoError(t, err)
-		assert.Empty(t, h.calls, sub)
-		assert.Contains(t, h.out.String(), "protected path", sub)
+		assert.Equal(t, []string{"npm"}, h.calls, sub)
+		assert.NotContains(t, h.out.String(), "protected path", sub)
 	}
 }
 

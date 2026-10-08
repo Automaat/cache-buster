@@ -237,7 +237,7 @@ func (p *DirPatternProvider) evaluate(ctx context.Context, dir string) (sc dirSc
 		return sc, "not a directory"
 	}
 
-	if p.skipIfGitWorktree && filepath.Base(dir) == ".git" {
+	if p.skipIfGitWorktree && IsGitMarkerName(filepath.Base(dir)) {
 		return sc, "is a .git directory"
 	}
 
@@ -366,7 +366,7 @@ func scanDir(ctx context.Context, dir string, rootMod time.Time) (sc dirScan, sk
 			sc.newest = info.ModTime()
 		}
 
-		if d.Name() == ".git" && sc.gitPath == "" && path != dir {
+		if IsGitMarkerName(d.Name()) && sc.gitPath == "" && path != dir {
 			rel, relErr := filepath.Rel(dir, path)
 			if relErr != nil {
 				rel = path
