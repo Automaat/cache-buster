@@ -80,16 +80,17 @@ func TestTierString(t *testing.T) {
 }
 
 type fakeProvider struct {
-	calls   *[]string
-	opts    *[]provider.CleanOptions
-	name    string
-	paths   []string
-	size    int64
-	max     int64
-	freed   int64
-	skip    string
-	err     error
-	missing bool
+	calls       *[]string
+	opts        *[]provider.CleanOptions
+	name        string
+	paths       []string
+	size        int64
+	max         int64
+	freed       int64
+	skip        string
+	err         error
+	missing     bool
+	onAvailable func()
 }
 
 func (f *fakeProvider) Name() string                               { return f.name }
@@ -97,7 +98,12 @@ func (f *fakeProvider) Paths() []string                            { return f.pa
 func (f *fakeProvider) CurrentSize(context.Context) (int64, error) { return f.size, nil }
 func (f *fakeProvider) MaxSize() int64                             { return f.max }
 func (f *fakeProvider) MaxAge() time.Duration                      { return time.Hour }
-func (f *fakeProvider) Available() bool                            { return !f.missing }
+func (f *fakeProvider) Available() bool {
+	if f.onAvailable != nil {
+		f.onAvailable()
+	}
+	return !f.missing
+}
 func (f *fakeProvider) Clean(_ context.Context, o provider.CleanOptions) (provider.CleanResult, error) {
 	*f.calls = append(*f.calls, f.name)
 	*f.opts = append(*f.opts, o)
@@ -473,7 +479,7 @@ func (r *recorder) exec(_ context.Context, name string, args ...string) ([]byte,
 	r.calls = append(r.calls, append([]string{name}, args...))
 	if len(args) > 0 {
 		if err := r.fail[args[0]]; err != nil {
-			return []byte("launchctl said no"), err
+			return []byte(err.Error()), err
 		}
 	}
 	return nil, nil
@@ -521,7 +527,7 @@ func TestAgentInstall_BootstrapFailureIsReturned(t *testing.T) {
 	err := a.Install(t.Context())
 
 	require.ErrorContains(t, err, "launchctl bootstrap")
-	assert.ErrorContains(t, err, "launchctl said no")
+	assert.ErrorContains(t, err, "exit 5")
 }
 
 func TestAgentInstall_RetriesBootstrapUntilItSucceeds(t *testing.T) {
@@ -583,7 +589,7 @@ func TestAgentUninstall_UnloadsRemovesPlistAndMarker(t *testing.T) {
 }
 
 func TestAgentUninstall_NotInstalledIsNotAnError(t *testing.T) {
-	rec := &recorder{fail: map[string]error{"bootout": errors.New("exit 113")}}
+	rec := &recorder{fail: map[string]error{"bootout": errors.New(`Could not find service "x" in domain`)}}
 	a := newAgent(t, rec)
 	out := a.Out.(*bytes.Buffer)
 
@@ -676,4 +682,64 @@ func TestIsProtected_CaseInsensitiveAndCacheLocations(t *testing.T) {
 	}
 	assert.False(t, isProtected("/Users/me/.cache/uv", home))
 	assert.False(t, isProtected("/Users/me/Library/Caches/Homebrew", home))
+}
+
+func TestAgentUninstall_RealBootoutFailureKeepsPlistAndMarker(t *testing.T) {
+	rec := &recorder{}
+	a := newAgent(t, rec)
+	require.NoError(t, a.Install(t.Context()))
+	rec.fail = map[string]error{"bootout": errors.New("Boot-out failed: 5: Input/output error")}
+
+	err := a.Uninstall(t.Context())
+
+	require.ErrorContains(t, err, "launchctl bootout")
+	assert.FileExists(t, a.PlistPath())
+	assert.True(t, FirstRunPending(a.StateDir))
+}
+
+func TestRun_SkipsProviderWhoseTreeContainsWorktrees(t *testing.T) {
+	h := newHarness(t)
+	root := h.dir("proj")
+	require.NoError(t, os.MkdirAll(filepath.Join(root, "a", "worktrees", "w"), 0o750))
+	h.add("ancestor", true, true, func(f *fakeProvider, pc *config.Provider) {
+		pc.Paths = []string{root}
+		f.paths = []string{root}
+	})
+
+	_, err := h.run(false, 1*gib)
+
+	require.NoError(t, err)
+	assert.Empty(t, h.calls)
+	assert.Contains(t, h.out.String(), "protected path")
+}
+
+func TestRun_AncestorWithHomebrewStyleDownloadsDirIsNotProtected(t *testing.T) {
+	h := newHarness(t)
+	root := h.dir("brew")
+	require.NoError(t, os.MkdirAll(filepath.Join(root, "downloads"), 0o750))
+	h.add("homebrew", true, true, func(f *fakeProvider, pc *config.Provider) {
+		pc.Paths = []string{root}
+		f.paths = []string{root}
+	})
+
+	_, err := h.run(false, 1*gib)
+
+	require.NoError(t, err)
+	assert.Equal(t, []string{"homebrew"}, h.calls)
+}
+
+func TestRun_InterruptDuringProbeStopsRun(t *testing.T) {
+	h := newHarness(t)
+	ctx, cancel := context.WithCancel(t.Context())
+	h.add("npm", true, true, func(f *fakeProvider, _ *config.Provider) { f.onAvailable = cancel })
+	h.add("pip", true, true)
+
+	_, err := Run(ctx, h.cfg, false, Deps{
+		Free:        func() (FreeSpace, error) { return FreeSpace{Free: 100 * gib, Total: 1000 * gib}, nil },
+		NewProvider: func(name string, _ config.Provider) (provider.Provider, error) { return h.fakes[name], nil },
+		Out:         &h.out,
+	})
+
+	require.ErrorIs(t, err, context.Canceled)
+	assert.Empty(t, h.calls)
 }

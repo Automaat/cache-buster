@@ -113,6 +113,10 @@ func Run(ctx context.Context, cfg *config.Config, dryRun bool, deps Deps) (Repor
 		printResult(deps.Out, res)
 	}
 
+	if err := ctx.Err(); err != nil {
+		return report, err
+	}
+
 	if end, freeErr := deps.Free(); freeErr == nil {
 		report.End = end
 	}
@@ -197,6 +201,10 @@ func runCandidate(ctx context.Context, c *candidate, tier Tier, dryRun bool, dep
 	}
 	if !p.Available() {
 		return skipped(res, "unavailable")
+	}
+	if err := ctx.Err(); err != nil {
+		res.Status, res.Err = StatusError, err
+		return res
 	}
 
 	if tier == TierOK {

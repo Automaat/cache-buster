@@ -53,10 +53,19 @@ func (a Agent) domainTarget() string {
 	return fmt.Sprintf("gui/%d", a.UID)
 }
 
-// unload asks launchd to drop the job. A job that was never loaded makes
-// bootout fail, which is the state the caller wants, so the error is ignored.
-func (a Agent) unload(ctx context.Context) {
-	_, _ = a.Exec(ctx, "launchctl", "bootout", a.domainTarget()+"/"+AgentLabel)
+// unload asks launchd to drop the job. A job that was never loaded is the
+// state the caller wants, so only other failures are reported.
+func (a Agent) unload(ctx context.Context) error {
+	out, err := a.Exec(ctx, "launchctl", "bootout", a.domainTarget()+"/"+AgentLabel)
+	if err != nil && !jobNotLoaded(string(out)) {
+		return fmt.Errorf("launchctl bootout: %w: %s", err, strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
+func jobNotLoaded(output string) bool {
+	lower := strings.ToLower(output)
+	return strings.Contains(lower, "no such process") || strings.Contains(lower, "could not find") || strings.Contains(lower, "not found")
 }
 
 // bootstrap loads the job, retrying because bootout can return before launchd
@@ -114,7 +123,7 @@ func (a Agent) Install(ctx context.Context) error {
 		return err
 	}
 
-	a.unload(ctx)
+	_ = a.unload(ctx)
 	if err := a.bootstrap(ctx); err != nil {
 		return err
 	}
@@ -126,7 +135,9 @@ func (a Agent) Install(ctx context.Context) error {
 
 // Uninstall unloads the agent and removes its plist and first-run marker.
 func (a Agent) Uninstall(ctx context.Context) error {
-	a.unload(ctx)
+	if err := a.unload(ctx); err != nil {
+		return err
+	}
 
 	removed := true
 	if err := os.Remove(a.PlistPath()); err != nil {

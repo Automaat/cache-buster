@@ -30,29 +30,32 @@ var AutoCmd = &cobra.Command{
 
 The docker-volumes provider never runs. Providers pointing at Downloads, opencode
 or worktrees are skipped. The first run after install-agent is a dry-run.`,
-	Args: cobra.NoArgs,
-	RunE: runAuto,
+	Args:         cobra.NoArgs,
+	SilenceUsage: true,
+	RunE:         runAuto,
 }
 
 // InstallAgentCmd installs the launchd agent that runs auto.
 var InstallAgentCmd = &cobra.Command{
-	Use:   "install-agent",
-	Short: "Install the launchd agent that runs auto periodically",
-	Args:  cobra.NoArgs,
-	RunE:  runInstallAgent,
+	Use:          "install-agent",
+	Short:        "Install the launchd agent that runs auto periodically",
+	Args:         cobra.NoArgs,
+	SilenceUsage: true,
+	RunE:         runInstallAgent,
 }
 
 // UninstallAgentCmd removes the launchd agent.
 var UninstallAgentCmd = &cobra.Command{
-	Use:   "uninstall-agent",
-	Short: "Remove the launchd agent",
-	Args:  cobra.NoArgs,
-	RunE:  runUninstallAgent,
+	Use:          "uninstall-agent",
+	Short:        "Remove the launchd agent",
+	Args:         cobra.NoArgs,
+	SilenceUsage: true,
+	RunE:         runUninstallAgent,
 }
 
 func init() {
 	AutoCmd.Flags().Bool("dry-run", false, "Preview without deleting")
-	AutoCmd.Flags().String("assume-free", "", "Pretend this much space is free (e.g. 3G); for testing the tiers")
+	AutoCmd.Flags().String("assume-free", "", "Pretend this much space is free (e.g. 3G) to exercise the tiers; implies --dry-run")
 	_ = AutoCmd.Flags().MarkHidden("assume-free")
 }
 
@@ -108,6 +111,7 @@ func runAuto(cmd *cobra.Command, _ []string) error {
 			return err
 		}
 		env.free = free
+		dryRun = true
 	}
 
 	ctx, stop := interruptContext()

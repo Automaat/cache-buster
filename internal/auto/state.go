@@ -79,5 +79,8 @@ func AcquireRunLock(stateDir string) (*RunLock, bool, error) {
 
 // Release drops the lock.
 func (l *RunLock) Release() {
+	if l == nil || l.f == nil {
+		return
+	}
 	_ = l.f.Close()
 }
