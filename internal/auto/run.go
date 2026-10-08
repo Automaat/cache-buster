@@ -110,6 +110,7 @@ func Run(ctx context.Context, cfg *config.Config, dryRun bool, deps Deps) (Repor
 		size.FormatSize(start.Free), size.FormatSize(start.Total), tier, dryRunSuffix(dryRun))
 
 	list := candidates(cfg, tier)
+	protected := ProtectedPaths(cfg, deps.Home)
 	for i := range list {
 		c := &list[i]
 		if err := ctx.Err(); err != nil {
@@ -126,7 +127,7 @@ func Run(ctx context.Context, cfg *config.Config, dryRun bool, deps Deps) (Repor
 			continue
 		}
 
-		res := runCandidate(ctx, c, tier, dryRun, deps)
+		res := runCandidate(ctx, c, tier, dryRun, deps, protected)
 		report.Results = append(report.Results, res)
 		printResult(deps.Out, res)
 	}
@@ -227,7 +228,7 @@ func pruneVolumes(cmd string) bool {
 	return strings.Contains(lower, "volume")
 }
 
-func runCandidate(ctx context.Context, c *candidate, tier Tier, dryRun bool, deps Deps) Result {
+func runCandidate(ctx context.Context, c *candidate, tier Tier, dryRun bool, deps Deps, protected []string) Result {
 	res := Result{Name: c.name}
 
 	p, err := deps.NewProvider(c.name, c.cfg)
@@ -236,7 +237,7 @@ func runCandidate(ctx context.Context, c *candidate, tier Tier, dryRun bool, dep
 		return res
 	}
 
-	if reason := protectedReason(p, deps.Home); reason != "" {
+	if reason := protectedReason(p, deps.Home, protected); reason != "" {
 		return skipped(res, reason)
 	}
 	if !availableCtx(ctx, p) {
@@ -286,9 +287,9 @@ func skipped(res Result, reason string) Result {
 	return res
 }
 
-func protectedReason(p provider.Provider, home string) string {
+func protectedReason(p provider.Provider, home string, protected []string) string {
 	for _, path := range p.Paths() {
-		if isProtected(path, home, true) {
+		if isProtectedWith(path, home, protected, true) {
 			return "protected path " + path
 		}
 	}

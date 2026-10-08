@@ -136,6 +136,11 @@ an enabled provider, or a `dir-pattern` sweep, points at it, into it or at a par
 scan measures top-level totals only, runs for at most 10 seconds and stops on Ctrl-C; when it
 stops early the sizes are lower bounds and `status` says so. `--json` adds an `unmanaged` object.
 
+`status` then lists protected data that exists, with sizes, under "Needs a human (protected, never
+auto-deleted)": the `protected` list plus `worktrees` directories up to two levels below home (Library, Documents, Desktop, Pictures, Movies and Music are not searched) and the other paths auto always skips, such as Xcode archives. Sizes are
+measured with the same kind of bounded scan (10 second budget, Ctrl-C stops it, partial sizes are marked
+"at least"). `--json` adds a `protected` object with `entries` and `incomplete`.
+
 ### clean
 
 ```bash
@@ -249,6 +254,19 @@ auto:
   min_free: 30G      # below this, trim every enabled provider
   min_free_pct: 15   # or below this percentage of the volume (0 disables)
 ```
+
+The optional top-level `protected` list names paths that `auto` never deletes from and that `status`
+reports under "needs a human":
+
+```yaml
+protected:
+  - ~/Documents/important
+```
+
+Entries must be literal paths, absolute or starting with `~/`: globs, `.`/`..` elements, home, its parents and top-level directories are rejected. They are added to the built-in list (`~/Downloads`,
+`~/.local/share/opencode`, `/var/lib/docker/volumes`); removing a built-in entry from the file has no
+effect. `auto` also skips any path that holds a `.git` entry (a git checkout or worktree), anything under a
+`worktrees` directory, and never prunes Docker volumes (Docker Desktop keeps them inside its VM image).
 
 ### Busy tools
 

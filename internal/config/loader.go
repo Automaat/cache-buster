@@ -42,7 +42,7 @@ func (l *Loader) path() (string, error) {
 func (l *Loader) Load() (*Config, error) {
 	var cfg *Config
 	if l.skipDefaults {
-		cfg = &Config{Version: "1", Providers: make(map[string]Provider), Auto: DefaultAuto()}
+		cfg = &Config{Version: "1", Providers: make(map[string]Provider), Auto: DefaultAuto(), Protected: DefaultProtected()}
 	} else {
 		cfg = DefaultConfig()
 	}
@@ -68,6 +68,11 @@ func (l *Loader) Load() (*Config, error) {
 	}
 
 	l.mergeAuto(cfg, &userCfg)
+	// Union, never replace: removing a built-in entry must not unprotect it.
+	cfg.Protected = MergeProtected(append(slices.Clone(cfg.Protected), userCfg.Protected...))
+	if err := cfg.validateProtected(); err != nil {
+		return nil, err
+	}
 
 	// Merge user overrides on top of defaults, field by field.
 	for name := range userCfg.Providers {
@@ -165,6 +170,14 @@ func (l *Loader) Save(cfg *Config) error {
 	// Defaults stay out of the file so a later default change still applies.
 	if cfg.Auto != DefaultAuto() {
 		l.v.Set("auto", cfg.Auto)
+	}
+
+	// Built-in entries stay out of the file so a later default change still applies.
+	extras := slices.DeleteFunc(slices.Clone(cfg.Protected), func(p string) bool {
+		return slices.Contains(DefaultProtected(), p)
+	})
+	if len(extras) > 0 || l.v.IsSet("protected") {
+		l.v.Set("protected", extras)
 	}
 
 	return l.v.WriteConfigAs(configPath)

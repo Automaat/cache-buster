@@ -150,7 +150,7 @@ func TestOutputJSON(t *testing.T) {
 
 	var err error
 	output := captureStdout(t, func() {
-		err = outputJSON(statuses, nil)
+		err = outputJSON(statuses, nil, nil)
 	})
 	require.NoError(t, err)
 
@@ -172,7 +172,7 @@ func TestOutputJSON_WithError(t *testing.T) {
 
 	var err error
 	output := captureStdout(t, func() {
-		err = outputJSON(statuses, nil)
+		err = outputJSON(statuses, nil, nil)
 	})
 	require.NoError(t, err)
 
@@ -235,7 +235,7 @@ func TestOutputJSON_DiskImageFields(t *testing.T) {
 
 	var err error
 	output := captureStdout(t, func() {
-		err = outputJSON(statuses, nil)
+		err = outputJSON(statuses, nil, nil)
 	})
 	require.NoError(t, err)
 
@@ -264,7 +264,7 @@ func TestRunStatus_NoConfig_UsesDefaults(t *testing.T) {
 
 	var err error
 	output := captureStdout(t, func() {
-		err = runStatusWithLoader(loader, false, nil)
+		err = runStatusWithLoader(loader, false, nil, nil)
 	})
 
 	require.NoError(t, err)
@@ -294,7 +294,7 @@ providers:
 
 	var err error
 	output := captureStdout(t, func() {
-		err = runStatusWithLoader(loader, false, nil)
+		err = runStatusWithLoader(loader, false, nil, nil)
 	})
 	require.NoError(t, err)
 
@@ -325,7 +325,7 @@ providers:
 
 	var err error
 	output := captureStdout(t, func() {
-		err = runStatusWithLoader(loader, false, nil)
+		err = runStatusWithLoader(loader, false, nil, nil)
 	})
 	require.NoError(t, err)
 
@@ -358,7 +358,7 @@ providers:
 
 	var err error
 	output := captureStdout(t, func() {
-		err = runStatusWithLoader(loader, true, nil)
+		err = runStatusWithLoader(loader, true, nil, nil)
 	})
 	require.NoError(t, err)
 

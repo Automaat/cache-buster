@@ -215,6 +215,7 @@ func DefaultConfig() *Config {
 		Version:   currentVersion,
 		Providers: DefaultProviders(),
 		Auto:      DefaultAuto(),
+		Protected: DefaultProtected(),
 	}
 }
 
