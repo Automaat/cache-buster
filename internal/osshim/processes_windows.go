@@ -46,10 +46,10 @@ func snapshotProcesses() ([]procEntry, error) {
 	}
 }
 
-// ProcessCommandLines returns the executable name of every running process
-// from a Toolhelp snapshot. Windows exposes no cheap argv for other
-// processes, so only image names such as "go.exe" are returned.
-func ProcessCommandLines(ctx context.Context) ([]string, error) {
+// ProcessTable returns the executable name of every running process from a
+// Toolhelp snapshot. Windows exposes no cheap argv for other processes, so
+// only image names such as "go.exe" are returned.
+func ProcessTable(ctx context.Context) ([]Process, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -57,9 +57,9 @@ func ProcessCommandLines(ctx context.Context) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	names := make([]string, 0, len(entries))
+	procs := make([]Process, 0, len(entries))
 	for i := range entries {
-		names = append(names, entries[i].exe)
+		procs = append(procs, Process{PID: int(entries[i].pid), PPID: int(entries[i].ppid), CommandLine: entries[i].exe})
 	}
-	return names, nil
+	return procs, nil
 }

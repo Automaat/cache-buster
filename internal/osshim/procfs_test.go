@@ -201,3 +201,19 @@ func TestProcHasOpenFiles(t *testing.T) {
 		assert.Error(t, err)
 	})
 }
+
+func TestProcessTableFromProcParentPID(t *testing.T) {
+	root := t.TempDir()
+	base := writeProc(t, root, "100", "/usr/bin/go\x00build\x00", "go")
+	require.NoError(t, os.WriteFile(filepath.Join(base, "stat"), []byte("100 (my (odd) name) S 42 100 100 0"), 0o600))
+	writeProc(t, root, "101", "x", "x")
+
+	procs, err := processTableFromProc(t.Context(), root)
+	require.NoError(t, err)
+	byPID := map[int]Process{}
+	for _, p := range procs {
+		byPID[p.PID] = p
+	}
+	assert.Equal(t, 42, byPID[100].PPID)
+	assert.Zero(t, byPID[101].PPID, "missing stat is an unknown parent")
+}

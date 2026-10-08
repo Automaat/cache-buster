@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -51,9 +52,35 @@ func newBusyGuard(name string, paths []string) *busyGuard {
 	return &busyGuard{
 		locks:         locks,
 		processes:     procs,
-		listProcesses: osshim.ProcessCommandLines,
+		listProcesses: otherProcessLines,
 		lockHeld:      osshim.LockHeld,
 	}
+}
+
+// otherProcessLines lists running command lines without cache-buster's own
+// process and its parent. Both carry the provider name as an argument
+// ("cache-buster clean cargo"), so they would always read as the tool being
+// busy.
+func otherProcessLines(ctx context.Context) ([]string, error) {
+	procs, err := osshim.ProcessTable(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return excludeSelf(procs, os.Getpid(), os.Getppid()), nil
+}
+
+// excludeSelf drops the process with pid self and its parent. A zero pid
+// never matches, since 0 stands for an unknown pid.
+func excludeSelf(procs []osshim.Process, self, parent int) []string {
+	lines := make([]string, 0, len(procs))
+	for i := range procs {
+		p := &procs[i]
+		if p.PID != 0 && (p.PID == self || p.PID == parent) {
+			continue
+		}
+		lines = append(lines, p.CommandLine)
+	}
+	return lines
 }
 
 // busyReason returns a non-empty reason when the tool is busy. A failed check

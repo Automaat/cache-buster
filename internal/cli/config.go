@@ -2,8 +2,10 @@ package cli
 
 import (
 	"fmt"
+	"maps"
 	"os"
 	"os/exec"
+	"slices"
 
 	"github.com/Automaat/cache-buster/internal/config"
 	"github.com/kballard/go-shellquote"
@@ -59,7 +61,27 @@ func runConfigShowWithLoader(loader *config.Loader) error {
 	configPath, _ := config.Path()
 	fmt.Printf("# %s\n", configPath)
 	fmt.Print(string(out))
+	for _, note := range defaultDriftNotes(cfg) {
+		fmt.Println(note)
+	}
 	return nil
+}
+
+// defaultDriftNotes returns a YAML comment for each provider whose saved
+// enabled flag differs from the current default, sorted by provider name.
+func defaultDriftNotes(cfg *config.Config) []string {
+	defaults := config.DefaultProviders()
+	var notes []string
+	for _, name := range slices.Sorted(maps.Keys(cfg.Providers)) {
+		def, ok := defaults[name]
+		if !ok || cfg.Providers[name].Enabled == def.Enabled {
+			continue
+		}
+		notes = append(notes, fmt.Sprintf(
+			"# note: %s has enabled: %t saved; the current default is %t",
+			name, cfg.Providers[name].Enabled, def.Enabled))
+	}
+	return notes
 }
 
 func runConfigInit(_ *cobra.Command, _ []string) error {

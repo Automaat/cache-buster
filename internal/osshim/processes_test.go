@@ -55,3 +55,16 @@ func TestProcessCommandLinesHonoursCancelledContext(t *testing.T) {
 		assert.NotEmpty(t, lines, "a listing that succeeds must not be empty")
 	}
 }
+
+func TestProcessTableReportsSelfAndParent(t *testing.T) {
+	procs, err := ProcessTable(context.Background())
+	require.NoError(t, err)
+
+	for i := range procs {
+		if procs[i].PID == os.Getpid() {
+			assert.Equal(t, os.Getppid(), procs[i].PPID)
+			return
+		}
+	}
+	t.Fatal("own process missing from the process table")
+}
