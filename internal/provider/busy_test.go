@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"testing"
 	"time"
 
@@ -52,6 +53,98 @@ func TestMatchProcess_WindowsImageNames(t *testing.T) {
 	}
 	assert.Equal(t, "go", matchProcess("go.exe", []string{"go"}))
 	assert.Equal(t, "cargo", matchProcess(`C:\Tools\CARGO.EXE`, []string{"cargo"}))
+}
+
+func TestExcludeSelf(t *testing.T) {
+	wanted := []string{"cargo", "rustc"}
+	procs := []osshim.Process{
+		{PID: 1, PPID: 0, CommandLine: "/sbin/launchd"},
+		{PID: 40, PPID: 1, CommandLine: "sudo sh -c cache-buster clean cargo"},
+		{PID: 50, PPID: 40, CommandLine: "zsh -c cache-buster clean cargo"},
+		{PID: 60, PPID: 50, CommandLine: "cache-buster clean cargo"},
+		{PID: 70, PPID: 1, CommandLine: "vim notes.txt"},
+	}
+
+	t.Run("self and wrapper ancestors are dropped", func(t *testing.T) {
+		lines := excludeSelf(procs, 60, wanted)
+		assert.Equal(t, []string{"vim notes.txt"}, lines)
+		g := fakeGuard(lines, nil, nil)
+		assert.Empty(t, g.busyReason(context.Background()))
+	})
+
+	t.Run("real tool process still skips", func(t *testing.T) {
+		withTool := slices.Concat(procs, []osshim.Process{{PID: 80, PPID: 1, CommandLine: "/Users/me/.cargo/bin/cargo build"}})
+		g := fakeGuard(excludeSelf(withTool, 60, wanted), nil, nil)
+		assert.Equal(t, "cargo is running", g.busyReason(context.Background()))
+	})
+
+	t.Run("tool ancestor stays visible", func(t *testing.T) {
+		parentTool := []osshim.Process{
+			{PID: 1, PPID: 0, CommandLine: "/sbin/launchd"},
+			{PID: 50, PPID: 1, CommandLine: "/Users/me/.cargo/bin/cargo run -- clean cargo"},
+			{PID: 60, PPID: 50, CommandLine: "target/debug/cache-buster clean cargo"},
+		}
+		g := fakeGuard(excludeSelf(parentTool, 60, wanted), nil, nil)
+		assert.Equal(t, "cargo is running", g.busyReason(context.Background()))
+	})
+
+	t.Run("linux comm suffix does not defeat the wrapper check", func(t *testing.T) {
+		linux := []osshim.Process{
+			{PID: 50, PPID: 1, CommandLine: "sh -c cache-buster clean cargo sh", Args: "sh -c cache-buster clean cargo"},
+			{PID: 60, PPID: 50, CommandLine: "cache-buster clean cargo cache-buster", Args: "cache-buster clean cargo"},
+		}
+		assert.Empty(t, excludeSelf(linux, 60, wanted))
+	})
+
+	t.Run("tool named later in the ancestor line stays visible", func(t *testing.T) {
+		brew := []osshim.Process{
+			{PID: 1, PPID: 0, CommandLine: "/sbin/launchd"},
+			{PID: 50, PPID: 1, CommandLine: "/opt/homebrew/ruby -W1 /opt/homebrew/Library/Homebrew/brew.rb bundle"},
+			{PID: 55, PPID: 50, CommandLine: "/bin/sh -c cache-buster clean homebrew"},
+			{PID: 60, PPID: 55, CommandLine: "cache-buster clean homebrew"},
+		}
+		g := fakeGuard(excludeSelf(brew, 60, []string{"brew"}), nil, nil)
+		g.processes = []string{"brew"}
+		assert.Equal(t, "brew is running", g.busyReason(context.Background()))
+
+		spaced := []osshim.Process{
+			{PID: 50, PPID: 0, CommandLine: "/Users/John Smith/.cargo/bin/cargo run"},
+			{PID: 60, PPID: 50, CommandLine: "cache-buster clean cargo"},
+		}
+		g = fakeGuard(excludeSelf(spaced, 60, wanted), nil, nil)
+		assert.Equal(t, "cargo is running", g.busyReason(context.Background()))
+	})
+
+	t.Run("cycle among kept ancestors terminates", func(t *testing.T) {
+		cyc := []osshim.Process{
+			{PID: 60, PPID: 5, CommandLine: "cache-buster clean cargo"},
+			{PID: 5, PPID: 6, CommandLine: "cargo"},
+			{PID: 6, PPID: 5, CommandLine: "cargo"},
+		}
+		assert.Len(t, excludeSelf(cyc, 60, wanted), 2)
+	})
+
+	t.Run("unknown pids and cycles are safe", func(t *testing.T) {
+		got := excludeSelf([]osshim.Process{{CommandLine: "cargo build"}}, 0, wanted)
+		assert.Equal(t, []string{"cargo build"}, got)
+		cyc := []osshim.Process{{PID: 5, PPID: 6, CommandLine: "a"}, {PID: 6, PPID: 5, CommandLine: "b"}}
+		assert.Empty(t, excludeSelf(cyc, 5, wanted))
+	})
+}
+
+func TestProcessLister_OmitsOwnProcess(t *testing.T) {
+	lines, err := processLister([]string{"go"})(context.Background())
+	require.NoError(t, err)
+	all, err := osshim.ProcessTable(context.Background())
+	require.NoError(t, err)
+	var own string
+	for i := range all {
+		if all[i].PID == os.Getpid() {
+			own = all[i].CommandLine
+		}
+	}
+	require.NotEmpty(t, own)
+	assert.Less(t, len(lines), len(all))
 }
 
 func fakeGuard(lines []string, listErr error, held map[string]bool) *busyGuard {

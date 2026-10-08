@@ -43,16 +43,49 @@ func pidDirs(root string) ([]string, error) {
 }
 
 // commandLinesFromProc returns one command line per process under a
-// /proc-style root. The kernel's short name is appended so a process that
-// rewrote its argv is still matched; a kernel thread or zombie has no argv
-// and yields the name alone.
+// /proc-style root.
 func commandLinesFromProc(ctx context.Context, root string) ([]string, error) {
+	procs, err := processTableFromProc(ctx, root)
+	if err != nil {
+		return nil, err
+	}
+	return commandLines(procs), nil
+}
+
+// parentPID reads the parent pid from a /proc stat file. The command name
+// sits in parentheses and may contain spaces, so parsing starts after the
+// last ")". An unreadable file yields 0, which no exclusion rule matches.
+func parentPID(base string) int {
+	stat, err := os.ReadFile(filepath.Join(base, "stat"))
+	if err != nil {
+		return 0
+	}
+	idx := strings.LastIndex(string(stat), ") ")
+	if idx < 0 {
+		return 0
+	}
+	fields := strings.Fields(string(stat)[idx+2:])
+	if len(fields) < 2 {
+		return 0
+	}
+	ppid, err := strconv.Atoi(fields[1])
+	if err != nil {
+		return 0
+	}
+	return ppid
+}
+
+// processTableFromProc returns one entry per process under a /proc-style
+// root. The kernel's short name is appended so a process that rewrote its
+// argv is still matched; a kernel thread or zombie has no argv and yields
+// the name alone.
+func processTableFromProc(ctx context.Context, root string) ([]Process, error) {
 	pids, err := pidDirs(root)
 	if err != nil {
 		return nil, err
 	}
 
-	lines := make([]string, 0, len(pids))
+	lines := make([]Process, 0, len(pids))
 	for _, pid := range pids {
 		if err := ctx.Err(); err != nil {
 			return nil, err
@@ -74,7 +107,13 @@ func commandLinesFromProc(ctx context.Context, root string) ([]string, error) {
 
 		args := strings.TrimSpace(strings.ReplaceAll(string(bytes.TrimRight(cmdline, "\x00")), "\x00", " "))
 		name := strings.TrimSpace(string(comm))
-		lines = append(lines, strings.TrimSpace(args+" "+name))
+		num, _ := strconv.Atoi(pid)
+		lines = append(lines, Process{
+			PID:         num,
+			PPID:        parentPID(filepath.Join(root, pid)),
+			CommandLine: strings.TrimSpace(args + " " + name),
+			Args:        args,
+		})
 	}
 	return lines, nil
 }

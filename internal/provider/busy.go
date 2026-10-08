@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -51,9 +52,87 @@ func newBusyGuard(name string, paths []string) *busyGuard {
 	return &busyGuard{
 		locks:         locks,
 		processes:     procs,
-		listProcesses: osshim.ProcessCommandLines,
+		listProcesses: processLister(procs),
 		lockHeld:      osshim.LockHeld,
 	}
+}
+
+// processLister returns a lister that leaves out cache-buster's own process
+// and its ancestors. They carry the provider name as an argument
+// ("cache-buster clean cargo"), so they would always read as the tool being
+// busy.
+func processLister(wanted []string) func(context.Context) ([]string, error) {
+	return func(ctx context.Context) ([]string, error) {
+		procs, err := osshim.ProcessTable(ctx)
+		if err != nil {
+			return nil, err
+		}
+		return excludeSelf(procs, os.Getpid(), wanted), nil
+	}
+}
+
+// excludeSelf drops the process with pid self and its ancestors, except an
+// ancestor that is a wanted tool: its executable is the tool, or its command
+// line names the tool without embedding cache-buster's own arguments
+// ("cargo run -- clean", "ruby brew.rb bundle"). A wrapper such as
+// "sh -c cache-buster clean cargo" embeds them and is dropped. A zero pid is
+// unknown and never matches.
+func excludeSelf(procs []osshim.Process, self int, wanted []string) []string {
+	byPID := make(map[int]*osshim.Process, len(procs))
+	for i := range procs {
+		if procs[i].PID != 0 {
+			byPID[procs[i].PID] = &procs[i]
+		}
+	}
+
+	var selfArgs string
+	if p, ok := byPID[self]; ok {
+		args := p.Args
+		if args == "" {
+			args = p.CommandLine
+		}
+		_, selfArgs, _ = strings.Cut(strings.TrimSpace(args), " ")
+		selfArgs = strings.TrimSpace(selfArgs)
+	}
+
+	skip := map[int]bool{}
+	seen := map[int]bool{}
+	for pid := self; pid != 0 && !seen[pid]; {
+		seen[pid] = true
+		p, ok := byPID[pid]
+		if !ok {
+			break
+		}
+		if pid == self || !keepAncestor(p.CommandLine, selfArgs, wanted) {
+			skip[pid] = true
+		}
+		pid = p.PPID
+	}
+
+	lines := make([]string, 0, len(procs))
+	for i := range procs {
+		if procs[i].PID != 0 && skip[procs[i].PID] {
+			continue
+		}
+		lines = append(lines, procs[i].CommandLine)
+	}
+	return lines
+}
+
+func keepAncestor(commandLine, selfArgs string, wanted []string) bool {
+	if matchProcess(firstToken(commandLine), wanted) != "" {
+		return true
+	}
+	embedsSelf := selfArgs != "" && strings.Contains(commandLine, selfArgs)
+	return !embedsSelf && matchProcess(commandLine, wanted) != ""
+}
+
+func firstToken(commandLine string) string {
+	fields := strings.Fields(commandLine)
+	if len(fields) == 0 {
+		return ""
+	}
+	return fields[0]
 }
 
 // busyReason returns a non-empty reason when the tool is busy. A failed check

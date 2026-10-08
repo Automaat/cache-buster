@@ -80,3 +80,21 @@ func TestConfigEdit_NoEditor(t *testing.T) {
 		t.Error("config file not created before edit")
 	}
 }
+
+func TestDefaultDriftNotes(t *testing.T) {
+	cfg := config.DefaultConfig()
+	if notes := defaultDriftNotes(cfg); len(notes) != 0 {
+		t.Fatalf("defaults must not drift, got %v", notes)
+	}
+
+	hf := cfg.Providers["huggingface"]
+	hf.Enabled = !hf.Enabled
+	cfg.Providers["huggingface"] = hf
+	cfg.Providers["custom-tool"] = config.Provider{Enabled: true}
+
+	notes := defaultDriftNotes(cfg)
+	want := "# note: huggingface has enabled: true saved; the current default is false"
+	if len(notes) != 1 || notes[0] != want {
+		t.Fatalf("notes = %v, want [%q]", notes, want)
+	}
+}

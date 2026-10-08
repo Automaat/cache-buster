@@ -4,8 +4,7 @@ package osshim
 
 import "context"
 
-// ProcessCommandLines returns the command line of every running process,
-// read from /proc.
-func ProcessCommandLines(ctx context.Context) ([]string, error) {
-	return commandLinesFromProc(ctx, "/proc")
+// ProcessTable returns every running process, read from /proc.
+func ProcessTable(ctx context.Context) ([]Process, error) {
+	return processTableFromProc(ctx, "/proc")
 }

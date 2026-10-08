@@ -228,6 +228,12 @@ Location: `~/.config/cache-buster/config.yaml`
 
 Generate defaults with `cache-buster config init`.
 
+A saved config keeps the values it was created with. When a default changes
+later, the saved value wins: configs from older versions keep `enabled: true`
+for `huggingface` and `playwright`, which are now disabled by default.
+`cache-buster config show` ends with a note for every provider whose saved
+`enabled` differs from the current default. Edit the file to change it.
+
 ```yaml
 version: "1"
 providers:
@@ -291,7 +297,9 @@ failure. If the check itself fails, the provider is skipped too.
 | `uv` | `<path>/.lock` is flock-held, or a `uv` process runs |
 
 Busy detection errs toward skipping: any process whose command line contains
-the tool name counts, including wrappers such as `sudo` or `sh -c`. A hung
+the tool name counts, including wrappers such as `sudo` or `sh -c`. The
+cache-buster process and its wrapper ancestors are not counted, but an
+ancestor that is the tool itself, such as `cargo run -- clean cargo`, is. A hung
 `clean_cmd` is killed with its whole process group, so it must not need a
 terminal.
 
