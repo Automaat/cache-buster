@@ -678,10 +678,10 @@ func TestIsProtected_CaseInsensitiveAndCacheLocations(t *testing.T) {
 		"/Users/me/.cache/OpenCode",
 		"/Users/me/work/Worktrees/a",
 	} {
-		assert.True(t, isProtected(p, home), p)
+		assert.True(t, isProtected(p, home, true), p)
 	}
-	assert.False(t, isProtected("/Users/me/.cache/uv", home))
-	assert.False(t, isProtected("/Users/me/Library/Caches/Homebrew", home))
+	assert.False(t, isProtected("/Users/me/.cache/uv", home, true))
+	assert.False(t, isProtected("/Users/me/Library/Caches/Homebrew", home, true))
 }
 
 func TestAgentUninstall_RealBootoutFailureKeepsPlistAndMarker(t *testing.T) {
@@ -742,4 +742,61 @@ func TestRun_InterruptDuringProbeStopsRun(t *testing.T) {
 
 	require.ErrorIs(t, err, context.Canceled)
 	assert.Empty(t, h.calls)
+}
+
+func TestRun_SkipsAncestorOfDeeplyNestedWorktrees(t *testing.T) {
+	h := newHarness(t)
+	root := h.dir("far")
+	require.NoError(t, os.MkdirAll(filepath.Join(root, "a", "b", "c", "d", "e", "worktrees", "w"), 0o750))
+	h.add("ancestor", true, true, func(f *fakeProvider, pc *config.Provider) {
+		pc.Paths = []string{root}
+		f.paths = []string{root}
+	})
+
+	_, err := h.run(false, 1*gib)
+
+	require.NoError(t, err)
+	assert.Empty(t, h.calls)
+}
+
+func TestHasDefaultPaths(t *testing.T) {
+	def := config.DefaultProviders()["npm"]
+
+	assert.True(t, hasDefaultPaths("npm", def))
+	def.Paths = []string{"/elsewhere"}
+	assert.False(t, hasDefaultPaths("npm", def))
+	assert.False(t, hasDefaultPaths("custom", config.Provider{Paths: []string{"~/x"}}))
+}
+
+func TestRun_DockerProviderWithVolumesFlagStillRuns(t *testing.T) {
+	h := newHarness(t)
+	h.add("docker", true, true, func(_ *fakeProvider, pc *config.Provider) { pc.CleanCmd = "docker system prune -af --volumes" })
+
+	_, err := h.run(false, 1*gib)
+
+	require.NoError(t, err)
+	assert.Equal(t, []string{"docker"}, h.calls)
+}
+
+type hangingProbe struct{ fakeProvider }
+
+func (hangingProbe) Available() bool { select {} }
+
+func TestRun_InterruptDoesNotWaitForHungProbe(t *testing.T) {
+	h := newHarness(t)
+	hung := &hangingProbe{}
+	h.add("npm", true, true, func(f *fakeProvider, _ *config.Provider) { hung.fakeProvider = *f })
+	ctx, cancel := context.WithTimeout(t.Context(), 100*time.Millisecond)
+	defer cancel()
+
+	start := time.Now()
+	_, err := Run(ctx, h.cfg, false, Deps{
+		Free:        func() (FreeSpace, error) { return FreeSpace{Free: 100 * gib, Total: 1000 * gib}, nil },
+		NewProvider: func(string, config.Provider) (provider.Provider, error) { return hung, nil },
+		Out:         &h.out,
+		Home:        h.home,
+	})
+
+	require.Error(t, err)
+	assert.Less(t, time.Since(start), 5*time.Second)
 }

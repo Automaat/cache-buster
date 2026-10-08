@@ -28,7 +28,7 @@ func protectedElement(part string) bool {
 }
 
 // isProtected reports whether path is, is inside, or contains protected data.
-func isProtected(path, home string) bool {
+func isProtected(path, home string, scanTree bool) bool {
 	candidates := []string{filepath.Clean(path)}
 	if resolved, err := filepath.EvalSymlinks(path); err == nil {
 		candidates = append(candidates, resolved)
@@ -40,7 +40,7 @@ func isProtected(path, home string) bool {
 				return true
 			}
 		}
-		if containsProtectedDir(p) {
+		if scanTree && containsProtectedDir(p) {
 			return true
 		}
 		for _, root := range protectedRoots(home) {
@@ -57,20 +57,17 @@ func within(path, root string) bool {
 	return path == root || strings.HasPrefix(path, root+string(filepath.Separator))
 }
 
-const (
-	descendantScanDepth   = 3
-	descendantScanEntries = 20000
-)
+const descendantScanEntries = 500000
 
 // containsProtectedDir reports whether a worktrees or opencode directory sits
-// within a few levels below root, so a provider on an ancestor cannot reach
-// into one. Downloads is left out: cache tools such as Homebrew keep a
-// downloads directory of their own. The scan is bounded and never follows
-// symlinks.
+// anywhere below root, so a provider on an ancestor cannot reach into one.
+// Downloads is left out: cache tools such as Homebrew keep a downloads
+// directory of their own. The scan never follows symlinks and fails closed
+// once the tree is too large to verify.
 func containsProtectedDir(root string) bool {
 	level := []string{root}
 	scanned := 0
-	for depth := 0; depth < descendantScanDepth && len(level) > 0; depth++ {
+	for len(level) > 0 {
 		var next []string
 		for _, dir := range level {
 			entries, err := os.ReadDir(dir)
@@ -80,7 +77,7 @@ func containsProtectedDir(root string) bool {
 			for _, e := range entries {
 				scanned++
 				if scanned > descendantScanEntries {
-					return false
+					return true
 				}
 				if !e.IsDir() {
 					continue

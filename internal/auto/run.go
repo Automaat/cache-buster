@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 	"strings"
 	"time"
 
@@ -70,9 +71,10 @@ func (r Report) Err() error {
 // candidate is a provider auto may run. A sweep is a disabled
 // directory-pattern provider that runs only at the critical tier.
 type candidate struct {
-	cfg   config.Provider
-	name  string
-	sweep bool
+	cfg     config.Provider
+	name    string
+	sweep   bool
+	builtin bool
 }
 
 // Run picks the pressure tier from free space and trims providers
@@ -158,15 +160,15 @@ func candidates(cfg *config.Config, tier Tier) []candidate {
 
 	for name := range cfg.Providers {
 		pc := cfg.Providers[name]
-		if name == VolumesProvider || pruneVolumes(pc.CleanCmd) || !config.PathsExist(pc.Paths) {
+		if name == VolumesProvider || (name != "docker" && pruneVolumes(pc.CleanCmd)) || !config.PathsExist(pc.Paths) {
 			continue
 		}
 		switch {
 		case pc.Enabled:
-			byName[name] = candidate{name: name, cfg: pc}
+			byName[name] = candidate{name: name, cfg: pc, builtin: hasDefaultPaths(name, pc)}
 			regular = append(regular, name)
 		case pc.Type == config.TypeDirPattern && tier == TierCritical:
-			byName[name] = candidate{name: name, cfg: pc, sweep: true}
+			byName[name] = candidate{name: name, cfg: pc, sweep: true, builtin: hasDefaultPaths(name, pc)}
 			sweeps = append(sweeps, name)
 		}
 	}
@@ -179,6 +181,14 @@ func candidates(cfg *config.Config, tier Tier) []candidate {
 		out = append(out, byName[name])
 	}
 	return out
+}
+
+// hasDefaultPaths reports whether a provider still points at its built-in
+// paths. Those well-known cache locations skip the costly tree scan for
+// protected directories; any user-defined or retargeted provider gets it.
+func hasDefaultPaths(name string, pc config.Provider) bool {
+	def, ok := config.DefaultProviders()[name]
+	return ok && slices.Equal(def.Paths, pc.Paths)
 }
 
 // pruneVolumes catches renamed or custom providers whose command prunes Docker volumes.
@@ -196,10 +206,14 @@ func runCandidate(ctx context.Context, c *candidate, tier Tier, dryRun bool, dep
 		return res
 	}
 
-	if reason := protectedReason(p, deps.Home); reason != "" {
+	if reason := protectedReason(p, deps.Home, !c.builtin); reason != "" {
 		return skipped(res, reason)
 	}
-	if !p.Available() {
+	if !availableCtx(ctx, p) {
+		if err := ctx.Err(); err != nil {
+			res.Status, res.Err = StatusError, err
+			return res
+		}
 		return skipped(res, "unavailable")
 	}
 	if err := ctx.Err(); err != nil {
@@ -242,9 +256,9 @@ func skipped(res Result, reason string) Result {
 	return res
 }
 
-func protectedReason(p provider.Provider, home string) string {
+func protectedReason(p provider.Provider, home string, scanTree bool) string {
 	for _, path := range p.Paths() {
-		if isProtected(path, home) {
+		if isProtected(path, home, scanTree) {
 			return "protected path " + path
 		}
 	}
@@ -280,5 +294,18 @@ func printPreview(out io.Writer, output string) {
 	}
 	if skips > 0 {
 		fmt.Fprintf(out, "  %d entries skipped\n", skips)
+	}
+}
+
+// availableCtx runs the provider's availability probe but returns false as
+// soon as ctx is cancelled, so an interrupt does not wait for a hung probe.
+func availableCtx(ctx context.Context, p provider.Provider) bool {
+	done := make(chan bool, 1)
+	go func() { done <- p.Available() }()
+	select {
+	case ok := <-done:
+		return ok
+	case <-ctx.Done():
+		return false
 	}
 }
