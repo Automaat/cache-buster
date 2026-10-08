@@ -149,8 +149,8 @@ func runAutoWithLoader(ctx context.Context, loader *config.Loader, env autoEnv, 
 	}
 	defer lock.Release()
 
-	firstRun := auto.FirstRunPending(env.stateDir)
-	if firstRun && !dryRun {
+	forced := auto.FirstRunPending(env.stateDir) && !dryRun
+	if forced {
 		fmt.Fprintln(env.out, "first run after install-agent: dry-run, nothing is deleted")
 		dryRun = true
 	}
@@ -168,7 +168,7 @@ func runAutoWithLoader(ctx context.Context, loader *config.Loader, env autoEnv, 
 		return err
 	}
 
-	if firstRun && dryRun {
+	if forced {
 		if clearErr := auto.ClearFirstRun(env.stateDir); clearErr != nil {
 			return clearErr
 		}
@@ -176,12 +176,14 @@ func runAutoWithLoader(ctx context.Context, loader *config.Loader, env autoEnv, 
 	return report.Err()
 }
 
-func runInstallAgent(cmd *cobra.Command, _ []string) error {
+func runInstallAgent(_ *cobra.Command, _ []string) error {
 	env, err := defaultAutoEnv()
 	if err != nil {
 		return err
 	}
-	return runInstallAgentWithLoader(cmd.Context(), config.NewLoader(), env)
+	ctx, stop := interruptContext()
+	defer stop()
+	return runInstallAgentWithLoader(ctx, config.NewLoader(), env)
 }
 
 func runInstallAgentWithLoader(ctx context.Context, loader *config.Loader, env autoEnv) error {
@@ -199,12 +201,14 @@ func runInstallAgentWithLoader(ctx context.Context, loader *config.Loader, env a
 	return env.agent(interval).Install(ctx)
 }
 
-func runUninstallAgent(cmd *cobra.Command, _ []string) error {
+func runUninstallAgent(_ *cobra.Command, _ []string) error {
 	env, err := defaultAutoEnv()
 	if err != nil {
 		return err
 	}
-	return env.agent(0).Uninstall(cmd.Context())
+	ctx, stop := interruptContext()
+	defer stop()
+	return env.agent(0).Uninstall(ctx)
 }
 
 func (e autoEnv) agent(interval time.Duration) auto.Agent {

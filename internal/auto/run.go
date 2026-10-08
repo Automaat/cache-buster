@@ -154,7 +154,7 @@ func candidates(cfg *config.Config, tier Tier) []candidate {
 
 	for name := range cfg.Providers {
 		pc := cfg.Providers[name]
-		if name == VolumesProvider || !config.PathsExist(pc.Paths) {
+		if name == VolumesProvider || pruneVolumes(pc.CleanCmd) || !config.PathsExist(pc.Paths) {
 			continue
 		}
 		switch {
@@ -175,6 +175,12 @@ func candidates(cfg *config.Config, tier Tier) []candidate {
 		out = append(out, byName[name])
 	}
 	return out
+}
+
+// pruneVolumes catches renamed or custom providers whose command prunes Docker volumes.
+func pruneVolumes(cmd string) bool {
+	lower := strings.ToLower(cmd)
+	return strings.Contains(lower, "volume")
 }
 
 func runCandidate(ctx context.Context, c *candidate, tier Tier, dryRun bool, deps Deps) Result {

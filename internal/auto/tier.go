@@ -67,7 +67,7 @@ func StatfsFree(path string) FreeFunc {
 		if err := syscall.Statfs(path, &st); err != nil {
 			return FreeSpace{}, fmt.Errorf("statfs %s: %w", path, err)
 		}
-		bsize := clampInt64(uint64(st.Bsize))
+		bsize := clampInt64(st.Bsize)
 		return FreeSpace{
 			Free:  clampInt64(st.Bavail) * bsize,
 			Total: clampInt64(st.Blocks) * bsize,
@@ -75,8 +75,15 @@ func StatfsFree(path string) FreeFunc {
 	}
 }
 
-func clampInt64(v uint64) int64 {
-	if v > math.MaxInt64 {
+type statfsInt interface {
+	~int32 | ~int64 | ~uint32 | ~uint64
+}
+
+func clampInt64[T statfsInt](v T) int64 {
+	if v <= 0 {
+		return 0
+	}
+	if uint64(v) > math.MaxInt64 {
 		return math.MaxInt64
 	}
 	return int64(v)

@@ -114,7 +114,7 @@ func TestAuto_ExplicitDryRunKeepsMarker(t *testing.T) {
 	require.NoError(t, runAutoWithLoader(t.Context(), f.loader, f.env, dryRunOnly))
 
 	assert.False(t, f.cleaned())
-	assert.False(t, auto.FirstRunPending(f.env.stateDir))
+	assert.True(t, auto.FirstRunPending(f.env.stateDir), "a manual preview must not consume the marker")
 }
 
 func TestAuto_NoMarkerCleansOnLowSpace(t *testing.T) {

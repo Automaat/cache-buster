@@ -14,6 +14,8 @@ import (
 	"time"
 )
 
+const bootstrapAttempts = 5
+
 // AgentLabel is the launchd label and the plist file stem.
 const AgentLabel = "dev.mskalski.cache-buster"
 
@@ -28,13 +30,14 @@ func ExecCommand(ctx context.Context, name string, args ...string) ([]byte, erro
 
 // Agent installs and removes the launchd agent.
 type Agent struct {
-	Exec     Executor
-	Out      io.Writer
-	Home     string
-	Exe      string
-	StateDir string
-	UID      int
-	Interval time.Duration
+	Exec       Executor
+	Out        io.Writer
+	Home       string
+	Exe        string
+	StateDir   string
+	UID        int
+	Interval   time.Duration
+	RetryDelay time.Duration
 }
 
 // PlistPath is where the agent definition lives.
@@ -54,6 +57,32 @@ func (a Agent) domainTarget() string {
 // bootout fail, which is the state the caller wants, so the error is ignored.
 func (a Agent) unload(ctx context.Context) {
 	_, _ = a.Exec(ctx, "launchctl", "bootout", a.domainTarget()+"/"+AgentLabel)
+}
+
+// bootstrap loads the job, retrying because bootout can return before launchd
+// has finished unloading and the first bootstrap then fails with an I/O error.
+func (a Agent) bootstrap(ctx context.Context) error {
+	delay := a.RetryDelay
+	if delay <= 0 {
+		delay = time.Second
+	}
+
+	var lastErr error
+	for attempt := range bootstrapAttempts {
+		if attempt > 0 {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(delay):
+			}
+		}
+		out, err := a.Exec(ctx, "launchctl", "bootstrap", a.domainTarget(), a.PlistPath())
+		if err == nil {
+			return nil
+		}
+		lastErr = fmt.Errorf("launchctl bootstrap: %w: %s", err, strings.TrimSpace(string(out)))
+	}
+	return lastErr
 }
 
 // Install arms the first-run dry-run marker, writes the plist and loads it.
@@ -86,8 +115,8 @@ func (a Agent) Install(ctx context.Context) error {
 	}
 
 	a.unload(ctx)
-	if out, err := a.Exec(ctx, "launchctl", "bootstrap", a.domainTarget(), a.PlistPath()); err != nil {
-		return fmt.Errorf("launchctl bootstrap: %w: %s", err, strings.TrimSpace(string(out)))
+	if err := a.bootstrap(ctx); err != nil {
+		return err
 	}
 
 	fmt.Fprintf(a.Out, "installed %s (every %s)\n", a.PlistPath(), a.Interval)

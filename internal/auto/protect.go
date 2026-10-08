@@ -15,13 +15,15 @@ func protectedRoots(home string) []string {
 		filepath.Join(home, ".local", "share", "opencode"),
 		filepath.Join(home, ".config", "opencode"),
 		filepath.Join(home, ".opencode"),
+		filepath.Join(home, ".cache", "opencode"),
+		filepath.Join(home, "Library", "Caches", "opencode"),
 	}
 }
 
 // protectedElement matches path elements that mark data auto must never
 // touch, whichever provider points at it.
 func protectedElement(part string) bool {
-	return part == "Downloads" || strings.EqualFold(part, "opencode") || strings.EqualFold(part, "worktrees")
+	return strings.EqualFold(part, "Downloads") || strings.EqualFold(part, "opencode") || strings.EqualFold(part, "worktrees")
 }
 
 // isProtected reports whether path is, is inside, or contains protected data.
@@ -38,7 +40,7 @@ func isProtected(path, home string) bool {
 			}
 		}
 		for _, root := range protectedRoots(home) {
-			if within(p, root) || within(root, p) {
+			if within(strings.ToLower(p), strings.ToLower(root)) || within(strings.ToLower(root), strings.ToLower(p)) {
 				return true
 			}
 		}

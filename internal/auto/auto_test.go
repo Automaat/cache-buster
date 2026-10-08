@@ -483,13 +483,14 @@ func newAgent(t *testing.T, rec *recorder) Agent {
 	t.Helper()
 	home := t.TempDir()
 	return Agent{
-		Exec:     rec.exec,
-		Out:      &bytes.Buffer{},
-		Home:     home,
-		Exe:      "/opt/homebrew/bin/cache-buster",
-		StateDir: filepath.Join(home, "state"),
-		UID:      501,
-		Interval: 45 * time.Minute,
+		Exec:       rec.exec,
+		Out:        &bytes.Buffer{},
+		Home:       home,
+		Exe:        "/opt/homebrew/bin/cache-buster",
+		StateDir:   filepath.Join(home, "state"),
+		UID:        501,
+		Interval:   45 * time.Minute,
+		RetryDelay: time.Nanosecond,
 	}
 }
 
@@ -521,6 +522,38 @@ func TestAgentInstall_BootstrapFailureIsReturned(t *testing.T) {
 
 	require.ErrorContains(t, err, "launchctl bootstrap")
 	assert.ErrorContains(t, err, "launchctl said no")
+}
+
+func TestAgentInstall_RetriesBootstrapUntilItSucceeds(t *testing.T) {
+	attempts := 0
+	a := newAgent(t, &recorder{})
+	a.Exec = func(_ context.Context, _ string, args ...string) ([]byte, error) {
+		if args[0] == "bootstrap" {
+			attempts++
+			if attempts < 3 {
+				return []byte("Input/output error"), errors.New("exit 5")
+			}
+		}
+		return nil, nil
+	}
+
+	require.NoError(t, a.Install(t.Context()))
+	assert.Equal(t, 3, attempts)
+}
+
+func TestAgentInstall_GivesUpAfterFiveBootstrapAttempts(t *testing.T) {
+	attempts := 0
+	a := newAgent(t, &recorder{})
+	a.Exec = func(_ context.Context, _ string, args ...string) ([]byte, error) {
+		if args[0] == "bootstrap" {
+			attempts++
+			return nil, errors.New("exit 5")
+		}
+		return nil, nil
+	}
+
+	require.Error(t, a.Install(t.Context()))
+	assert.Equal(t, 5, attempts)
 }
 
 func TestAgentInstall_RefusesGoRunBinaryAndRelativePath(t *testing.T) {
@@ -616,4 +649,31 @@ func TestPrintPreview_CountsSkipsAndKeepsRemovals(t *testing.T) {
 	printPreview(&out, "skip: /a (not a directory)\nwould remove: /b (1 GiB, idle 3h)\nskip: /c (busy)\n")
 
 	assert.Equal(t, "  would remove: /b (1 GiB, idle 3h)\n  2 entries skipped\n", out.String())
+}
+
+func TestRun_SkipsCustomProvidersThatPruneVolumes(t *testing.T) {
+	h := newHarness(t)
+	h.add("my-volumes", true, true, func(_ *fakeProvider, pc *config.Provider) { pc.CleanCmd = "docker volume prune -f" })
+	h.add("npm", true, true)
+
+	_, err := h.run(false, 1*gib)
+
+	require.NoError(t, err)
+	assert.Equal(t, []string{"npm"}, h.calls)
+}
+
+func TestIsProtected_CaseInsensitiveAndCacheLocations(t *testing.T) {
+	home := "/Users/me"
+
+	for _, p := range []string{
+		"/Users/me/downloads/x",
+		"/Users/me/.cache/opencode/models",
+		"/Users/me/Library/Caches/opencode",
+		"/Users/me/.cache/OpenCode",
+		"/Users/me/work/Worktrees/a",
+	} {
+		assert.True(t, isProtected(p, home), p)
+	}
+	assert.False(t, isProtected("/Users/me/.cache/uv", home))
+	assert.False(t, isProtected("/Users/me/Library/Caches/Homebrew", home))
 }

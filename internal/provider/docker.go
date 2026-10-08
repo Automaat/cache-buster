@@ -171,14 +171,19 @@ func (p *DockerProvider) dockerDataSize(ctx context.Context) (int64, error) {
 	return total, nil
 }
 
+// dockerProbeTimeout bounds the daemon probe so a wedged Docker Desktop cannot hang a run.
+const dockerProbeTimeout = 15 * time.Second
+
 // Available implements Provider.
 func (p *DockerProvider) Available() bool {
 	if _, err := exec.LookPath("docker"); err != nil {
 		return false
 	}
 
-	cmd := exec.Command("docker", "ps", "--quiet")
-	return cmd.Run() == nil
+	ctx, cancel := context.WithTimeout(context.Background(), dockerProbeTimeout)
+	defer cancel()
+
+	return exec.CommandContext(ctx, "docker", "ps", "--quiet").Run() == nil
 }
 
 // Clean implements Provider.
