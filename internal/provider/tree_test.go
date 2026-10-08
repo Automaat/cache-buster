@@ -58,6 +58,7 @@ func newTree(t *testing.T, name string, cfg config.Provider) *TreeProvider {
 	require.NoError(t, err)
 	p.procLines = func(context.Context) ([]string, error) { return nil, nil }
 	p.imageOnly = false
+	p.spec.verify = nil
 	if p.busy != nil {
 		p.busy.listProcesses = func(context.Context) ([]string, error) { return nil, nil }
 	}
