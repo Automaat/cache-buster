@@ -119,6 +119,7 @@ type harness struct {
 	fakes map[string]*fakeProvider
 	out   bytes.Buffer
 	home  string
+	wrap  map[string]provider.Provider
 }
 
 func newHarness(t *testing.T) *harness {
@@ -171,6 +172,9 @@ func (h *harness) runWith(verbose, dryRun bool, free ...int64) (Report, error) {
 			return FreeSpace{Free: v, Total: 1000 * gib}, nil
 		},
 		NewProvider: func(name string, _ config.Provider) (provider.Provider, error) {
+			if w, ok := h.wrap[name]; ok {
+				return w, nil
+			}
 			f, ok := h.fakes[name]
 			if !ok {
 				return nil, errors.New("unknown " + name)

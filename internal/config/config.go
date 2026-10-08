@@ -152,10 +152,30 @@ type Provider struct {
 	SkipIfGitWorktree *bool `mapstructure:"skip_if_git_worktree" yaml:"skip_if_git_worktree,omitempty"`
 	// SkipPrefixes lists entry-name prefixes that whole-entry providers never evict.
 	SkipPrefixes []string `mapstructure:"skip_prefixes" yaml:"skip_prefixes,omitempty"`
+
+	// MaxDepth bounds how deep project-artifacts looks below each root (default 4).
+	MaxDepth int `mapstructure:"max_depth" yaml:"max_depth,omitempty"`
+	// ScanBudget bounds project discovery per pass for project-artifacts (default 10s).
+	ScanBudget string `mapstructure:"scan_budget" yaml:"scan_budget,omitempty"`
+	// SkipIfDirty skips projects with uncommitted changes for project-artifacts (default true).
+	SkipIfDirty *bool `mapstructure:"skip_if_dirty" yaml:"skip_if_dirty,omitempty"`
+	// Rust, Node and Python switch the per-kind project-artifacts detectors
+	// (rust and node default to true, python to false).
+	Rust   *bool `mapstructure:"rust" yaml:"rust,omitempty"`
+	Node   *bool `mapstructure:"node" yaml:"node,omitempty"`
+	Python *bool `mapstructure:"python" yaml:"python,omitempty"`
 }
 
 // TypeDirPattern is the provider type that removes whole stale directories matching a glob.
 const TypeDirPattern = "dir-pattern"
+
+// TypeProjectArtifacts is the provider type that removes whole build artifact
+// directories (Rust target, node_modules, Python venvs) of idle projects found
+// below the roots in paths.
+const TypeProjectArtifacts = "project-artifacts"
+
+// MaxProjectDepth is the deepest max_depth accepted.
+const MaxProjectDepth = 16
 
 // Validate checks config for required fields.
 func (c *Config) Validate() error {
@@ -170,7 +190,7 @@ func (c *Config) Validate() error {
 		if strings.Contains(name, ".") {
 			return fmt.Errorf("provider %q: must not contain '.' (reserved as Viper key delimiter)", name)
 		}
-		if p.Type != "" && p.Type != TypeDirPattern {
+		if p.Type != "" && p.Type != TypeDirPattern && p.Type != TypeProjectArtifacts {
 			return fmt.Errorf("provider %q: unknown type %q", name, p.Type)
 		}
 		if p.Type == TypeDirPattern {
@@ -183,6 +203,11 @@ func (c *Config) Validate() error {
 					return fmt.Errorf("provider %q: %s paths must be absolute or start with ~/, got %q",
 						name, TypeDirPattern, path)
 				}
+			}
+		}
+		if p.Type == TypeProjectArtifacts {
+			if err := p.validateProjectArtifacts(); err != nil {
+				return fmt.Errorf("provider %q: %w", name, err)
 			}
 		}
 		if p.CleanTimeout != "" {
@@ -208,6 +233,34 @@ func (c *Config) Validate() error {
 		}
 		if p.MaxSize == "" {
 			return fmt.Errorf("provider %q: max_size is required", name)
+		}
+	}
+	return nil
+}
+
+// validateProjectArtifacts checks the project-artifacts settings.
+func (p Provider) validateProjectArtifacts() error {
+	for _, path := range p.Paths {
+		if !IsAbsPortable(path) && !strings.HasPrefix(path, "~/") && !strings.HasPrefix(path, `~\`) {
+			return fmt.Errorf("%s paths must be absolute or start with ~/, got %q", TypeProjectArtifacts, path)
+		}
+		if strings.ContainsAny(path, "*?[") {
+			return fmt.Errorf("%s paths are literal roots, globs are not allowed: %q", TypeProjectArtifacts, path)
+		}
+	}
+	if p.MaxDepth < 0 || p.MaxDepth > MaxProjectDepth {
+		return fmt.Errorf("max_depth must be between 0 and %d, got %d", MaxProjectDepth, p.MaxDepth)
+	}
+	for field, value := range map[string]string{"min_idle": p.MinIdle, "scan_budget": p.ScanBudget} {
+		if value == "" {
+			continue
+		}
+		d, err := ParseDuration(value)
+		if err != nil {
+			return fmt.Errorf("%s: %w", field, err)
+		}
+		if d <= 0 {
+			return fmt.Errorf("%s must be positive, got %q", field, value)
 		}
 	}
 	return nil

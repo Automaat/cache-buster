@@ -145,8 +145,83 @@ Providers are auto-detected — only tools installed on your system appear in th
 | gh | 1G | file-based |
 | chrome-devtools-mcp (disabled by default; never evicts `chrome-profile-*`) | 2G | whole-entry |
 | vscode-shipit | 1G | file-based |
+| **Project artifacts** | | |
+| project-artifacts (Rust `target`, `node_modules`, Python venvs of idle projects) | 20G | whole-directory, oldest project first |
 | **Toolchains** | | |
 | rustup (disabled by default; once over the limit uninstalls every toolchain except `stable`, default, active and directory-override ones) | 10G | `rustup toolchain uninstall` |
+
+### Project artifacts
+
+`project-artifacts` removes the build output that dominates a developer disk: Rust `target/`
+directories (4 to 12 GB each, many in git worktrees) and idle `node_modules`. It scans
+project roots, finds artifact directories by marker, and removes whole directories of idle
+projects, oldest project first and only as far as needed. Every artifact regenerates with a
+build or install.
+
+An artifact counts only when its marker and the project file beside it both exist, so a
+directory that merely shares the name is never touched:
+
+| Kind | Artifact | Marker inside | Project file beside it | Default |
+|------|----------|---------------|------------------------|---------|
+| `rust` | `target/` | `CACHEDIR.TAG` whose first line is cargo's signature | `Cargo.toml` | on |
+| `node` | `node_modules/` | none | `package.json` | on |
+| `python` | `.venv/`, `venv/` | `pyvenv.cfg` | `pyproject.toml` or `requirements*.txt` | off |
+
+Roots default to whichever of `~/sideprojects`, `~/kong`, `~/work`, `~/src`, `~/code` and
+`~/projects` exist. Defaults are not written to the saved config, so one file works on every
+machine. The search goes `max_depth` levels below each root (default 4), never follows
+symlinks, never enters `.git`, `node_modules`, `target`, `.venv` or `venv`, and stops after
+`scan_budget` (default 10s) or on Ctrl-C. A nested project in a monorepo is found at its own
+level. A root that is home, a parent of home or the filesystem root is ignored.
+
+A project is idle when both of these are older than `min_idle` (default 30 days): the newest
+mtime among files outside the artifact directories and `.git` (a sample of the first 3000
+entries, breadth first), and the git `HEAD` and reflog time. A linked worktree is judged by its
+own `HEAD`. A directory-only removal never makes a project look active: the parent keeps its
+mtime.
+
+An artifact is skipped, with the reason in `--verbose` output, when:
+
+- its project or the artifact lies in a protected location, or under a `Downloads` or
+  `opencode` directory. A git worktree is not protected by being a worktree: an idle one is
+  cleaned, the worktree itself is never deleted
+- the project is not idle yet
+- the git tree is dirty (`git status --porcelain` is non-empty, or git is missing or fails).
+  Set `skip_if_dirty: false` to turn this off
+- a tool of that kind runs in the project: `cargo` or `rustc` for Rust, `node`, `npm`, `npx`,
+  `pnpm`, `yarn` or `bun` for Node, `python`, `pip`, `uv` or `poetry` for Python. A process
+  counts when its command line names the project or its working directory is inside it. A
+  process whose working directory cannot be read counts as busy when the lookup fails outright
+  (always on Windows, where only image names are visible)
+- a process has an open file in it (`lsof`; `skip_if_open: false` turns this off). Windows
+  cannot list handles, but refuses to rename a directory that has open files, so the rename is
+  the check there
+
+Removal renames the directory aside (`.bilgie-trash-*` in the same folder) and then deletes it,
+so a crash leaves either the intact artifact or a trash directory that no marker check accepts,
+never a half-deleted `target`. The next run sweeps leftover trash.
+
+`clean project-artifacts` removes every eligible artifact (full mode). `clean --smart` and
+`auto` remove only until the artifacts are under `max_size`; `auto` under low-space pressure
+instead stops as soon as free space is back above the floors. `--dry-run` lists what would go;
+by default the five largest, with kind, project and idle days, and `--verbose` lists all of them
+and every skip. `status` shows the size of all artifacts and how much of it is recoverable now
+(the clean checks except the slow open-file probe).
+
+```yaml
+providers:
+  project-artifacts:
+    paths: [~/sideprojects, ~/work]
+    max_size: 20G
+    min_idle: 30d
+    max_depth: 4
+    scan_budget: 10s
+    rust: true
+    node: true
+    python: false
+    skip_if_dirty: true
+    skip_if_open: true
+```
 
 ## Commands
 
@@ -369,10 +444,14 @@ providers:
 | `max_age` | File age threshold for smart clean (e.g., `30d`) |
 | `clean_cmd` | Command for full clean (empty = file-based deletion) |
 | `clean_timeout` | Max runtime of `clean_cmd` before it is cancelled and reported (default `2m`) |
-| `type` | `dir-pattern` removes whole stale directories matching a glob in `paths` |
-| `min_idle` | `dir-pattern`: minimum idle time, from the newest mtime in the tree (default `2h`) |
-| `skip_if_open` | `dir-pattern`: skip directories with open files via `lsof +D` (default `true`) |
+| `type` | `dir-pattern` removes whole stale directories matching a glob in `paths`; `project-artifacts` removes build artifacts of idle projects found below the roots in `paths` |
+| `min_idle` | `dir-pattern`: minimum idle time, from the newest mtime in the tree (default `2h`); `project-artifacts`: project idle time (default `30d`) |
+| `skip_if_open` | `dir-pattern`, `project-artifacts`: skip directories with open files via `lsof +D` (default `true`) |
 | `skip_if_git_worktree` | `dir-pattern`: skip directories containing a `.git` entry (default `true`) |
+| `max_depth` | `project-artifacts`: directory levels searched below each root (default `4`, at most 16) |
+| `scan_budget` | `project-artifacts`: time allowed for finding projects per pass (default `10s`) |
+| `rust`, `node`, `python` | `project-artifacts`: per-kind switches (default `true`, `true`, `false`) |
+| `skip_if_dirty` | `project-artifacts`: skip projects with uncommitted changes (default `true`) |
 | `skip_prefixes` | Whole-entry providers never evict entries whose name starts with one of these prefixes; user values add to the built-in ones |
 
 The optional top-level `auto` block configures `bilgie auto`:
@@ -396,6 +475,7 @@ Entries must be literal paths, absolute or starting with `~/`: globs, `.`/`..` e
 `~/.local/share/opencode`, `/var/lib/docker/volumes`); removing a built-in entry from the file has no
 effect. `auto` also skips any path that holds a `.git` entry (a git checkout or worktree), anything under a
 `worktrees` directory, and never prunes Docker volumes (Docker Desktop keeps them inside its VM image).
+`project-artifacts` is the one provider that works inside git checkouts and `worktrees` directories by design; it enforces the protected list, `Downloads` and `opencode` itself and cleans only the artifact directories.
 
 ### Busy tools
 
