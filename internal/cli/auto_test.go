@@ -129,6 +129,30 @@ func TestAuto_FirstRunWithEveryProviderFailingLeavesMarkerArmed(t *testing.T) {
 	assert.True(t, auto.FirstRunPending(f.env.stateDir))
 }
 
+func TestAuto_FirstRunWithOneFailingProviderKeepsMarkerAndExitsNonZero(t *testing.T) {
+	f := newAutoFixture(t, 1*autoGiB, "")
+	require.NoError(t, auto.MarkFirstRunPending(f.env.stateDir))
+	base := f.env.newProvider
+	f.env.newProvider = func(name string, cfg config.Provider) (provider.Provider, error) {
+		if name == "tool" {
+			return base(name, cfg)
+		}
+		return nil, os.ErrInvalid
+	}
+	bad := filepath.Join(f.home, "bad")
+	require.NoError(t, os.MkdirAll(bad, 0o750))
+	cfgPath := filepath.Join(f.home, "config2.yaml")
+	cfg := "version: \"1\"\nproviders:\n  tool:\n    enabled: true\n    paths: [" + filepath.Join(f.home, "cache") +
+		"]\n    max_size: 1G\n    max_age: 1d\n    clean_cmd: \"true\"\n  broken:\n    enabled: true\n    paths: [" + bad + "]\n    max_size: 1G\n    max_age: 1d\n    clean_cmd: \"true\"\n"
+	require.NoError(t, os.WriteFile(cfgPath, []byte(cfg), 0o600))
+	f.loader.SetConfigPath(cfgPath)
+
+	require.Error(t, runAutoWithLoader(t.Context(), f.loader, f.env, false))
+
+	assert.False(t, f.cleaned(), "first run is a dry-run")
+	assert.True(t, auto.FirstRunPending(f.env.stateDir), "a run with a provider error must not consume the marker")
+}
+
 func TestAuto_ExplicitDryRunKeepsMarker(t *testing.T) {
 	f := newAutoFixture(t, 100*autoGiB, "")
 	require.NoError(t, auto.MarkFirstRunPending(f.env.stateDir))

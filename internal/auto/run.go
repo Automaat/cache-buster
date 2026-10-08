@@ -87,10 +87,9 @@ func (r Report) Err() error {
 // candidate is a provider auto may run. A sweep is a disabled
 // directory-pattern provider that runs only at the critical tier.
 type candidate struct {
-	cfg     config.Provider
-	name    string
-	sweep   bool
-	builtin bool
+	cfg   config.Provider
+	name  string
+	sweep bool
 }
 
 // Run picks the pressure tier from free space and trims providers
@@ -181,10 +180,10 @@ func candidates(cfg *config.Config, tier Tier) []candidate {
 		}
 		switch {
 		case pc.Enabled:
-			byName[name] = candidate{name: name, cfg: pc, builtin: isBuiltin(name, pc)}
+			byName[name] = candidate{name: name, cfg: pc}
 			regular = append(regular, name)
 		case pc.Type == config.TypeDirPattern && tier == TierCritical:
-			byName[name] = candidate{name: name, cfg: pc, sweep: true, builtin: isBuiltin(name, pc)}
+			byName[name] = candidate{name: name, cfg: pc, sweep: true}
 			sweeps = append(sweeps, name)
 		}
 	}
@@ -219,24 +218,6 @@ func isXcodeArchives(path string) bool {
 	return false
 }
 
-// isBuiltin reports whether a provider still matches its built-in
-// definition in everything that affects deletion safety. Those well-known
-// cache locations skip the costly tree scan for protected directories; any
-// user-defined or weakened provider gets it. Limits and enablement may differ.
-func isBuiltin(name string, pc config.Provider) bool {
-	def, ok := config.DefaultProviders()[name]
-	return ok &&
-		slices.Equal(def.Paths, pc.Paths) &&
-		def.Type == pc.Type &&
-		def.CleanCmd == pc.CleanCmd &&
-		def.MinIdle == pc.MinIdle &&
-		slices.Equal(def.SkipPrefixes, pc.SkipPrefixes) &&
-		boolOrTrue(def.SkipIfOpen) == boolOrTrue(pc.SkipIfOpen) &&
-		boolOrTrue(def.SkipIfGitWorktree) == boolOrTrue(pc.SkipIfGitWorktree)
-}
-
-func boolOrTrue(b *bool) bool { return b == nil || *b }
-
 // pruneVolumes catches renamed or custom providers whose command prunes Docker volumes.
 func pruneVolumes(cmd string) bool {
 	lower := strings.ToLower(cmd)
@@ -252,7 +233,7 @@ func runCandidate(ctx context.Context, c *candidate, tier Tier, dryRun bool, dep
 		return res
 	}
 
-	if reason := protectedReason(p, deps.Home, !c.builtin); reason != "" {
+	if reason := protectedReason(p, deps.Home); reason != "" {
 		return skipped(res, reason)
 	}
 	if !availableCtx(ctx, p) {
@@ -302,9 +283,9 @@ func skipped(res Result, reason string) Result {
 	return res
 }
 
-func protectedReason(p provider.Provider, home string, scanTree bool) string {
+func protectedReason(p provider.Provider, home string) string {
 	for _, path := range p.Paths() {
-		if isProtected(path, home, scanTree) {
+		if isProtected(path, home, true) {
 			return "protected path " + path
 		}
 	}

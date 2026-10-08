@@ -164,14 +164,14 @@ Safety rules:
 
 - `docker-volumes` never runs in `auto`, enabled or not.
 - `xcode-archives` never runs in `auto`, by name or by path (any provider on an Xcode `Archives` folder is skipped): archives hold App Store dSYMs and signed builds.
-- A built-in provider whose safeguards are weakened (`skip_if_git_worktree`, `skip_if_open`, `min_idle`, `clean_cmd`) gets the full protected-tree scan like a custom one.
+- Every provider path is scanned for protected descendants (a `worktrees` or `opencode` directory, or a `Downloads` directory with macOS capitalisation) before it runs, built-in providers included. A tree over 500000 entries fails closed and the provider is skipped.
 - A provider with a path inside or containing `Downloads`, `opencode` or a `worktrees` directory is skipped.
 - Docker prune commands are cancelled after 10 minutes; command providers keep their `clean_timeout`.
 - Providers whose tool is busy are skipped, as in `clean`.
 - Two runs never overlap; a second one exits immediately.
 - The first run after `install-agent` is a dry-run that deletes nothing. A marker in
   `~/.local/state/cache-buster/` records it, so it survives restarts and only a completed
-  dry-run in the low or critical tier, where at least one provider ran, clears it. Running `install-agent` again arms it again.
+  dry-run in the low or critical tier, where at least one provider ran, clears it, and only when no provider failed. Running `install-agent` again arms it again.
 
 `install-agent` writes `~/Library/LaunchAgents/dev.mskalski.cache-buster.plist`
 (`StartInterval` from `auto.interval`, `RunAtLoad`, low priority, a `PATH` with Homebrew,

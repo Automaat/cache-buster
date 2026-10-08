@@ -97,8 +97,8 @@ const descendantScanEntries = 500000
 
 // containsProtectedDir reports whether a worktrees or opencode directory sits
 // anywhere below root, so a provider on an ancestor cannot reach into one.
-// Downloads is left out: cache tools such as Homebrew keep a downloads
-// directory of their own. The scan never follows symlinks and fails closed
+// Downloads matches only with its exact macOS capitalisation: cache tools
+// such as Homebrew keep a lowercase downloads directory of their own. The scan never follows symlinks and fails closed
 // once the tree is too large to verify.
 func containsProtectedDir(root string) bool {
 	level := []string{root}
@@ -106,7 +106,7 @@ func containsProtectedDir(root string) bool {
 	for len(level) > 0 {
 		var next []string
 		for _, dir := range level {
-			entries, err := os.ReadDir(dir)
+			entries, err := readDirUnsorted(dir)
 			if err != nil {
 				continue
 			}
@@ -118,7 +118,7 @@ func containsProtectedDir(root string) bool {
 				if !e.IsDir() {
 					continue
 				}
-				if strings.EqualFold(e.Name(), "worktrees") || strings.EqualFold(e.Name(), "opencode") {
+				if e.Name() == "Downloads" || strings.EqualFold(e.Name(), "worktrees") || strings.EqualFold(e.Name(), "opencode") {
 					return true
 				}
 				next = append(next, filepath.Join(dir, e.Name()))
@@ -127,4 +127,14 @@ func containsProtectedDir(root string) bool {
 		level = next
 	}
 	return false
+}
+
+// readDirUnsorted lists dir without sorting; the scan does not need order.
+func readDirUnsorted(dir string) ([]os.DirEntry, error) {
+	f, err := os.Open(dir)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = f.Close() }()
+	return f.ReadDir(-1)
 }

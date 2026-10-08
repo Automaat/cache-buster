@@ -759,24 +759,23 @@ func TestRun_SkipsAncestorOfDeeplyNestedWorktrees(t *testing.T) {
 	assert.Empty(t, h.calls)
 }
 
-func TestIsBuiltin(t *testing.T) {
-	def := config.DefaultProviders()["npm"]
-	assert.True(t, isBuiltin("npm", def))
-	def.Paths = []string{"/elsewhere"}
-	assert.False(t, isBuiltin("npm", def))
-	assert.False(t, isBuiltin("custom", config.Provider{Paths: []string{"~/x"}}))
+func TestRun_DefaultPathProviderWithProtectedSubdirIsSkipped(t *testing.T) {
+	for _, sub := range []string{"worktrees", "Downloads", "opencode"} {
+		h := newHarness(t)
+		root := h.dir("npm-cache")
+		require.NoError(t, os.MkdirAll(filepath.Join(root, "a", sub, "x"), 0o750))
+		def := config.DefaultProviders()["npm"]
+		h.add("npm", true, true, func(f *fakeProvider, pc *config.Provider) {
+			*pc = def
+			pc.Paths = []string{root}
+			f.paths = []string{root}
+		})
 
-	off := false
-	for name, weaken := range map[string]func(*config.Provider){
-		"worktree guard": func(p *config.Provider) { p.SkipIfGitWorktree = &off },
-		"open guard":     func(p *config.Provider) { p.SkipIfOpen = &off },
-		"idle":           func(p *config.Provider) { p.MinIdle = "0s" },
-		"clean cmd":      func(p *config.Provider) { p.CleanCmd = "rm -rf /" },
-	} {
-		sail := config.DefaultProviders()["sail-dirs"]
-		assert.True(t, isBuiltin("sail-dirs", sail))
-		weaken(&sail)
-		assert.False(t, isBuiltin("sail-dirs", sail), name)
+		_, err := h.run(false, 1*gib)
+
+		require.NoError(t, err)
+		assert.Empty(t, h.calls, sub)
+		assert.Contains(t, h.out.String(), "protected path", sub)
 	}
 }
 
@@ -857,12 +856,6 @@ func TestWithoutDataAlias_CaseInsensitive(t *testing.T) {
 	assert.Contains(t, got, "/Users/me")
 	assert.NotContains(t, got, "X/y")
 	assert.Len(t, got, 3)
-}
-
-func TestIsBuiltin_CleanTimeoutDoesNotDisqualify(t *testing.T) {
-	def := config.DefaultProviders()["docker"]
-	def.CleanTimeout = "5m"
-	assert.True(t, isBuiltin("docker", def))
 }
 
 func TestAgentUninstall_UnrecognisedBootoutWithFailingPrintStillRemoves(t *testing.T) {

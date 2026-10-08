@@ -172,7 +172,7 @@ func runAutoWithLoader(ctx context.Context, loader *config.Loader, env autoEnv, 
 		return err
 	}
 
-	if forced && report.Previewed() {
+	if forced && report.Previewed() && report.Err() == nil {
 		if clearErr := auto.ClearFirstRun(env.stateDir); clearErr != nil {
 			return clearErr
 		}
