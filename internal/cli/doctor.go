@@ -77,6 +77,7 @@ func runDoctorWithLoader(ctx context.Context, loader *config.Loader, env autoEnv
 	}
 	if cfg != nil {
 		in.Conflicts = auto.ProtectionConflicts(ctx, cfg, env.home, env.newProvider)
+		in.LoadErrors = auto.LoadErrors(cfg, env.newProvider)
 	}
 
 	rep := doctor.Diagnose(in)

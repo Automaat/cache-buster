@@ -401,3 +401,33 @@ func TestInstallAgent_WritesSystemdUnitsUnderTheConfigDir(t *testing.T) {
 	assert.FileExists(t, filepath.Join(f.home, "xdg", "systemd", "user", auto.SystemdUnit+".timer"))
 	assert.NoDirExists(t, filepath.Join(f.home, ".config"))
 }
+
+func TestAuto_LoadErrorNamedInOutputAndRunLogWhileOthersRun(t *testing.T) {
+	f := newAutoFixture(t, 1*autoGiB, `  rel:
+    enabled: true
+    type: dir-pattern
+    min_idle: banana
+    paths:
+      - `+filepath.Join(t.TempDir(), "dirs-*")+`
+    max_size: 1G
+`)
+
+	err := runAutoWithLoader(t.Context(), f.loader, f.env, false)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "provider rel: parse min_idle")
+	assert.NotContains(t, err.Error(), "rel: provider rel")
+	assert.Contains(t, f.out.String(), "provider rel: parse min_idle")
+	assert.True(t, f.cleaned(), "the healthy provider still ran")
+
+	runs, _, readErr := auto.ReadRuns(f.env.stateDir, 0)
+	require.NoError(t, readErr)
+	require.NotEmpty(t, runs)
+	var logged string
+	for _, p := range runs[len(runs)-1].Providers {
+		if p.Name == "rel" {
+			logged = p.Error
+		}
+	}
+	assert.Contains(t, logged, "provider rel: parse min_idle")
+}

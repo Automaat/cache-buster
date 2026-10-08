@@ -455,3 +455,38 @@ func TestFindGitMarker_FlatTreeOfSubdirsStopsQueueingAtDirLimit(t *testing.T) {
 	assert.Equal(t, markerTooLarge, findGitMarker(t.Context(), root, lim).outcome)
 	assert.Equal(t, 1, *reads)
 }
+
+func TestFindGitMarker_AnyCaseMarkerIsFound(t *testing.T) {
+	for _, name := range []string{".GIT", ".Git", ".gIt"} {
+		for _, kind := range []string{"dir", "worktree file"} {
+			t.Run(name+" "+kind, func(t *testing.T) {
+				root := t.TempDir()
+				repo := filepath.Join(root, "p")
+				require.NoError(t, os.MkdirAll(repo, 0o750))
+				marker := filepath.Join(repo, name)
+				if kind == "dir" {
+					require.NoError(t, os.Mkdir(marker, 0o750))
+				} else {
+					require.NoError(t, os.WriteFile(marker, []byte("gitdir: "+filepath.ToSlash(filepath.Join(root, "main.git", "worktrees", "p"))+"\n"), 0o600))
+				}
+				if _, err := os.Lstat(filepath.Join(repo, name)); err != nil {
+					t.Skipf("cannot create %s on this filesystem: %v", name, err)
+				}
+
+				res := findGitMarker(t.Context(), root, markerLimits)
+
+				assert.Equal(t, markerFound, res.outcome)
+				assert.Equal(t, repo, res.detail)
+			})
+		}
+	}
+}
+
+func TestCheckProtected_AnyCaseMarkerProtectsProvider(t *testing.T) {
+	root := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(root, "p", ".GIT"), 0o750))
+
+	v := checkProtected(t.Context(), root, t.TempDir(), nil, true)
+
+	assert.Equal(t, verdictProtected, v.kind)
+}

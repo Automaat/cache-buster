@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -50,7 +51,7 @@ type markerResult struct {
 }
 
 // findGitMarker looks for a git checkout or worktree below root: an entry
-// named .git, of any kind. A .git directory is a checkout; a .git file is a
+// named .git in any letter case, of any kind. A .git directory is a checkout; a .git file is a
 // worktree or submodule checkout whose gitdir line points into another
 // repository. Both protect alike, so no file is ever opened. The walk lists
 // directory names only, with no stat per file, goes breadth first so shallow
@@ -122,7 +123,7 @@ func listDir(ctx, parent context.Context, dir string, budget, dirBudget int, wan
 			return out
 		}
 		for _, e := range batch {
-			if e.Name() == ".git" {
+			if strings.EqualFold(e.Name(), ".git") {
 				out.found = true
 				return out
 			}

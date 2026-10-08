@@ -4,6 +4,7 @@
 package doctor
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"slices"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/smykla-skalski/bilgie/internal/auto"
 	"github.com/smykla-skalski/bilgie/internal/config"
+	"github.com/smykla-skalski/bilgie/internal/provider"
 	"github.com/smykla-skalski/bilgie/pkg/size"
 )
 
@@ -95,7 +97,10 @@ type Input struct {
 	NotifierErr     error
 
 	Conflicts []auto.Conflict
-	GOOS      string
+	// LoadErrors are enabled providers whose config does not load; each
+	// reads "provider <name>: <reason>".
+	LoadErrors []error
+	GOOS       string
 }
 
 // Report is the ordered list of findings.
@@ -435,6 +440,18 @@ func configFindings(in Input) []Finding {
 	var out []Finding
 	if f, ok := disabledFinding(in.Cfg); ok {
 		out = append(out, f)
+	}
+
+	for _, err := range in.LoadErrors {
+		name := ""
+		if le, ok := errors.AsType[*provider.LoadError](err); ok {
+			name = le.Name
+		}
+		out = append(out, Finding{
+			Area: "config", Level: Fail,
+			Message: err.Error() + "; auto reports an error for it on every run",
+			Hint:    fmt.Sprintf("fix providers.%s in the config, or set providers.%s.enabled: false", name, name),
+		})
 	}
 
 	conflicted := make(map[string]bool)

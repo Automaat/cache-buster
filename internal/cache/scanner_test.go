@@ -440,3 +440,44 @@ func TestCalculateSizeContext_NoCancellationCompletes(t *testing.T) {
 		t.Errorf("Size = %d, want %d", result.Size, want)
 	}
 }
+
+func TestCalculateSize_CountsHardlinkedFilesOnce(t *testing.T) {
+	a := t.TempDir()
+	b := t.TempDir()
+	orig := filepath.Join(a, "data.bin")
+	if err := os.WriteFile(orig, make([]byte, 1000), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Link(orig, filepath.Join(a, "copy.bin")); err != nil {
+		t.Skipf("hard links unsupported here: %v", err)
+	}
+	if err := os.Link(orig, filepath.Join(b, "other.bin")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(b, "unique.bin"), make([]byte, 50), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := CalculateSize([]string{a, b})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Size != 1050 {
+		t.Fatalf("size = %d, want 1050 (shared inode counted once)", res.Size)
+	}
+}
+
+func TestCalculateSize_DuplicatePathsCountOnce(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "a.bin"), make([]byte, 400), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := CalculateSize([]string{dir, dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Size != 400 {
+		t.Fatalf("size = %d, want 400", res.Size)
+	}
+}
