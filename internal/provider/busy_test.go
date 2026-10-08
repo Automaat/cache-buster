@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
@@ -35,8 +36,6 @@ func TestMatchProcess(t *testing.T) {
 		{"editor arg errs toward busy", "vim go", []string{"go"}, "go"},
 		{"prefix is not a match", "gopls serve", []string{"go"}, ""},
 		{"similar name", "go-task build", []string{"go"}, ""},
-		{"windows image name", "go.exe", []string{"go"}, "go"},
-		{"windows upper case image", "/tools/CARGO.EXE", []string{"cargo"}, "cargo"},
 		{"empty line", "", []string{"go"}, ""},
 	}
 
@@ -45,6 +44,14 @@ func TestMatchProcess(t *testing.T) {
 			assert.Equal(t, tt.want, matchProcess(tt.line, tt.wanted))
 		})
 	}
+}
+
+func TestMatchProcess_WindowsImageNames(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("image-name suffix handling is windows-only")
+	}
+	assert.Equal(t, "go", matchProcess("go.exe", []string{"go"}))
+	assert.Equal(t, "cargo", matchProcess(`C:\Tools\CARGO.EXE`, []string{"cargo"}))
 }
 
 func fakeGuard(lines []string, listErr error, held map[string]bool) *busyGuard {

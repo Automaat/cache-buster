@@ -12,6 +12,14 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+	"time"
+)
+
+// A process mid-exec is briefly unreadable even to its owner, so a permission
+// error is retried before it is treated as unknowable.
+const (
+	inspectRetries    = 3
+	inspectRetryDelay = 20 * time.Millisecond
 )
 
 // pidDirs lists the numeric entries of a /proc-style root. An empty result
@@ -50,14 +58,17 @@ func commandLinesFromProc(ctx context.Context, root string) ([]string, error) {
 			return nil, err
 		}
 		cmdline, err := os.ReadFile(filepath.Join(root, pid, "cmdline"))
-		if errors.Is(err, os.ErrNotExist) {
+		if errors.Is(err, os.ErrNotExist) || errors.Is(err, syscall.ESRCH) {
 			continue
 		}
 		if err != nil {
 			return nil, err
 		}
 		comm, err := os.ReadFile(filepath.Join(root, pid, "comm"))
-		if err != nil && !errors.Is(err, os.ErrNotExist) {
+		if errors.Is(err, os.ErrNotExist) || errors.Is(err, syscall.ESRCH) {
+			continue
+		}
+		if err != nil {
 			return nil, err
 		}
 
@@ -101,16 +112,22 @@ func procHasOpenFiles(ctx context.Context, root, dir string, selfUID int) (bool,
 		}
 		other := false
 		if st, ok := info.Sys().(*syscall.Stat_t); ok {
-			other = int(st.Uid) != selfUID
+			other = int(st.Uid) != selfUID && !statusUIDMatches(base, selfUID)
 		}
 
 		open, err := procPidHasOpenFiles(base, dir)
+		for attempt := 0; attempt < inspectRetries && errors.Is(err, os.ErrPermission); attempt++ {
+			time.Sleep(inspectRetryDelay)
+			open, err = procPidHasOpenFiles(base, dir)
+		}
 		switch {
 		case err == nil && open:
 			return true, nil
 		case err == nil, errors.Is(err, os.ErrNotExist), errors.Is(err, syscall.ESRCH):
 			continue
 		case other && errors.Is(err, os.ErrPermission):
+			continue
+		case errors.Is(err, os.ErrPermission) && processIsDead(base):
 			continue
 		default:
 			return false, fmt.Errorf("inspect process %s: %w", pid, err)
@@ -164,4 +181,47 @@ func procPidHasOpenFiles(base, dir string) (bool, error) {
 		}
 	}
 	return false, nil
+}
+
+// statusUIDMatches reports whether the real or effective uid in the status
+// file is selfUID. A non-dumpable process of our own user has a root-owned
+// /proc entry yet is still ours, so it must not be skipped when unreadable.
+func statusUIDMatches(base string, selfUID int) bool {
+	status, err := os.ReadFile(filepath.Join(base, "status"))
+	if err != nil {
+		return true
+	}
+	for line := range strings.SplitSeq(string(status), "\n") {
+		rest, ok := strings.CutPrefix(line, "Uid:")
+		if !ok {
+			continue
+		}
+		fields := strings.Fields(rest)
+		if len(fields) < 2 {
+			return true
+		}
+		for _, f := range fields[:2] {
+			if uid, convErr := strconv.Atoi(f); convErr != nil || uid == selfUID {
+				return true
+			}
+		}
+		return false
+	}
+	return true
+}
+
+// processIsDead reports a zombie or exiting process: it holds no files, yet
+// the kernel denies access to its fd directory.
+func processIsDead(base string) bool {
+	status, err := os.ReadFile(filepath.Join(base, "status"))
+	if err != nil {
+		return false
+	}
+	for line := range strings.SplitSeq(string(status), "\n") {
+		if state, ok := strings.CutPrefix(line, "State:"); ok {
+			state = strings.TrimSpace(state)
+			return strings.HasPrefix(state, "Z") || strings.HasPrefix(state, "X")
+		}
+	}
+	return false
 }

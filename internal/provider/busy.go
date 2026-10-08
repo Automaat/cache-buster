@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"github.com/Automaat/cache-buster/internal/osshim"
@@ -99,7 +100,7 @@ var toolAliases = map[string]string{"uvx": "uv"}
 func matchProcess(commandLine string, wanted []string) string {
 	for field := range strings.FieldsSeq(commandLine) {
 		base := filepath.Base(strings.Trim(field, `"';&|()`))
-		if strings.HasSuffix(strings.ToLower(base), ".exe") {
+		if runtime.GOOS == "windows" && strings.HasSuffix(strings.ToLower(base), ".exe") {
 			base = strings.ToLower(base[:len(base)-len(".exe")])
 		}
 		if alias, ok := toolAliases[base]; ok {

@@ -6,6 +6,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strconv"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -154,12 +155,43 @@ func TestProcHasOpenFiles(t *testing.T) {
 	t.Run("uninspectable process of another user is skipped", func(t *testing.T) {
 		root := t.TempDir()
 		base := writeProc(t, root, "100", "x", "x")
+		status := "Uid:\t" + strconv.Itoa(uid+5) + "\t" + strconv.Itoa(uid+5) + "\t0\t0\n"
+		require.NoError(t, os.WriteFile(filepath.Join(base, "status"), []byte(status), 0o600))
 		require.NoError(t, os.Chmod(filepath.Join(base, "maps"), 0o000))
 		if _, err := os.ReadFile(filepath.Join(base, "maps")); err == nil {
 			t.Skip("running as a user that ignores file modes")
 		}
 
 		open, err := procHasOpenFiles(t.Context(), root, dir, uid+1)
+		require.NoError(t, err)
+		assert.False(t, open)
+	})
+
+	t.Run("other user process with our uid in status fails closed", func(t *testing.T) {
+		root := t.TempDir()
+		base := writeProc(t, root, "100", "x", "x")
+		status := "Name:\tx\nUid:\t" + strconv.Itoa(uid+1) + "\t" + strconv.Itoa(uid) + "\t0\t0\n"
+		require.NoError(t, os.WriteFile(filepath.Join(base, "status"), []byte(status), 0o600))
+		require.NoError(t, os.Chmod(filepath.Join(base, "maps"), 0o000))
+		if _, err := os.ReadFile(filepath.Join(base, "maps")); err == nil {
+			t.Skip("running as a user that ignores file modes")
+		}
+
+		_, err := procHasOpenFiles(t.Context(), root, dir, uid+1)
+		assert.Error(t, err)
+	})
+
+	t.Run("zombie with a denied fd directory holds nothing", func(t *testing.T) {
+		root := t.TempDir()
+		base := writeProc(t, root, "100", "", "x")
+		require.NoError(t, os.WriteFile(filepath.Join(base, "status"), []byte("State:\tZ (zombie)\n"), 0o600))
+		require.NoError(t, os.Chmod(filepath.Join(base, "fd"), 0o000))
+		t.Cleanup(func() { _ = os.Chmod(filepath.Join(base, "fd"), 0o700) })
+		if _, err := os.ReadDir(filepath.Join(base, "fd")); err == nil {
+			t.Skip("running as a user that ignores file modes")
+		}
+
+		open, err := procHasOpenFiles(t.Context(), root, dir, uid)
 		require.NoError(t, err)
 		assert.False(t, open)
 	})

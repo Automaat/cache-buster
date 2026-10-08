@@ -36,7 +36,18 @@ func killTree(root uint32, killRoot func() error) error {
 	for i := range entries {
 		procs[i] = entries[i].procInfo
 	}
+	rootStart, rootErr := creationTime(root)
+	if rootErr != nil {
+		errs = append(errs, rootErr)
+	}
 	for _, pid := range descendants(root, procs) {
+		if rootErr != nil {
+			break
+		}
+		start, err := creationTime(pid)
+		if err != nil || start < rootStart {
+			continue
+		}
 		if err := terminatePID(pid); err != nil {
 			errs = append(errs, err)
 		}
@@ -58,4 +69,21 @@ func terminatePID(pid uint32) error {
 	}
 	defer func() { _ = windows.CloseHandle(h) }()
 	return windows.TerminateProcess(h, 1)
+}
+
+// creationTime returns a process start time in 100ns ticks. A descendant
+// cannot predate its ancestor, so an earlier start exposes a stale parent id
+// that Windows has since reused.
+func creationTime(pid uint32) (int64, error) {
+	h, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION, false, pid)
+	if err != nil {
+		return 0, err
+	}
+	defer func() { _ = windows.CloseHandle(h) }()
+
+	var created, exited, kernel, user windows.Filetime
+	if err := windows.GetProcessTimes(h, &created, &exited, &kernel, &user); err != nil {
+		return 0, err
+	}
+	return created.Nanoseconds(), nil
 }

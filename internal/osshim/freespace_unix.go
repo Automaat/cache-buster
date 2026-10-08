@@ -18,11 +18,15 @@ func FreeSpace(path string) (uint64, error) {
 	return blocksToBytes(st.Bavail, st.Bsize)
 }
 
-// blocksToBytes multiplies a block count by a block size whose integer type
-// differs per OS, rejecting values that make no sense.
-func blocksToBytes[S ~uint32 | ~int64](blocks uint64, size S) (uint64, error) {
-	if size <= 0 {
-		return 0, fmt.Errorf("invalid filesystem block size %d", size)
+type integer interface {
+	~int8 | ~int16 | ~int32 | ~int64 | ~int | ~uint8 | ~uint16 | ~uint32 | ~uint64 | ~uint
+}
+
+// blocksToBytes multiplies a block count by a block size whose integer types
+// differ per OS and architecture, rejecting values that make no sense.
+func blocksToBytes[B, S integer](blocks B, size S) (uint64, error) {
+	if size <= 0 || blocks < 0 {
+		return 0, fmt.Errorf("invalid filesystem geometry: %d blocks of %d bytes", blocks, size)
 	}
-	return blocks * uint64(size), nil
+	return uint64(blocks) * uint64(size), nil
 }
