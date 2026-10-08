@@ -182,3 +182,23 @@ func TestUninstall_UnsupportedOSIsRejectedBeforeAnyCommand(t *testing.T) {
 	require.ErrorContains(t, a.Uninstall(t.Context()), "not supported on plan9")
 	assert.Empty(t, s.calls)
 }
+
+func TestUninstallTask_LegacyFailureStillRemovesTheNewTask(t *testing.T) {
+	s := &scriptedExec{respond: func(_ string, args []string) ([]byte, error) {
+		if args[0] == "/Delete" && args[2] == "cache-buster" {
+			return []byte("ERROR: Access is denied."), errors.New("exit status 1")
+		}
+		if args[0] == "/Query" {
+			return []byte("\"\\cache-buster\",\"N/A\",\"Ready\"\r\n"), nil
+		}
+		return nil, nil
+	}}
+	a := newOSAgent(t, "windows", windowsExe, s)
+	require.NoError(t, MarkFirstRunPending(a.StateDir))
+
+	err := a.Uninstall(t.Context())
+
+	require.ErrorContains(t, err, "remove legacy cache-buster agent")
+	assert.Contains(t, s.commands(), "schtasks /Delete /TN bilgie /F")
+	assert.True(t, FirstRunPending(a.StateDir))
+}

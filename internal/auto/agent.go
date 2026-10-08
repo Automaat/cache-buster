@@ -190,12 +190,12 @@ func (a Agent) Uninstall(ctx context.Context) error {
 	if goos := a.goos(); !supportedOS(goos) {
 		return fmt.Errorf("uninstall-agent is not supported on %s", goos)
 	}
-	legacyRemoved, err := a.legacyAgent().uninstallJob(ctx)
-	if err != nil {
-		return fmt.Errorf("remove legacy %s agent: %w", legacyAgentName, err)
+	legacyRemoved, legacyErr := a.legacyAgent().uninstallJob(ctx)
+	if legacyErr != nil {
+		legacyErr = fmt.Errorf("remove legacy %s agent: %w", legacyAgentName, legacyErr)
 	}
 	removed, err := a.uninstallJob(ctx)
-	if err != nil {
+	if err := errors.Join(legacyErr, err); err != nil {
 		return err
 	}
 	removed = removed || legacyRemoved
