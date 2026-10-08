@@ -1,6 +1,8 @@
 package config
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -43,4 +45,23 @@ func TestValidate_CleanTimeoutRequiresCommand(t *testing.T) {
 	err := cfg.Validate()
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "requires clean_cmd")
+}
+
+func TestLoader_MergesCleanTimeoutOverDefaults(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	require.NoError(t, os.WriteFile(path, []byte(`version: "1"
+providers:
+  go-build:
+    clean_timeout: 45s
+`), 0o600))
+
+	loader := NewLoader()
+	loader.SetConfigPath(path)
+	cfg, err := loader.Load()
+	require.NoError(t, err)
+
+	p, ok := cfg.GetProvider("go-build")
+	require.True(t, ok)
+	assert.Equal(t, "45s", p.CleanTimeout)
+	assert.Equal(t, "go clean -cache", p.CleanCmd, "other defaults stay")
 }

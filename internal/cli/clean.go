@@ -61,6 +61,16 @@ func runCleanWithLoader(loader *config.Loader, args []string, allFlag, dryRun, f
 }
 
 func runCleanWithOptions(loader *config.Loader, args []string, opts cleanOptions, stdin *os.File) error {
+	return runCleanWithContext(interruptContext, loader, args, opts, stdin)
+}
+
+func interruptContext() (context.Context, context.CancelFunc) {
+	return signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+}
+
+// runCleanWithContext runs clean under the context from newCtx, created only
+// after the confirmation prompt so Ctrl-C still aborts the prompt.
+func runCleanWithContext(newCtx func() (context.Context, context.CancelFunc), loader *config.Loader, args []string, opts cleanOptions, stdin *os.File) error {
 	allFlag, dryRun, force, quiet, smart := opts.all, opts.dryRun, opts.force, opts.quiet, opts.smart
 	if opts.json && !force && !dryRun {
 		return fmt.Errorf("--json requires --force or --dry-run (no interactive prompt)")
@@ -101,7 +111,7 @@ func runCleanWithOptions(loader *config.Loader, args []string, opts cleanOptions
 		}
 	}
 
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	ctx, stop := newCtx()
 	defer stop()
 
 	mode := provider.CleanModeFull
@@ -251,6 +261,14 @@ func executeClean(
 
 		result, err := p.Clean(ctx, provider.CleanOptions{DryRun: dryRun, Mode: mode})
 		totalCleaned += result.BytesCleaned
+		if err != nil && ctx.Err() != nil {
+			// An interrupt killed the command; report it like any other cancel.
+			if !quiet && text {
+				fmt.Println("error")
+				fmt.Println("\nCancelled")
+			}
+			return finishClean(results, totalCleaned, opts, errors, true)
+		}
 		entry := ProviderCleanResult{
 			Name:       p.Name(),
 			Output:     strings.TrimSpace(result.Output),

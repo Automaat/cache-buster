@@ -1,11 +1,13 @@
 package cli
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
 	"syscall"
 	"testing"
+	"time"
 
 	"github.com/Automaat/cache-buster/internal/config"
 	"github.com/stretchr/testify/assert"
@@ -165,4 +167,27 @@ providers:
 	require.NoError(t, json.Unmarshal([]byte(output), &got), output)
 	require.Len(t, got.Providers, 1)
 	assert.Equal(t, statusUnavailable, got.Providers[0].Status)
+}
+
+func TestClean_InterruptedCleanIsNotAnErrorInJSON(t *testing.T) {
+	loader, _ := busyUVLoader(t, `  slow:
+    enabled: true
+    paths:
+      - `+t.TempDir()+`
+    max_size: 1GB
+    clean_cmd: 'sh -c "sleep 30"'
+    clean_timeout: 100s
+`)
+	ctx, cancel := context.WithCancel(context.Background())
+	time.AfterFunc(300*time.Millisecond, cancel)
+
+	var err error
+	output := captureStdout(t, func() {
+		err = runCleanWithContext(func() (context.Context, context.CancelFunc) { return ctx, cancel }, loader, []string{"slow"}, cleanOptions{force: true, json: true}, os.Stdin)
+	})
+
+	require.NoError(t, err)
+	var got CleanOutput
+	require.NoError(t, json.Unmarshal([]byte(output), &got), output)
+	assert.True(t, got.Cancelled)
 }
