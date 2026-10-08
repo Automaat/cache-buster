@@ -384,6 +384,7 @@ func TestLoader_RejectsUnsafeProtectedEntries(t *testing.T) {
 }
 
 func TestValidateProtected_RejectsBroadAndMalformedEntries(t *testing.T) {
+	skipOnWindows(t, "#206 per-OS paths and permissions")
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	bad := []string{
