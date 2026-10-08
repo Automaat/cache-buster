@@ -149,6 +149,8 @@ func TestExcludeSelf_WrapperForms(t *testing.T) {
 		{"backslash escape", `sh -c bilgie\ clean\ cargo`, "bilgie clean cargo", false, false},
 		{"absolute exe in wrapper", "sh -c '/usr/local/bin/bilgie clean cargo'", "bilgie clean cargo", false, false},
 		{"cargo inside wrapper stays busy", `sh -c 'cargo run -- clean cargo'`, "bilgie clean cargo", false, true},
+		{"tool before bilgie behind sudo stays busy", "sudo cargo run -- bilgie clean cargo", "bilgie clean cargo", false, true},
+		{"tool before bilgie behind env stays busy", "env FOO=1 cargo install foo bilgie clean cargo", "bilgie clean cargo", false, true},
 		{"other program with same args stays busy", `sh -c 'go run . clean cargo'`, "bilgie clean cargo", false, true},
 		{"unterminated quote stays busy", `sh -c 'bilgie clean cargo`, "bilgie clean cargo", false, true},
 		{"unterminated nested quote stays busy", `sh -c "bilgie clean 'cargo"`, "bilgie clean cargo", false, true},

@@ -147,13 +147,14 @@ func keepAncestor(p *osshim.Process, inv invocation, wanted []string, windows bo
 	if matchProcess(firstToken(p.CommandLine), wanted) != "" {
 		return true
 	}
-	return !wrapsInvocation(commandText(p), inv, windows) && matchProcess(p.CommandLine, wanted) != ""
+	return !wrapsInvocation(commandText(p), inv, wanted, windows) && matchProcess(p.CommandLine, wanted) != ""
 }
 
 // wrapsInvocation reports whether a command line launches bilgie with its own
-// arguments, directly or through any depth of shell -c strings. A string that
+// arguments, directly or through any depth of shell -c strings, with no wanted
+// tool before it ("sudo cargo run -- bilgie clean"). A string that
 // does not parse reports false, which keeps the ancestor and so errs busy.
-func wrapsInvocation(text string, inv invocation, windows bool) bool {
+func wrapsInvocation(text string, inv invocation, wanted []string, windows bool) bool {
 	if inv.exe == "" {
 		return false
 	}
@@ -163,7 +164,7 @@ func wrapsInvocation(text string, inv invocation, windows bool) bool {
 	}
 	for i := 1; i+len(inv.args) <= len(tokens); i++ {
 		if slices.Equal(tokens[i:i+len(inv.args)], inv.args) && exeName(tokens[i-1], windows) == inv.exe {
-			return true
+			return matchProcess(strings.Join(tokens[:i-1], " "), wanted) == ""
 		}
 	}
 	return false
