@@ -122,9 +122,12 @@ type harness struct {
 
 func newHarness(t *testing.T) *harness {
 	t.Helper()
+	cfg := config.DefaultConfigFor(config.Platform{OS: config.OSDarwin})
+	cfg.Providers = map[string]config.Provider{}
+	cfg.Auto = autoCfg()
 	return &harness{
 		t:     t,
-		cfg:   &config.Config{Providers: map[string]config.Provider{}, Auto: autoCfg()},
+		cfg:   cfg,
 		fakes: map[string]*fakeProvider{},
 		home:  t.TempDir(),
 	}
@@ -883,7 +886,7 @@ func TestAgentUninstall_UnrecognisedBootoutAndPrintFailureKeepsState(t *testing.
 
 func TestWithoutDataAlias_CaseInsensitive(t *testing.T) {
 	got := withoutDataAlias([]string{"/system/volumes/data/Users/me", "/System/Volumes/DataX/y"})
-	assert.Contains(t, got, "/Users/me")
+	assert.Contains(t, got, filepath.FromSlash("/Users/me"))
 	assert.NotContains(t, got, "X/y")
 	assert.Len(t, got, 3)
 }

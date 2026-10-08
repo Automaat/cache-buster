@@ -5,6 +5,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -114,18 +115,20 @@ func TestRun_NeverDeletesProtectedPaths(t *testing.T) {
 }
 
 func TestProtectedPaths_UnionOfDefaultsAndConfig(t *testing.T) {
-	home := "/Users/me"
-	got := ProtectedPaths(&config.Config{Protected: []string{"~/keep", "/data/keep", "~/Downloads"}}, home)
+	home := absPath("/Users/me")
+	got := ProtectedPaths(&config.Config{Protected: []string{"~/keep", absPath("/data/keep"), "~/Downloads"}}, home)
 
-	assert.Contains(t, got, "/Users/me/Downloads")
-	assert.Contains(t, got, "/Users/me/.local/share/opencode")
-	assert.Contains(t, got, "/var/lib/docker/volumes")
-	assert.Contains(t, got, "/Users/me/keep")
-	assert.Contains(t, got, "/data/keep")
-	assert.Len(t, got, 5)
+	assert.Contains(t, got, filepath.Join(home, "Downloads"))
+	assert.Contains(t, got, filepath.Join(home, ".local", "share", "opencode"))
+	if runtime.GOOS != "windows" {
+		assert.Contains(t, got, "/var/lib/docker/volumes")
+	}
+	assert.Contains(t, got, filepath.Join(home, "keep"))
+	assert.Contains(t, got, absPath("/data/keep"))
 
 	empty := ProtectedPaths(&config.Config{}, home)
-	assert.Contains(t, empty, "/Users/me/Downloads")
+	assert.Contains(t, empty, filepath.Join(home, "Downloads"))
+	assert.Len(t, got, len(empty)+2)
 }
 
 func TestIsProtectedWith_ConfiguredAndGitRoots(t *testing.T) {
@@ -172,10 +175,10 @@ func TestScanProtected_CancelledContextIsIncomplete(t *testing.T) {
 }
 
 func TestProtectedPaths_DropsRelativeEntries(t *testing.T) {
-	got := ProtectedPaths(&config.Config{Protected: []string{"Downloads2", "./x"}}, "/Users/me")
+	got := ProtectedPaths(&config.Config{Protected: []string{"Downloads2", "./x"}}, absPath("/Users/me"))
 
 	assert.NotContains(t, got, "Downloads2")
-	assert.Len(t, got, len(config.DefaultProtected()))
+	assert.Len(t, got, len(ProtectedPaths(&config.Config{}, absPath("/Users/me"))))
 }
 
 func TestInsideGitCheckout_StopsAtHome(t *testing.T) {
@@ -291,4 +294,11 @@ func TestInsideGitCheckout_DataAliasAndCaseOfHome(t *testing.T) {
 
 	assert.False(t, insideGitCheckout(filepath.Join(home, "plain"), strings.ToUpper(home)))
 	assert.False(t, insideGitCheckout("/System/Volumes/Data"+filepath.Join(home, "plain"), home))
+}
+
+func absPath(posix string) string {
+	if runtime.GOOS == "windows" {
+		return `C:` + filepath.FromSlash(posix)
+	}
+	return posix
 }

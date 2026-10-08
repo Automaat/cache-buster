@@ -69,7 +69,7 @@ func (p Platform) data(rel string) string {
 // under joins rel to root, or to the home-relative fallback when root is
 // unset. A root inside the home directory collapses to the ~/ spelling.
 func (p Platform) under(root, fallback, rel string) string {
-	if root == "" || !isAbsPortable(root) {
+	if root == "" || !IsAbsPortable(root) {
 		return p.home(fallback + "/" + rel)
 	}
 	if sub, ok := cutDir(root, p.Home, p.OS == OSWindows); ok {
@@ -111,9 +111,9 @@ func hasDrive(path string) bool {
 		(path[0] >= 'a' && path[0] <= 'z' || path[0] >= 'A' && path[0] <= 'Z')
 }
 
-// isAbsPortable reports whether path is absolute on any supported OS, so a
+// IsAbsPortable reports whether path is absolute on any supported OS, so a
 // config written on one OS validates on another.
-func isAbsPortable(path string) bool {
+func IsAbsPortable(path string) bool {
 	if strings.HasPrefix(path, "/") || strings.HasPrefix(path, `\`) || filepath.IsAbs(path) {
 		return true
 	}

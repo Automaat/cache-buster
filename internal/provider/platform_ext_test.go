@@ -1,6 +1,7 @@
 package provider_test
 
 import (
+	"github.com/Automaat/cache-buster/internal/config"
 	"runtime"
 	"testing"
 )
@@ -19,4 +20,8 @@ func exeSuffix() string {
 		return ".exe"
 	}
 	return ""
+}
+
+func macDefaults() map[string]config.Provider {
+	return config.DefaultProvidersFor(config.Platform{OS: config.OSDarwin})
 }

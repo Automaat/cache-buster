@@ -38,7 +38,7 @@ func NewDirPatternProvider(name string, cfg config.Provider) (*DirPatternProvide
 		if !strings.ContainsAny(path, "*?[") {
 			return nil, fmt.Errorf("path %q must contain a glob (*, ? or [)", path)
 		}
-		if !strings.HasPrefix(path, "/") && !strings.HasPrefix(path, "~/") {
+		if !config.IsAbsPortable(path) && !strings.HasPrefix(path, "~/") && !strings.HasPrefix(path, `~\`) {
 			return nil, fmt.Errorf("path %q must be absolute or start with ~/", path)
 		}
 	}

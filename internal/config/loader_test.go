@@ -393,7 +393,9 @@ func TestValidateProtected_RejectsBroadAndMalformedEntries(t *testing.T) {
 		"~/a/..", home + "/.", filepath.Dir(filepath.Dir(home)),
 		"~/scratch/*", "/data/*/keep", "/data/k?ep", "/data/[ab]/keep",
 		"/System/Volumes/Data", "/System/Volumes/Data/", "/System/Volumes/Data/Users",
-		"/system/volumes/data" + home, "/System/Volumes/Data" + home,
+	}
+	if !hasDrive(home) {
+		bad = append(bad, "/system/volumes/data"+home, "/System/Volumes/Data"+home)
 	}
 	for _, entry := range bad {
 		t.Run(entry, func(t *testing.T) {

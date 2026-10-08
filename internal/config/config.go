@@ -179,7 +179,7 @@ func (c *Config) Validate() error {
 					return fmt.Errorf("provider %q: %s paths must contain a glob (*, ? or [), got %q",
 						name, TypeDirPattern, path)
 				}
-				if !isAbsPortable(path) && !strings.HasPrefix(path, "~/") && !strings.HasPrefix(path, `~\`) {
+				if !IsAbsPortable(path) && !strings.HasPrefix(path, "~/") && !strings.HasPrefix(path, `~\`) {
 					return fmt.Errorf("provider %q: %s paths must be absolute or start with ~/, got %q",
 						name, TypeDirPattern, path)
 				}
@@ -339,12 +339,14 @@ func validateProtectedEntry(path, home string) error {
 // again under the user data volume.
 const dataVolumeAlias = "/System/Volumes/Data"
 
-// stripDataAlias returns p without the data volume firmlink prefix.
+// stripDataAlias returns p without the data volume firmlink prefix, using
+// slash separators when it strips.
 func stripDataAlias(p string) string {
-	if len(p) < len(dataVolumeAlias) || !strings.EqualFold(p[:len(dataVolumeAlias)], dataVolumeAlias) {
+	slashed := filepath.ToSlash(p)
+	if len(slashed) < len(dataVolumeAlias) || !strings.EqualFold(slashed[:len(dataVolumeAlias)], dataVolumeAlias) {
 		return p
 	}
-	rest := p[len(dataVolumeAlias):]
+	rest := slashed[len(dataVolumeAlias):]
 	if rest == "" {
 		return "/"
 	}

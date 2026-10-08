@@ -408,10 +408,14 @@ func TestStatus_ListsOnlyProvidersThatApplyOnInjectedOS(t *testing.T) {
 		os      string
 		goBuild string
 		want    []string
+		absent  []string
 	}{
-		{config.OSDarwin, "Library/Caches/go-build", []string{"go-build", "homebrew", "ios-simulator", "xcode-archives", "xcode-deriveddata"}},
-		{config.OSLinux, ".cache/go-build", []string{"go-build"}},
-		{config.OSWindows, "AppData/Local/go-build", []string{"go-build"}},
+		{config.OSDarwin, "Library/Caches/go-build",
+			[]string{"go-build", "homebrew", "ios-simulator", "xcode-archives", "xcode-deriveddata"}, nil},
+		{config.OSLinux, ".cache/go-build", []string{"go-build"},
+			[]string{"homebrew", "ios-simulator", "xcode-archives", "xcode-deriveddata"}},
+		{config.OSWindows, "AppData/Local/go-build", []string{"go-build"},
+			[]string{"homebrew", "ios-simulator", "xcode-archives", "xcode-deriveddata"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.os, func(t *testing.T) {
@@ -435,7 +439,14 @@ func TestStatus_ListsOnlyProvidersThatApplyOnInjectedOS(t *testing.T) {
 			for _, p := range got.Providers {
 				names = append(names, p.Name)
 			}
-			assert.Equal(t, tt.want, names)
+			if tt.absent == nil {
+				assert.Equal(t, tt.want, names)
+				return
+			}
+			assert.Subset(t, names, tt.want)
+			for _, name := range tt.absent {
+				assert.NotContains(t, names, name)
+			}
 		})
 	}
 }

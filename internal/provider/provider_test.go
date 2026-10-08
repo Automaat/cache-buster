@@ -1530,23 +1530,25 @@ func TestDockerProvider_SmartClean_DryRun(t *testing.T) {
 }
 
 func TestNewProvider_ExtraCacheDefaults(t *testing.T) {
-	for name, cfg := range config.DefaultProviders() {
-		t.Run(name, func(t *testing.T) {
-			p, err := provider.NewProvider(name, cfg)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if p.Name() != name {
-				t.Errorf("name = %q, want %q", p.Name(), name)
-			}
-		})
+	for _, goos := range []string{config.OSDarwin, config.OSLinux, config.OSWindows} {
+		for name, cfg := range config.DefaultProvidersFor(config.Platform{OS: goos}) {
+			t.Run(goos+"/"+name, func(t *testing.T) {
+				p, err := provider.NewProvider(name, cfg)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if p.Name() != name {
+					t.Errorf("name = %q, want %q", p.Name(), name)
+				}
+			})
+		}
 	}
 }
 
 func TestNewProvider_ExtraCacheIsFileBased(t *testing.T) {
 	for _, name := range []string{"edge", "vivaldi", "gh", "vscode-shipit"} {
 		t.Run(name, func(t *testing.T) {
-			p, err := provider.NewProvider(name, config.DefaultProviders()[name])
+			p, err := provider.NewProvider(name, macDefaults()[name])
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1558,7 +1560,7 @@ func TestNewProvider_ExtraCacheIsFileBased(t *testing.T) {
 }
 
 func TestNewProvider_Rustup(t *testing.T) {
-	p, err := provider.NewProvider("rustup", config.DefaultProviders()["rustup"])
+	p, err := provider.NewProvider("rustup", macDefaults()["rustup"])
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1592,7 +1594,7 @@ func TestEnabledProviders_ExtraCachesNeedExistingPath(t *testing.T) {
 func TestNewProvider_ExtraCacheIsEntryBased(t *testing.T) {
 	for _, name := range []string{"huggingface", "playwright", "lima", "chrome-devtools-mcp"} {
 		t.Run(name, func(t *testing.T) {
-			p, err := provider.NewProvider(name, config.DefaultProviders()[name])
+			p, err := provider.NewProvider(name, macDefaults()[name])
 			if err != nil {
 				t.Fatal(err)
 			}

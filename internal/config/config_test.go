@@ -144,7 +144,7 @@ func TestConfig_AllEnabledProviders(t *testing.T) {
 }
 
 func TestDefaultConfig(t *testing.T) {
-	cfg := DefaultConfig()
+	cfg := DefaultConfigFor(macPlatform)
 
 	if err := cfg.Validate(); err != nil {
 		t.Errorf("DefaultConfig() should be valid: %v", err)

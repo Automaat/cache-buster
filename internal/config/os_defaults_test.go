@@ -237,7 +237,7 @@ func TestIsAbsPortable(t *testing.T) {
 		"":                 false,
 	}
 	for in, want := range tests {
-		assert.Equal(t, want, isAbsPortable(in), in)
+		assert.Equal(t, want, IsAbsPortable(in), in)
 	}
 }
 

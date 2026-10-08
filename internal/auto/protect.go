@@ -105,7 +105,7 @@ func isProtectedWith(path, home string, extra []string, scanTree bool) bool {
 	roots = withoutDataAlias(roots)
 
 	for _, p := range candidates {
-		if p == string(filepath.Separator) || isXcodeArchives(p) || insideGitCheckout(p, home) {
+		if filepath.Dir(p) == p || isXcodeArchives(p) || insideGitCheckout(p, home) {
 			return true
 		}
 		for part := range strings.SplitSeq(p, string(filepath.Separator)) {
@@ -134,14 +134,15 @@ const dataVolumeAlias = "/System/Volumes/Data"
 func withoutDataAlias(paths []string) []string {
 	out := slices.Clone(paths)
 	for _, p := range paths {
-		if len(p) < len(dataVolumeAlias) || !strings.EqualFold(p[:len(dataVolumeAlias)], dataVolumeAlias) {
+		slashed := filepath.ToSlash(p)
+		if len(slashed) < len(dataVolumeAlias) || !strings.EqualFold(slashed[:len(dataVolumeAlias)], dataVolumeAlias) {
 			continue
 		}
-		rest := p[len(dataVolumeAlias):]
+		rest := slashed[len(dataVolumeAlias):]
 		if rest == "" {
 			out = append(out, string(filepath.Separator))
-		} else if strings.HasPrefix(rest, string(filepath.Separator)) {
-			out = append(out, rest)
+		} else if strings.HasPrefix(rest, "/") {
+			out = append(out, filepath.FromSlash(rest))
 		}
 	}
 	return out
