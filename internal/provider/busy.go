@@ -52,35 +52,64 @@ func newBusyGuard(name string, paths []string) *busyGuard {
 	return &busyGuard{
 		locks:         locks,
 		processes:     procs,
-		listProcesses: otherProcessLines,
+		listProcesses: processLister(procs),
 		lockHeld:      osshim.LockHeld,
 	}
 }
 
-// otherProcessLines lists running command lines without cache-buster's own
-// process and its parent. Both carry the provider name as an argument
+// processLister returns a lister that leaves out cache-buster's own process
+// and its ancestors. They carry the provider name as an argument
 // ("cache-buster clean cargo"), so they would always read as the tool being
 // busy.
-func otherProcessLines(ctx context.Context) ([]string, error) {
-	procs, err := osshim.ProcessTable(ctx)
-	if err != nil {
-		return nil, err
+func processLister(wanted []string) func(context.Context) ([]string, error) {
+	return func(ctx context.Context) ([]string, error) {
+		procs, err := osshim.ProcessTable(ctx)
+		if err != nil {
+			return nil, err
+		}
+		return excludeSelf(procs, os.Getpid(), wanted), nil
 	}
-	return excludeSelf(procs, os.Getpid(), os.Getppid()), nil
 }
 
-// excludeSelf drops the process with pid self and its parent. A zero pid
-// never matches, since 0 stands for an unknown pid.
-func excludeSelf(procs []osshim.Process, self, parent int) []string {
+// excludeSelf drops the process with pid self and its ancestors, except an
+// ancestor whose executable is itself a wanted tool ("cargo run -- clean"):
+// that tool is really running. A zero pid is unknown and never matches.
+func excludeSelf(procs []osshim.Process, self int, wanted []string) []string {
+	byPID := make(map[int]*osshim.Process, len(procs))
+	for i := range procs {
+		if procs[i].PID != 0 {
+			byPID[procs[i].PID] = &procs[i]
+		}
+	}
+
+	skip := map[int]bool{}
+	for pid := self; pid != 0 && !skip[pid]; {
+		p, ok := byPID[pid]
+		if !ok {
+			break
+		}
+		if pid == self || matchProcess(firstToken(p.CommandLine), wanted) == "" {
+			skip[pid] = true
+		}
+		pid = p.PPID
+	}
+
 	lines := make([]string, 0, len(procs))
 	for i := range procs {
-		p := &procs[i]
-		if p.PID != 0 && (p.PID == self || p.PID == parent) {
+		if procs[i].PID != 0 && skip[procs[i].PID] {
 			continue
 		}
-		lines = append(lines, p.CommandLine)
+		lines = append(lines, procs[i].CommandLine)
 	}
 	return lines
+}
+
+func firstToken(commandLine string) string {
+	fields := strings.Fields(commandLine)
+	if len(fields) == 0 {
+		return ""
+	}
+	return fields[0]
 }
 
 // busyReason returns a non-empty reason when the tool is busy. A failed check
