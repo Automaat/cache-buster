@@ -438,3 +438,20 @@ func TestRun_VerboseShowsTooLargeAndCannotVerifyReasons(t *testing.T) {
 	require.NoError(t, err)
 	assert.Contains(t, h.out.String(), "big: skipped (too large to verify: "+root+")")
 }
+
+func TestFindGitMarker_FlatTreeOfSubdirsStopsQueueingAtDirLimit(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "mod")
+	layout := func(rel string) []os.DirEntry {
+		out := make([]os.DirEntry, 100000)
+		for i := range out {
+			out[i] = fakeEntry{name: fmt.Sprintf("d%d", i), dir: true}
+		}
+		return out
+	}
+	reads := useFakeTree(t, root, layout)
+	lim := markerLimits
+	lim.dirs = 10
+
+	assert.Equal(t, markerTooLarge, findGitMarker(t.Context(), root, lim).outcome)
+	assert.Equal(t, 1, *reads)
+}
