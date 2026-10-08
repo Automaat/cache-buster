@@ -141,6 +141,9 @@ func Run(ctx context.Context, cfg *config.Config, dryRun bool, deps Deps) (Repor
 	} else {
 		report.EndStale = true
 	}
+	if tier != TierOK && len(report.Results) > 0 && !slices.ContainsFunc(report.Results, func(r Result) bool { return r.Status != StatusSkipped }) {
+		fmt.Fprintln(deps.Out, "nothing to clean: every provider was skipped, see the reasons above")
+	}
 	fmt.Fprintf(deps.Out, "done: free %s\n", size.FormatSize(report.End.Free))
 	return report, nil
 }
@@ -237,7 +240,12 @@ func runCandidate(ctx context.Context, c *candidate, tier Tier, dryRun bool, dep
 		return res
 	}
 
-	if reason := protectedReason(p, deps.Home, protected); reason != "" {
+	reason, ctxErr := protectedReason(ctx, p, c.cfg.Type == config.TypeDirPattern, deps.Home, protected)
+	if ctxErr != nil {
+		res.Status, res.Err = StatusError, ctxErr
+		return res
+	}
+	if reason != "" {
 		return skipped(res, reason)
 	}
 	if !availableCtx(ctx, p) {
@@ -287,13 +295,29 @@ func skipped(res Result, reason string) Result {
 	return res
 }
 
-func protectedReason(p provider.Provider, home string, protected []string) string {
+// protectedReason returns why a provider's paths are off limits, or "" when
+// they are clear. Paths that cannot be verified in the budget are reported as
+// too large to verify. A directory-pattern sweep also matches protected names
+// in its own path, since it targets user directories. The error is ctx's when
+// the scan was cancelled.
+func protectedReason(ctx context.Context, p provider.Provider, sweep bool, home string, protected []string) (string, error) {
 	for _, path := range p.Paths() {
-		if isProtectedWith(path, home, protected, true) {
-			return "protected path " + path
+		if sweep && hasProtectedName(path) {
+			return "protected path " + path, nil
+		}
+		v := checkProtected(ctx, path, home, protected, true)
+		switch {
+		case v.cancelled:
+			return "", ctx.Err()
+		case v.kind == verdictProtected && v.detail != "":
+			return "protected path " + path + " (" + v.detail + ")", nil
+		case v.kind == verdictProtected:
+			return "protected path " + path, nil
+		case v.kind == verdictUnverified:
+			return v.detail, nil
 		}
 	}
-	return ""
+	return "", nil
 }
 
 func printResult(out io.Writer, res Result) {

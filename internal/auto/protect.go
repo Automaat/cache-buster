@@ -1,6 +1,7 @@
 package auto
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -26,10 +27,22 @@ func protectedRoots(home string) []string {
 	}
 }
 
-// protectedElement matches path elements that mark data auto must never
-// touch, whichever provider points at it.
+// protectedElement matches path elements that mark user data in the path of
+// a directory-pattern sweep. Only sweeps of user directories use it: a name
+// says nothing about a provider's own cache tree (mise keeps a downloads/opencode
+// directory of tool downloads), where exact roots and git markers decide.
 func protectedElement(part string) bool {
 	return strings.EqualFold(part, "Downloads") || strings.EqualFold(part, "opencode") || strings.EqualFold(part, "worktrees")
+}
+
+// hasProtectedName reports whether any element of a sweep path is protected by name.
+func hasProtectedName(path string) bool {
+	for part := range strings.SplitSeq(filepath.Clean(path), string(filepath.Separator)) {
+		if protectedElement(part) {
+			return true
+		}
+	}
+	return false
 }
 
 // isProtected reports whether path is, is inside, or contains protected data.
@@ -92,10 +105,38 @@ func insideGitCheckout(path, home string) bool {
 }
 
 // isProtectedWith is isProtected plus extra protected roots, such as the
-// configured protected list.
+// configured protected list. A tree the marker scan cannot verify counts as
+// protected.
 func isProtectedWith(path, home string, extra []string, scanTree bool) bool {
+	return checkProtected(context.Background(), path, home, extra, scanTree).kind != verdictClear
+}
+
+type verdictKind int
+
+const (
+	verdictClear verdictKind = iota
+	verdictProtected
+	verdictUnverified
+)
+
+// verdict is the outcome of checkProtected. An unverified verdict means the
+// marker scan could not finish (too large, unreadable, cancelled). detail
+// is a phrase for the skip reason: the whole reason when unverified, the
+// marker location when a scan found a checkout.
+type verdict struct {
+	detail    string
+	kind      verdictKind
+	cancelled bool
+}
+
+// checkProtected decides whether auto may touch path. Protection is by exact
+// location, never by a directory's name: the built-in and configured roots
+// and anything inside or above them, Xcode archives, checkouts that contain
+// path, and, with scanTree, a git marker within a bounded reach below path.
+func checkProtected(ctx context.Context, path, home string, extra []string, scanTree bool) verdict {
 	candidates := []string{filepath.Clean(path)}
-	if resolved, err := filepath.EvalSymlinks(path); err == nil {
+	resolved, resolveErr := filepath.EvalSymlinks(path)
+	if resolveErr == nil {
 		candidates = append(candidates, resolved)
 	}
 	candidates = withoutDataAlias(candidates)
@@ -103,31 +144,44 @@ func isProtectedWith(path, home string, extra []string, scanTree bool) bool {
 	var roots []string
 	for _, root := range append(protectedRoots(home), extra...) {
 		roots = append(roots, root)
-		if resolved, err := filepath.EvalSymlinks(root); err == nil {
-			roots = append(roots, resolved)
+		if resolvedRoot, err := filepath.EvalSymlinks(root); err == nil {
+			roots = append(roots, resolvedRoot)
 		}
 	}
 	roots = withoutDataAlias(roots)
 
 	for _, p := range candidates {
 		if filepath.Dir(p) == p || isXcodeArchives(p) || insideGitCheckout(p, home) {
-			return true
-		}
-		for part := range strings.SplitSeq(p, string(filepath.Separator)) {
-			if protectedElement(part) {
-				return true
-			}
-		}
-		if scanTree && containsProtectedDir(p) {
-			return true
+			return verdict{kind: verdictProtected}
 		}
 		for _, root := range roots {
 			if within(strings.ToLower(p), strings.ToLower(root)) || within(strings.ToLower(root), strings.ToLower(p)) {
-				return true
+				return verdict{kind: verdictProtected}
 			}
 		}
 	}
-	return false
+	if !scanTree {
+		return verdict{}
+	}
+
+	target := candidates[0]
+	if resolveErr == nil {
+		target = resolved
+	}
+	res := findGitMarker(ctx, target, markerLimits)
+	switch res.outcome {
+	case markerNone:
+		return verdict{}
+	case markerFound:
+		return verdict{kind: verdictProtected, detail: "git checkout at " + res.detail}
+	case markerTooLarge:
+		return verdict{kind: verdictUnverified, detail: "too large to verify: " + path}
+	case markerUnreadable:
+		return verdict{kind: verdictUnverified, detail: res.detail}
+	case markerCancelled:
+		return verdict{kind: verdictUnverified, cancelled: true}
+	}
+	return verdict{kind: verdictUnverified, detail: "cannot verify: " + path}
 }
 
 // dataVolumeAlias is the firmlink that exposes the user data volume under
@@ -158,50 +212,4 @@ func withoutDataAlias(paths []string) []string {
 func within(path, root string) bool {
 	root = strings.TrimRight(root, string(filepath.Separator))
 	return root == "" || path == root || strings.HasPrefix(path, root+string(filepath.Separator))
-}
-
-const descendantScanEntries = 500000
-
-// containsProtectedDir reports whether a worktrees or opencode directory sits
-// anywhere below root, so a provider on an ancestor cannot reach into one.
-// Downloads matches only with its exact macOS capitalisation: cache tools
-// such as Homebrew keep a lowercase downloads directory of their own. The scan never follows symlinks and fails closed
-// once the tree is too large to verify.
-func containsProtectedDir(root string) bool {
-	level := []string{root}
-	scanned := 0
-	for len(level) > 0 {
-		var next []string
-		for _, dir := range level {
-			entries, err := readDirUnsorted(dir)
-			if err != nil {
-				continue
-			}
-			for _, e := range entries {
-				scanned++
-				if scanned > descendantScanEntries {
-					return true
-				}
-				if !e.IsDir() {
-					continue
-				}
-				if e.Name() == "Downloads" || strings.EqualFold(e.Name(), "worktrees") || strings.EqualFold(e.Name(), "opencode") {
-					return true
-				}
-				next = append(next, filepath.Join(dir, e.Name()))
-			}
-		}
-		level = next
-	}
-	return false
-}
-
-// readDirUnsorted lists dir without sorting; the scan does not need order.
-func readDirUnsorted(dir string) ([]os.DirEntry, error) {
-	f, err := os.Open(dir)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = f.Close() }()
-	return f.ReadDir(-1)
 }

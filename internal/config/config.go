@@ -36,7 +36,8 @@ func (c *Config) Applies(name string) bool {
 	return AppliesOn(name, goos)
 }
 
-// DefaultProtected returns the built-in protected paths. The docker volumes
+// DefaultProtected returns the built-in protected paths. Each is an exact
+// location: auto never protects a directory just for sharing its name. The docker volumes
 // path is the Linux location; Docker Desktop keeps volumes in a VM image
 // that auto never prunes.
 func DefaultProtected() []string {

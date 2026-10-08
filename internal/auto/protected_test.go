@@ -326,3 +326,10 @@ func TestProtectedPaths_BackslashHomeEntryIsExpandedOnEveryOS(t *testing.T) {
 
 	assert.Contains(t, got, filepath.Join(home, "Photos", "raw"))
 }
+
+func writeWorktreeMarker(t *testing.T, dir string) {
+	t.Helper()
+	gitdir := filepath.Join(filepath.Dir(dir), "main.git", "worktrees", filepath.Base(dir))
+	require.NoError(t, os.MkdirAll(dir, 0o750))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ".git"), []byte("gitdir: "+filepath.ToSlash(gitdir)+"\n"), 0o600))
+}

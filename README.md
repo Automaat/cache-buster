@@ -206,8 +206,10 @@ Safety rules:
 
 - `docker-volumes` never runs in `auto`, enabled or not.
 - `xcode-archives` never runs in `auto`, by name or by path (any provider on an Xcode `Archives` folder is skipped): archives hold App Store dSYMs and signed builds.
-- Every provider path is scanned for protected descendants (a `worktrees` or `opencode` directory, or a `Downloads` directory with macOS capitalisation) before it runs, built-in providers included. A tree over 500000 entries fails closed and the provider is skipped.
-- A provider with a path inside or containing `Downloads`, `opencode` or a `worktrees` directory is skipped.
+- Protection is by exact location, never by a directory's name. A provider is skipped when its path is, lies inside, or contains one of the protected roots: `~/Downloads`, the opencode data, config, cache and home directories, Docker volumes and the `protected` list. A directory that is merely named `opencode`, `worktrees` or `Downloads` inside a cache (mise keeps `downloads/opencode`) protects nothing.
+- A provider whose path lies inside a git checkout is skipped. Below the path, `auto` looks for a git checkout or worktree by its marker, an entry named `.git` (a directory, or the file of a linked worktree whose `gitdir:` points into another repository's `worktrees/` directory), down to 3 levels below the path. The scan lists directory names only: it never opens files, never follows symlinks, stops at the first hit and gives up after 5 seconds, 50000 directories or 2000000 entries. A checkout buried deeper than 3 levels is not detected by this scan. The skip reason names the checkout that was found.
+- Anything the scan cannot verify is skipped, never cleaned: `skipped (too large to verify: <path>)` when a limit is hit, `skipped (cannot verify: <dir>)` for an unreadable directory. Both appear in the `auto` output and the run log, and when every provider ends up skipped `auto` says `nothing to clean`.
+- Names still matter in two places: the path of a `dir-pattern` sweep of user directories (such as `sail-dirs`) is skipped when it has a `Downloads`, `opencode` or `worktrees` element, and the `status` listing of protected data finds `worktrees` directories near home.
 - Docker prune commands are cancelled after 10 minutes; command providers keep their `clean_timeout`.
 - Providers whose tool is busy are skipped, as in `clean`.
 - Two runs never overlap; a second one exits immediately.
@@ -316,8 +318,8 @@ protected:
 
 Entries must be literal paths, absolute or starting with `~/`: globs, `.`/`..` elements, home, its parents and top-level directories are rejected. They are added to the built-in list (`~/Downloads`,
 `~/.local/share/opencode`, `/var/lib/docker/volumes`); removing a built-in entry from the file has no
-effect. `auto` also skips any path that holds a `.git` entry (a git checkout or worktree), anything under a
-`worktrees` directory, and never prunes Docker volumes (Docker Desktop keeps them inside its VM image).
+effect. `auto` also skips any path inside a git checkout or worktree, any path holding one within 3 levels (see
+the safety rules), and never prunes Docker volumes (Docker Desktop keeps them inside its VM image).
 
 ### Busy tools
 
