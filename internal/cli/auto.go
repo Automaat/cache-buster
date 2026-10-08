@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -16,9 +17,6 @@ import (
 
 // autoRunTimeout caps one unattended run so a stuck provider cannot pile up runs.
 const autoRunTimeout = 45 * time.Minute
-
-// notifyTimeout keeps a hung notifier from holding the run lock.
-const notifyTimeout = 10 * time.Second
 
 // AutoCmd trims caches based on free disk space.
 var AutoCmd = &cobra.Command{
@@ -38,19 +36,22 @@ or worktrees are skipped. The first run after install-agent is a dry-run.`,
 	RunE:         runAuto,
 }
 
-// InstallAgentCmd installs the launchd agent that runs auto.
+// InstallAgentCmd installs the scheduled job that runs auto.
 var InstallAgentCmd = &cobra.Command{
-	Use:          "install-agent",
-	Short:        "Install the launchd agent that runs auto periodically",
+	Use:   "install-agent",
+	Short: "Install the scheduled job that runs auto periodically",
+	Long: `Registers auto with the scheduler of this OS: a launchd agent on macOS, a systemd user timer
+on Linux (a crontab entry when no systemd user manager is running) and a Task Scheduler task on Windows.
+The first run after install is a dry-run.`,
 	Args:         cobra.NoArgs,
 	SilenceUsage: true,
 	RunE:         runInstallAgent,
 }
 
-// UninstallAgentCmd removes the launchd agent.
+// UninstallAgentCmd removes the scheduled job.
 var UninstallAgentCmd = &cobra.Command{
 	Use:          "uninstall-agent",
-	Short:        "Remove the launchd agent",
+	Short:        "Remove the scheduled job installed by install-agent",
 	Args:         cobra.NoArgs,
 	SilenceUsage: true,
 	RunE:         runUninstallAgent,
@@ -63,7 +64,7 @@ func init() {
 }
 
 // autoEnv holds everything auto touches outside the config, so tests can
-// replace the disk, the state directory and launchctl.
+// replace the disk, the state directory and the schedulers.
 type autoEnv struct {
 	free        auto.FreeFunc
 	newProvider func(name string, cfg config.Provider) (provider.Provider, error)
@@ -75,6 +76,7 @@ type autoEnv struct {
 	home        string
 	exe         string
 	uid         int
+	goos        string
 }
 
 func defaultAutoEnv() (autoEnv, error) {
@@ -195,10 +197,13 @@ func (e autoEnv) recordRun(ctx context.Context, cfg config.Auto, report auto.Rep
 	notified := false
 	if runErr == nil {
 		var err error
-		notifyCtx, cancel := context.WithTimeout(ctx, notifyTimeout)
+		notifyCtx, cancel := context.WithTimeout(ctx, auto.NotifyTimeout)
 		defer cancel()
 		notified, err = auto.NotifyIfStillLow(notifyCtx, e.notify, report, cfg)
-		if err != nil {
+		switch {
+		case errors.Is(err, auto.ErrNotifierUnavailable):
+			fmt.Fprintf(e.out, "notification skipped: %v\n", err)
+		case err != nil:
 			fmt.Fprintf(e.out, "warning: %v\n", err)
 		}
 	}
@@ -255,5 +260,6 @@ func (e autoEnv) agent(interval time.Duration) auto.Agent {
 		StateDir: e.stateDir,
 		UID:      e.uid,
 		Interval: interval,
+		OS:       e.goos,
 	}
 }

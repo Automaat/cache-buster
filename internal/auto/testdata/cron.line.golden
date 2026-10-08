@@ -1,0 +1,1 @@
+*/30 * * * * env PATH='/home/linuxbrew/.linuxbrew/bin:/usr/local/bin:/home/me/.local/bin:/home/me/.local/share/mise/shims:/home/me/go/bin:/home/me/.cargo/bin:/usr/bin:/bin:/usr/sbin:/sbin' nice -n 10 '/usr/local/bin/cache-buster' auto >> '/home/me/.local/state/cache-buster/auto.log' 2>&1 # cache-buster

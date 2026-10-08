@@ -168,8 +168,8 @@ cache-buster clean --smart       # LRU-based trimming
 ```bash
 cache-buster auto             # Trim by free-space tier
 cache-buster auto --dry-run   # Preview only
-cache-buster install-agent    # Run auto from launchd every auto.interval
-cache-buster uninstall-agent  # Unload and remove the agent
+cache-buster install-agent    # Run auto every auto.interval with the OS scheduler
+cache-buster uninstall-agent  # Unload and remove everything install-agent created
 ```
 
 `auto` reads the free space of the data volume (`statfs` of `/System/Volumes/Data`)
@@ -194,11 +194,25 @@ Safety rules:
   `~/.local/state/cache-buster/` records it, so it survives restarts and only a completed
   dry-run in the low or critical tier, where at least one provider ran, clears it, and only when no provider failed. Running `install-agent` again arms it again.
 
-`install-agent` writes `~/Library/LaunchAgents/dev.mskalski.cache-buster.plist`
-(`StartInterval` from `auto.interval`, `RunAtLoad`, low priority, a `PATH` with Homebrew,
-mise, Go, Cargo and Docker) and loads it with `launchctl bootstrap`. Output goes to
-`~/Library/Logs/cache-buster/auto.log`. Install from a built or installed binary, not
-`go run`. The plist records the binary path, so run `install-agent` again after moving it.
+`install-agent` picks the scheduler of the running OS. Install from a built or installed
+binary, not `go run`; the job records the binary path, so run `install-agent` again after
+moving it. The first run after install is a dry-run on every OS.
+
+| OS | Scheduler | What is written | Output |
+|----|-----------|-----------------|--------|
+| macOS | launchd agent, loaded with `launchctl bootstrap` | `~/Library/LaunchAgents/dev.mskalski.cache-buster.plist` (`StartInterval` from `auto.interval`, `RunAtLoad`, low priority, a `PATH` with Homebrew, mise, Go, Cargo and Docker) | `~/Library/Logs/cache-buster/auto.log` |
+| Linux | systemd user timer | `~/.config/systemd/user/cache-buster.service` and `cache-buster.timer` (first run a minute after enabling, then `auto.interval` after each run), enabled with `systemctl --user enable` | `~/.local/state/cache-buster/auto.log` |
+| Linux without a systemd user manager | cron | one crontab line tagged `# cache-buster`; other entries are kept | `~/.local/state/cache-buster/auto.log` |
+| Windows | Task Scheduler task `cache-buster`, created with `schtasks /Create /XML` | `~/.local/state/cache-buster/cache-buster-task.xml` (repeats every `auto.interval`, below-normal priority, runs only while you are logged on) | none |
+
+Cron fires on fixed minute and hour marks, so the cron fallback only accepts an `auto.interval`
+that divides an hour or a day evenly (1m, 2m, 5m, 10m, 15m, 20m, 30m, 1h, 2h, 3h, 4h, 6h, 8h, 12h,
+24h) and refuses any other. Installing the systemd timer removes an earlier cron entry and the cron fallback removes earlier systemd units.
+The systemd user timer runs only while your user manager is up; on a headless box run
+`loginctl enable-linger $USER` so it survives logout, otherwise install falls back to cron.
+`uninstall-agent` removes the job, its definition
+files and the first-run marker, and succeeds when nothing is installed; on Linux it clears both
+the systemd units and the crontab line.
 
 Every run appends one JSON line to `~/.local/state/cache-buster/runs.jsonl`: time, tier, free space
 before and after, bytes freed per provider, and skipped providers with their reasons. The log rotates
@@ -211,8 +225,10 @@ cache-buster history --json    # Full records, including per-provider detail
 ```
 
 `history` skips unreadable lines and reports how many. When a real run (not a dry-run) ends with
-free space still under `min_free` or `min_free_pct`, `auto` shows one macOS notification; a run that
-recovered enough space stays quiet. A failed notification or log write is reported but does not fail the run.
+free space still under `min_free` or `min_free_pct`, `auto` shows one desktop notification (`osascript` on macOS, `notify-send` on Linux, a PowerShell toast on
+Windows); a run that recovered enough space stays quiet. A notifier that is not installed is logged as a skipped
+notification. A failed notification or log write is reported but does not fail the run, and a notifier is
+cancelled after 10 seconds so it cannot hold the run lock.
 
 ### config
 
@@ -264,7 +280,7 @@ The optional top-level `auto` block configures `cache-buster auto`:
 
 ```yaml
 auto:
-  interval: 30m      # launchd StartInterval, minimum 1m
+  interval: 30m      # scheduler interval, minimum 1m
   min_free: 30G      # below this, trim every enabled provider
   min_free_pct: 15   # or below this percentage of the volume (0 disables)
 ```
