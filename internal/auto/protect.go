@@ -47,6 +47,9 @@ func isProtected(path, home string, scanTree bool) bool {
 	roots = withoutDataAlias(roots)
 
 	for _, p := range candidates {
+		if p == string(filepath.Separator) {
+			return true
+		}
 		for part := range strings.SplitSeq(p, string(filepath.Separator)) {
 			if protectedElement(part) {
 				return true

@@ -827,6 +827,13 @@ func TestIsProtected_FilesystemRootAndDataAlias(t *testing.T) {
 	assert.False(t, within("/Users/me2", "/Users/me"))
 }
 
+func TestIsProtected_RootWithoutHome(t *testing.T) {
+	for _, scan := range []bool{true, false} {
+		assert.True(t, isProtected("/", "", scan))
+		assert.True(t, isProtected("/System/Volumes/Data", "", scan))
+	}
+}
+
 func TestReport_Previewed(t *testing.T) {
 	ran := []Result{{Status: StatusDryRun}}
 	assert.False(t, Report{Tier: TierOK, Results: ran}.Previewed(), "ok tier previews nothing")
