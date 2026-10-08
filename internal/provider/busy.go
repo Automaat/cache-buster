@@ -19,6 +19,7 @@ var busyProcesses = map[string][]string{
 	"go-mod":   {"go"},
 	"homebrew": {"brew"},
 	"cargo":    {"cargo", "rustc"},
+	"rustup":   {"rustup", "cargo", "rustc"},
 	"uv":       {"uv"},
 }
 

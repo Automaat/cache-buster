@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/Automaat/cache-buster/internal/config"
 	"github.com/stretchr/testify/assert"
@@ -134,6 +135,7 @@ func newFakeRustupProvider(t *testing.T, f *fakeRustup) *RustupProvider {
 	})
 	require.NoError(t, err)
 	p.run = f.run
+	p.busy = nil // never inspect the real process table
 	return p
 }
 
@@ -198,9 +200,47 @@ func TestRustupProvider_UnderLimitRemovesNothing(t *testing.T) {
 	p, err := NewRustupProvider("rustup", config.Provider{Paths: []string{t.TempDir()}, MaxSize: "1G", Enabled: true})
 	require.NoError(t, err)
 	p.run = f.run
+	p.busy = nil
 
 	res, err := p.Clean(context.Background(), CleanOptions{})
 	require.NoError(t, err)
 	assert.Empty(t, f.calls)
 	assert.Equal(t, "already under limit", res.Output)
+}
+
+func TestRustupProvider_SkipsWhenBusy(t *testing.T) {
+	f := &fakeRustup{list: rustupListing}
+	p := newFakeRustupProvider(t, f)
+	p.busy = &busyGuard{
+		processes:     busyProcesses["rustup"],
+		listProcesses: func(context.Context) ([]string, error) { return []string{"/x/.cargo/bin/cargo +1.75.0 build"}, nil },
+	}
+
+	res, err := p.Clean(context.Background(), CleanOptions{})
+	require.NoError(t, err)
+	assert.Empty(t, f.calls)
+	assert.NotEmpty(t, res.SkipReason)
+}
+
+func TestRustupProvider_TimeoutBoundsRustup(t *testing.T) {
+	p := newFakeRustupProvider(t, &fakeRustup{})
+	p.timeout = 20 * time.Millisecond
+	p.run = func(ctx context.Context, _ ...string) (string, error) {
+		<-ctx.Done()
+		return "", ctx.Err()
+	}
+
+	_, err := p.Clean(context.Background(), CleanOptions{})
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+}
+
+func TestNewRustupProvider_CleanTimeout(t *testing.T) {
+	cfg := config.Provider{Paths: []string{t.TempDir()}, MaxSize: "1G", CleanTimeout: "5s"}
+	p, err := NewRustupProvider("rustup", cfg)
+	require.NoError(t, err)
+	assert.Equal(t, 5*time.Second, p.timeout)
+
+	cfg.CleanTimeout = "-1s"
+	_, err = NewRustupProvider("rustup", cfg)
+	require.Error(t, err)
 }

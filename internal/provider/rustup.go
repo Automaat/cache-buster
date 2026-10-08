@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/Automaat/cache-buster/internal/config"
 )
@@ -19,6 +20,8 @@ type rustupRunner func(ctx context.Context, args ...string) (string, error)
 type RustupProvider struct {
 	*BaseProvider
 	run rustupRunner
+	// timeout bounds each rustup invocation.
+	timeout time.Duration
 }
 
 // NewRustupProvider creates a provider that uninstalls unused toolchains.
@@ -27,11 +30,24 @@ func NewRustupProvider(name string, cfg config.Provider) (*RustupProvider, error
 	if err != nil {
 		return nil, err
 	}
-	return &RustupProvider{BaseProvider: base, run: execRustup}, nil
+	timeout := DefaultCleanTimeout
+	if cfg.CleanTimeout != "" {
+		timeout, err = config.ParseDuration(cfg.CleanTimeout)
+		if err != nil {
+			return nil, fmt.Errorf("parse clean_timeout: %w", err)
+		}
+		if timeout <= 0 {
+			return nil, fmt.Errorf("clean_timeout must be positive, got %q", cfg.CleanTimeout)
+		}
+	}
+	return &RustupProvider{BaseProvider: base, run: execRustup, timeout: timeout}, nil
 }
 
 func execRustup(ctx context.Context, args ...string) (string, error) {
 	cmd := exec.CommandContext(ctx, "rustup", args...)
+	// Without a delay a child holding the pipes keeps Run blocked after the
+	// context kills rustup.
+	cmd.WaitDelay = cleanWaitDelay
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -43,6 +59,15 @@ func execRustup(ctx context.Context, args ...string) (string, error) {
 	return strings.TrimSpace(stdout.String()), nil
 }
 
+func (p *RustupProvider) runBounded(ctx context.Context, args ...string) (string, error) {
+	if p.timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, p.timeout)
+		defer cancel()
+	}
+	return p.run(ctx, args...)
+}
+
 // Available reports whether rustup is on PATH.
 func (p *RustupProvider) Available() bool {
 	_, err := exec.LookPath("rustup")
@@ -52,17 +77,21 @@ func (p *RustupProvider) Available() bool {
 // Clean implements Provider. Smart and full modes behave the same: a
 // toolchain is removed whole or not at all.
 func (p *RustupProvider) Clean(ctx context.Context, opts CleanOptions) (CleanResult, error) {
+	if skipped, ok := p.skipIfBusy(ctx); ok {
+		return skipped, nil
+	}
+
 	current, sizeErr := p.CurrentSize(ctx)
 	if sizeErr == nil && current <= p.maxSize {
 		return CleanResult{Output: "already under limit"}, nil
 	}
 
-	listing, err := p.run(ctx, "toolchain", "list")
+	listing, err := p.runBounded(ctx, "toolchain", "list")
 	if err != nil {
 		return CleanResult{Output: listing}, fmt.Errorf("rustup toolchain list: %w", err)
 	}
 
-	overrides, err := p.run(ctx, "override", "list")
+	overrides, err := p.runBounded(ctx, "override", "list")
 	if err != nil {
 		return CleanResult{Output: overrides}, fmt.Errorf("rustup override list: %w", err)
 	}
@@ -85,7 +114,7 @@ func (p *RustupProvider) Clean(ctx context.Context, opts CleanOptions) (CleanRes
 		if ctx.Err() != nil {
 			return CleanResult{Output: "interrupted"}, ctx.Err()
 		}
-		if out, err := p.run(ctx, "toolchain", "uninstall", tc); err != nil {
+		if out, err := p.runBounded(ctx, "toolchain", "uninstall", tc); err != nil {
 			return CleanResult{Output: out}, fmt.Errorf("uninstall %s: %w", tc, err)
 		}
 		removed = append(removed, tc)
