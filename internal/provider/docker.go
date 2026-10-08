@@ -43,9 +43,11 @@ func stripVolumesFlag(cmd string) string {
 	}
 	kept := parts[:0]
 	for _, part := range parts {
-		if part != "--volumes" {
-			kept = append(kept, part)
+		if part == "--volumes" || strings.HasPrefix(part, "--volumes=") {
+			continue
 		}
+		// Wrapped commands such as sh -c carry the flag inside one token.
+		kept = append(kept, strings.ReplaceAll(part, " --volumes", ""))
 	}
 	return shellquote.Join(kept...)
 }

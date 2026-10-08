@@ -22,7 +22,7 @@ func runMeasuredClean(
 		return CleanResult{}, nil
 	}
 
-	sizeBefore, _ := sizeFn(ctx)
+	sizeBefore, beforeErr := sizeFn(ctx)
 
 	cmd := exec.CommandContext(ctx, args[0], args[1:]...)
 	var stdout, stderr bytes.Buffer
@@ -35,8 +35,12 @@ func runMeasuredClean(
 		return CleanResult{Output: output}, err
 	}
 
-	sizeAfter, _ := sizeFn(ctx)
-	bytesCleaned := sizeBefore - sizeAfter
+	sizeAfter, afterErr := sizeFn(ctx)
+	// An unmeasured side would read as 0 and skew the freed bytes.
+	var bytesCleaned int64
+	if beforeErr == nil && afterErr == nil {
+		bytesCleaned = sizeBefore - sizeAfter
+	}
 	if bytesCleaned < 0 {
 		fmt.Fprintf(os.Stderr, "warning: %s cache size increased during clean\n", name)
 		bytesCleaned = 0

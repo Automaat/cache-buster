@@ -506,8 +506,8 @@ func TestDockerProvider_DryRun(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if result.Output != "would run: docker system prune -af --volumes" {
-		t.Errorf("output = %q, want %q", result.Output, "would run: docker system prune -af --volumes")
+	if result.Output != "would run: docker system prune -af" {
+		t.Errorf("output = %q, want %q", result.Output, "would run: docker system prune -af")
 	}
 }
 
