@@ -1,6 +1,7 @@
 package osshim
 
 import (
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -29,6 +30,9 @@ func TestHasOpenFiles(t *testing.T) {
 	}
 
 	open, err := HasOpenFiles(t.Context(), dir)
+	if errors.Is(err, os.ErrPermission) {
+		t.Skip("host has same-user processes whose files cannot be inspected; the check fails closed")
+	}
 	require.NoError(t, err)
 	assert.False(t, open, "no process holds a file yet")
 
