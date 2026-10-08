@@ -74,7 +74,7 @@ func findGitMarker(ctx context.Context, root string, lim scanLimits) markerResul
 			if dirs > lim.dirs {
 				return markerResult{outcome: markerTooLarge}
 			}
-			listing := listDir(ctx, parent, dir, lim.entries-entries, depth < lim.depth)
+			listing := listDir(ctx, parent, dir, lim.entries-entries, lim.dirs-dirs-len(next), depth < lim.depth)
 			if listing.outcome != markerNone {
 				return listing.markerResult
 			}
@@ -99,7 +99,7 @@ type dirListing struct {
 // listDir reads one directory in batches, so a directory with hundreds of
 // thousands of files is never held in memory whole, and returns at the first
 // .git entry. budget is the number of names still allowed.
-func listDir(ctx, parent context.Context, dir string, budget int, wantSubdirs bool) dirListing {
+func listDir(ctx, parent context.Context, dir string, budget, dirBudget int, wantSubdirs bool) dirListing {
 	f, err := openDir(dir)
 	if errors.Is(err, fs.ErrNotExist) {
 		return dirListing{}
@@ -127,6 +127,10 @@ func listDir(ctx, parent context.Context, dir string, budget int, wantSubdirs bo
 				return out
 			}
 			if wantSubdirs && e.IsDir() {
+				if len(out.subdirs) >= dirBudget {
+					out.outcome = markerTooLarge
+					return out
+				}
 				out.subdirs = append(out.subdirs, filepath.Join(dir, e.Name()))
 			}
 		}

@@ -195,7 +195,7 @@ func Run(ctx context.Context, cfg *config.Config, dryRun bool, deps Deps) (Repor
 	} else {
 		rep.EndStale = true
 	}
-	if tier != TierOK && len(rep.Results) > 0 && !slices.ContainsFunc(rep.Results, func(r Result) bool { return r.Status != StatusSkipped }) {
+	if tier != TierOK && !rep.Recovered && len(rep.Results) > 0 && !slices.ContainsFunc(rep.Results, func(r Result) bool { return r.Status != StatusSkipped }) {
 		fmt.Fprintln(deps.Out, "nothing to clean: every provider was skipped, see the reasons above")
 	}
 	fmt.Fprintf(deps.Out, "done: free %s\n", size.FormatSize(rep.End.Free))
