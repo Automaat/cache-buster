@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"slices"
 	"sort"
 	"strings"
@@ -58,7 +59,7 @@ func ownsTrash(dir, name string) bool {
 // those names are skipped: src/target is source.
 func ownedArtifact(dir, name string) bool {
 	var kind artifactKind
-	switch name {
+	switch foldName(name) {
 	case "target":
 		kind = kindRust
 	case "node_modules":
@@ -126,8 +127,17 @@ func (s *artifactScan) total() int64 {
 	return total
 }
 
+// foldName lowercases names on the OSes whose default volumes ignore case, so
+// a Target directory is the target directory there; elsewhere names are exact.
+func foldName(name string) string {
+	if runtime.GOOS == "darwin" || runtime.GOOS == "windows" {
+		return strings.ToLower(name)
+	}
+	return name
+}
+
 func trashName(base string) string {
-	return trashPrefix + strings.TrimPrefix(base, ".") + "-" + strings.ToLower(cryptorand.Text()[:8])
+	return trashPrefix + strings.ToLower(strings.TrimPrefix(base, ".")) + "-" + strings.ToLower(cryptorand.Text()[:8])
 }
 
 // discover finds every project artifact below the roots and measures it. The
@@ -210,7 +220,7 @@ func (w *walker) walk(ctx context.Context, dir string, depth int) {
 	}
 	byName := make(map[string]fs.DirEntry, len(entries))
 	for _, e := range entries {
-		byName[e.Name()] = e
+		byName[foldName(e.Name())] = e
 	}
 
 	if arts := w.p.detect(dir, byName); len(arts) > 0 {
@@ -228,7 +238,7 @@ func (w *walker) walk(ctx context.Context, dir string, depth int) {
 			if ownsTrash(dir, name) {
 				w.scan.trash = append(w.scan.trash, child)
 			}
-		case neverDescend[name], depth >= w.p.maxDepth, lexicallyProtected(child), w.seen[child]:
+		case neverDescend[strings.ToLower(name)], depth >= w.p.maxDepth, lexicallyProtected(child), w.seen[child]:
 		default:
 			w.seen[child] = true
 			w.walk(ctx, child, depth+1)
@@ -254,7 +264,7 @@ func (w *walker) alias(dir string) string {
 func (p *ProjectArtifactsProvider) detect(dir string, byName map[string]fs.DirEntry) []*artifactDir {
 	var out []*artifactDir
 	add := func(kind artifactKind, name string) {
-		art := &artifactDir{Path: filepath.Join(dir, name), Kind: kind}
+		art := &artifactDir{Path: filepath.Join(dir, byName[name].Name()), Kind: kind}
 		if markersValid(art) {
 			out = append(out, art)
 		}
@@ -445,7 +455,7 @@ func sampleTree(ctx context.Context, dir string, limit int) (root, below time.Ti
 					return root, below, true, nil
 				}
 				name := e.Name()
-				if e.IsDir() && (name == ".git" || ownedArtifact(cur, name) || (trashPattern.MatchString(name) && ownsTrash(cur, name))) {
+				if e.IsDir() && (isGitName(name) || ownedArtifact(cur, name) || (trashPattern.MatchString(name) && ownsTrash(cur, name))) {
 					continue
 				}
 				seen++

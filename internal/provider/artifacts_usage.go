@@ -112,8 +112,9 @@ func artifactUse(art *artifactDir) (time.Time, error) {
 	return u.newest, nil
 }
 
-// rustUse reads target itself and every debug or release profile directory,
-// directly below target or below a target-triple directory.
+// rustUse reads target itself, each directory directly below it (debug,
+// release and custom profile directories) and the debug or release
+// directory of each target-triple directory.
 func rustUse(u *usageProbe, target string) error {
 	if err := u.entries(target, false, "CACHEDIR.TAG"); err != nil {
 		return err
@@ -128,10 +129,7 @@ func rustUse(u *usageProbe, target string) error {
 			continue
 		}
 		dir := filepath.Join(target, e.Name())
-		if isProfileDir(e.Name()) {
-			profiles = append(profiles, dir)
-			continue
-		}
+		profiles = append(profiles, dir)
 		for _, name := range []string{"debug", "release"} {
 			if isRealDir(filepath.Join(dir, name)) {
 				profiles = append(profiles, filepath.Join(dir, name))
@@ -147,8 +145,4 @@ func rustUse(u *usageProbe, target string) error {
 		}
 	}
 	return nil
-}
-
-func isProfileDir(name string) bool {
-	return name == "debug" || name == "release"
 }

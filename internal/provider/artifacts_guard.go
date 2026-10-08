@@ -143,7 +143,7 @@ func (p *ProjectArtifactsProvider) measureActivity(ctx context.Context, proj *pr
 // linked worktree is the worktree's own admin directory.
 func findGit(dir, stop string) (repoRoot, gitDir string, err error) {
 	for cur := dir; ; cur = filepath.Dir(cur) {
-		entry := filepath.Join(cur, ".git")
+		entry := gitEntry(cur)
 		if info, statErr := os.Lstat(entry); statErr == nil {
 			switch {
 			case info.IsDir():
@@ -159,6 +159,30 @@ func findGit(dir, stop string) (repoRoot, gitDir string, err error) {
 			return "", "", nil
 		}
 	}
+}
+
+// gitEntry returns the path of dir's .git entry, whatever its case: a
+// case-insensitive volume accepts .GIT, and treating a lookalike as git on any
+// OS only makes the checks stricter. Without one it returns dir/.git.
+func gitEntry(dir string) string {
+	exact := filepath.Join(dir, ".git")
+	if _, err := os.Lstat(exact); err == nil {
+		return exact
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return exact
+	}
+	for _, e := range entries {
+		if isGitName(e.Name()) {
+			return filepath.Join(dir, e.Name())
+		}
+	}
+	return exact
+}
+
+func isGitName(name string) bool {
+	return strings.EqualFold(name, ".git")
 }
 
 func readGitFile(path, base string) (string, error) {
@@ -274,7 +298,7 @@ func (ps *pass) busyReason(c *candidate) string {
 }
 
 // pathFlags are the options whose value is a project path.
-var pathFlags = []string{"--manifest-path", "--prefix", "--cwd", "-C"}
+var pathFlags = []string{"--manifest-path", "--prefix", "--cwd", "-C", "--workspace", "-w"}
 
 // argsReach reports whether a path in the process's arguments, resolved
 // against its working directory, lies inside one of dirs. This catches
@@ -286,7 +310,15 @@ func argsReach(proc toolProcess, dirs ...string) bool {
 	if proc.Cwd == "" {
 		return false
 	}
-	fields := strings.Fields(proc.CommandLine)
+	for _, fields := range [][]string{splitQuoted(proc.CommandLine), strings.Fields(proc.CommandLine)} {
+		if fieldsReach(fields, proc.Cwd, dirs) {
+			return true
+		}
+	}
+	return false
+}
+
+func fieldsReach(fields []string, cwd string, dirs []string) bool {
 	for i, field := range fields {
 		tok := strings.Trim(field, `"';&|()`)
 		if strings.HasPrefix(tok, "-") {
@@ -309,7 +341,7 @@ func argsReach(proc toolProcess, dirs ...string) bool {
 		}
 		abs := tok
 		if !filepath.IsAbs(abs) {
-			abs = filepath.Join(proc.Cwd, tok)
+			abs = filepath.Join(cwd, tok)
 		}
 		spellings := []string{abs}
 		if resolved, err := filepath.EvalSymlinks(abs); err == nil && resolved != abs {
@@ -324,6 +356,41 @@ func argsReach(proc toolProcess, dirs ...string) bool {
 		}
 	}
 	return false
+}
+
+// splitQuoted splits a command line on spaces, keeping a quoted run, which may
+// hold spaces, in one field with the quotes removed.
+func splitQuoted(s string) []string {
+	var (
+		fields []string
+		cur    strings.Builder
+		quote  rune
+		active bool
+	)
+	for _, r := range s {
+		switch {
+		case quote != 0:
+			if r == quote {
+				quote = 0
+			} else {
+				cur.WriteRune(r)
+			}
+		case r == '"' || r == '\'':
+			quote, active = r, true
+		case r == ' ' || r == '\t':
+			if active || cur.Len() > 0 {
+				fields = append(fields, cur.String())
+				cur.Reset()
+				active = false
+			}
+		default:
+			cur.WriteRune(r)
+		}
+	}
+	if active || cur.Len() > 0 {
+		fields = append(fields, cur.String())
+	}
+	return fields
 }
 
 // dirtyReason skips projects whose git tree has uncommitted changes. Git

@@ -387,3 +387,121 @@ func TestProjectArtifacts_PythonVenvInUseKeepsProject(t *testing.T) {
 	assert.Empty(t, res.Entries)
 	assert.DirExists(t, h.path("ml", ".venv"))
 }
+
+func TestSplitQuoted(t *testing.T) {
+	assert.Equal(t, []string{"node", "my app/server.js", "x"}, splitQuoted(`node "my app/server.js" x`))
+	assert.Equal(t, []string{"npm", "--prefix=my app", "start"}, splitQuoted(`npm --prefix="my app" start`))
+	assert.Equal(t, []string{"a", ""}, splitQuoted(`a ''`))
+}
+
+func TestArgsReachQuotedAndWorkspace(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("posix paths")
+	}
+	for _, cmd := range []string{`node "my app/server.js"`, `npm --prefix "my app" start`, `npm --prefix="my app" start`, `npm -w "my app" dev`} {
+		assert.True(t, argsReach(toolProcess{CommandLine: cmd, Cwd: "/code"}, "/code/my app"), cmd)
+	}
+}
+
+func TestProjectArtifacts_CustomCargoProfileBinaryKeepsTarget(t *testing.T) {
+	h := newArtifactHarness(t, nil)
+	rustProject(t, h.path("api"), 100, 90*day)
+	bin := h.path("api", "target", "dist", "app")
+	writeFile(t, bin, "elf")
+	ageTree(t, h.path("api"), 90*day)
+	setTimes(t, bin, time.Now(), time.Now().Add(-90*day))
+
+	res := h.clean(CleanOptions{Mode: CleanModeFull})
+
+	assert.Empty(t, res.Entries)
+	assert.DirExists(t, h.path("api", "target"))
+}
+
+func TestProjectArtifacts_GitMarkerCaseVariants(t *testing.T) {
+	when := time.Now().Add(-2 * day)
+	writeGit := func(t *testing.T, gitDir string, when time.Time) {
+		t.Helper()
+		writeFile(t, filepath.Join(gitDir, "HEAD"), "ref: refs/heads/main\n")
+		writeFile(t, filepath.Join(gitDir, "logs", "HEAD"), fmt.Sprintf("0 1 A <a@b.c> %d +0000\tcommit: x\n", when.Unix()))
+	}
+	t.Run("directory with recent reflog keeps the project", func(t *testing.T) {
+		h := newArtifactHarness(t, nil)
+		rustProject(t, h.path("api"), 100, 90*day)
+		writeGit(t, h.path("api", ".GIT"), when)
+		ageTree(t, h.path("api", ".GIT", "logs"), 90*day)
+		ageTree(t, h.path("api", ".GIT", "HEAD"), 90*day)
+		ageTree(t, h.path("api", ".GIT"), 90*day)
+		old := time.Now().Add(-90 * day)
+		setTimes(t, h.path("api"), old, old)
+
+		res := h.clean(CleanOptions{Mode: CleanModeFull})
+
+		assert.Empty(t, res.Entries)
+		assert.DirExists(t, h.path("api", "target"))
+	})
+	t.Run("directory is dirty-checked", func(t *testing.T) {
+		h := newArtifactHarness(t, nil)
+		rustProject(t, h.path("api"), 100, 90*day)
+		writeGit(t, h.path("api", ".Git"), time.Now().Add(-90*day))
+		ageTree(t, h.path("api"), 90*day)
+		old := time.Now().Add(-90 * day)
+		require.NoError(t, os.Chtimes(h.path("api", ".Git", "logs", "HEAD"), old, old))
+		h.dirty[evalDir(t, h.path("api"))] = true
+
+		res := h.clean(CleanOptions{Mode: CleanModeFull})
+
+		assert.Empty(t, res.Entries)
+		assert.Contains(t, res.Output, "uncommitted changes")
+	})
+	t.Run("worktree-style file points at a recent admin dir", func(t *testing.T) {
+		h := newArtifactHarness(t, nil)
+		rustProject(t, h.path("wt"), 100, 90*day)
+		admin := h.path("admin")
+		writeGit(t, admin, when)
+		writeFile(t, h.path("wt", ".GIT"), "gitdir: "+admin+"\n")
+		ageTree(t, h.path("wt"), 90*day)
+
+		res := h.clean(CleanOptions{Mode: CleanModeFull})
+
+		assert.Empty(t, res.Entries)
+		assert.DirExists(t, h.path("wt", "target"))
+	})
+	t.Run("contents of the git directory are not project activity", func(t *testing.T) {
+		h := newArtifactHarness(t, nil)
+		rustProject(t, h.path("api"), 100, 90*day)
+		gitRepo(t, h.path("api"), 90*day)
+		require.NoError(t, os.Rename(h.path("api", ".git"), h.path("api", ".GIT")))
+		writeFile(t, h.path("api", ".GIT", "objects", "pack", "p.pack"), "x")
+		ageTree(t, h.path("api"), 90*day)
+		now := time.Now()
+		setTimes(t, h.path("api", ".GIT", "objects", "pack", "p.pack"), now, now)
+
+		sampled, _, err := sampleNewest(context.Background(), h.path("api"), sampleLimit)
+
+		require.NoError(t, err)
+		assert.True(t, sampled.Before(now.Add(-day)))
+	})
+}
+
+func TestProjectArtifacts_ArtifactNamesFollowFilesystemCase(t *testing.T) {
+	probe := t.TempDir()
+	writeFile(t, filepath.Join(probe, "a"), "x")
+	_, err := os.Lstat(filepath.Join(probe, "A"))
+	insensitive := err == nil
+
+	h := newArtifactHarness(t, nil)
+	writeFile(t, h.path("api", "cargo.toml"), "x")
+	writeFile(t, h.path("api", "Target", "CACHEDIR.TAG"), artifactTag())
+	writeFile(t, h.path("api", "Target", "debug", "a.rlib"), "data")
+	ageTree(t, h.path("api"), 90*day)
+
+	res := h.clean(CleanOptions{Mode: CleanModeFull})
+
+	if insensitive {
+		assert.Len(t, res.Entries, 1, "a differently cased spelling is the same directory here")
+		assert.NoDirExists(t, h.path("api", "Target"))
+		return
+	}
+	assert.Empty(t, res.Entries, "exact names only on a case-sensitive volume")
+	assert.DirExists(t, h.path("api", "Target"))
+}
