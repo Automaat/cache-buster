@@ -36,6 +36,7 @@ type Summary struct {
 	Entries        int              `json:"entries"`
 	SkippedEntries int              `json:"skipped_entries,omitempty"`
 	Bytes          int64            `json:"bytes"`
+	Warnings       []string         `json:"warnings,omitempty"`
 }
 
 // Overall is the summary of a whole run across providers.
@@ -187,6 +188,7 @@ func WriteBlock(w io.Writer, b Block) {
 		line += " (" + strings.Join(extra, ", ") + ")"
 	}
 	fmt.Fprintln(w, line)
+	WriteWarnings(w, s.Warnings)
 
 	if len(s.Top) > 0 {
 		WriteTop(w, s)
@@ -194,6 +196,13 @@ func WriteBlock(w io.Writer, b Block) {
 	}
 	if b.Status == StatusDryRun {
 		writeNote(w, b.Output)
+	}
+}
+
+// WriteWarnings prints one indented line per warning.
+func WriteWarnings(w io.Writer, warnings []string) {
+	for _, warning := range warnings {
+		fmt.Fprintf(w, "  warning: %s\n", warning)
 	}
 }
 

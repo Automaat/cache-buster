@@ -368,8 +368,12 @@ func executeClean(
 }
 
 func printDone(result provider.CleanResult, concise bool) {
+	defer report.WriteWarnings(os.Stdout, result.Warnings)
 	if !concise {
 		fmt.Printf("done (freed %s)\n", size.FormatSize(result.BytesCleaned))
+		if out := strings.TrimSpace(result.Output); out != "" {
+			fmt.Println(out)
+		}
 		return
 	}
 	fmt.Printf("done (freed %s%s)\n", size.FormatSize(result.BytesCleaned), entryCount(result))
@@ -378,6 +382,7 @@ func printDone(result provider.CleanResult, concise bool) {
 
 func summaryOf(status string, result provider.CleanResult) *report.Summary {
 	s := report.Summarize(status, result.BytesCleaned, result.Entries, result.SkippedEntries)
+	s.Warnings = result.Warnings
 	return &s
 }
 
@@ -387,7 +392,7 @@ func blockOf(name, status string, result provider.CleanResult) report.Block {
 		Status:  status,
 		Reason:  result.SkipReason,
 		Output:  strings.TrimSpace(result.Output),
-		Summary: report.Summarize(status, result.BytesCleaned, result.Entries, result.SkippedEntries),
+		Summary: *summaryOf(status, result),
 	}
 }
 

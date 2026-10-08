@@ -19,7 +19,7 @@ func TestProjectArtifactsDefaultsOnEveryOS(t *testing.T) {
 			assert.True(t, pa.Enabled)
 			assert.Equal(t, TypeProjectArtifacts, pa.Type)
 			assert.Equal(t, []string{"~/sideprojects", "~/kong", "~/work", "~/src", "~/code", "~/projects"}, pa.Paths)
-			assert.Equal(t, "30d", pa.MinIdle)
+			assert.Equal(t, "60d", pa.MinIdle)
 			require.NotNil(t, pa.Rust)
 			require.NotNil(t, pa.Node)
 			require.NotNil(t, pa.Python)
@@ -134,4 +134,18 @@ func TestBuiltinProtectedRoots(t *testing.T) {
 	roots := BuiltinProtectedRoots("/h")
 	assert.Contains(t, roots, filepath.Join("/h", "Downloads"))
 	assert.Contains(t, roots, filepath.Join("/h", ".config", "opencode"))
+}
+
+func TestProjectArtifactsPassBudgetAndDepthMessages(t *testing.T) {
+	cfg := DefaultConfigFor(Platform{OS: "linux"})
+	pa := cfg.Providers["project-artifacts"]
+	pa.PassBudget = "0s"
+	assert.ErrorContains(t, pa.validateProjectArtifacts(), "pass_budget must be positive")
+	pa.PassBudget = "45s"
+	pa.MaxDepth = -2
+	assert.ErrorContains(t, pa.validateProjectArtifacts(), "max_depth must be at least 1")
+	pa.MaxDepth = MaxProjectDepth + 1
+	assert.ErrorContains(t, pa.validateProjectArtifacts(), "max_depth must be at most")
+	pa.MaxDepth = 3
+	assert.NoError(t, pa.validateProjectArtifacts())
 }

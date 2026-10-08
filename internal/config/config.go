@@ -290,6 +290,9 @@ type Provider struct {
 	MaxDepth int `mapstructure:"max_depth" yaml:"max_depth,omitempty"`
 	// ScanBudget bounds project discovery per pass for project-artifacts (default 10s).
 	ScanBudget string `mapstructure:"scan_budget" yaml:"scan_budget,omitempty"`
+	// PassBudget bounds one whole clean pass of project-artifacts; candidates
+	// left when it runs out are skipped (default 30s).
+	PassBudget string `mapstructure:"pass_budget" yaml:"pass_budget,omitempty"`
 	// SkipIfDirty skips projects with uncommitted changes for project-artifacts (default true).
 	SkipIfDirty *bool `mapstructure:"skip_if_dirty" yaml:"skip_if_dirty,omitempty"`
 	// Rust, Node and Python switch the per-kind project-artifacts detectors
@@ -404,10 +407,13 @@ func (p Provider) validateProjectArtifacts() error {
 			return fmt.Errorf("%s paths are literal roots, globs are not allowed: %q", TypeProjectArtifacts, path)
 		}
 	}
-	if p.MaxDepth < 0 || p.MaxDepth > MaxProjectDepth {
-		return fmt.Errorf("max_depth must be between 0 and %d, got %d", MaxProjectDepth, p.MaxDepth)
+	if p.MaxDepth < 0 {
+		return fmt.Errorf("max_depth must be at least 1, got %d", p.MaxDepth)
 	}
-	for field, value := range map[string]string{"min_idle": p.MinIdle, "scan_budget": p.ScanBudget} {
+	if p.MaxDepth > MaxProjectDepth {
+		return fmt.Errorf("max_depth must be at most %d, got %d", MaxProjectDepth, p.MaxDepth)
+	}
+	for field, value := range map[string]string{"min_idle": p.MinIdle, "scan_budget": p.ScanBudget, "pass_budget": p.PassBudget} {
 		if value == "" {
 			continue
 		}

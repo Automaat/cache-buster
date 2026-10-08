@@ -85,6 +85,9 @@ type CleanResult struct {
 	Entries []Entry
 	// SkippedEntries counts candidates a provider examined and left alone.
 	SkippedEntries int
-	BytesCleaned   int64
-	FilesDeleted   int64
+	// Warnings are problems that did not fail the clean but need the user's
+	// eye, such as a leftover that could not be removed.
+	Warnings     []string
+	BytesCleaned int64
+	FilesDeleted int64
 }
