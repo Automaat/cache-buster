@@ -9,8 +9,8 @@ import (
 	"strings"
 	"text/tabwriter"
 
-	"github.com/Automaat/cache-buster/internal/auto"
-	"github.com/Automaat/cache-buster/pkg/size"
+	"github.com/smykla-skalski/bilgie/internal/auto"
+	"github.com/smykla-skalski/bilgie/pkg/size"
 	"github.com/spf13/cobra"
 )
 
@@ -21,7 +21,7 @@ const defaultHistoryLimit = 10
 var HistoryCmd = &cobra.Command{
 	Use:   "history",
 	Short: "Show recent auto runs",
-	Long: `Shows the newest runs recorded by auto in ~/.local/state/cache-buster/runs.jsonl:
+	Long: `Shows the newest runs recorded by auto in ~/.local/state/bilgie/runs.jsonl:
 tier, free space before and after, bytes freed and what was skipped. Unreadable log lines are skipped.`,
 	Args:         cobra.NoArgs,
 	SilenceUsage: true,

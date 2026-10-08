@@ -12,10 +12,10 @@ import (
 	"charm.land/bubbles/v2/spinner"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
-	"github.com/Automaat/cache-buster/internal/config"
-	"github.com/Automaat/cache-buster/internal/provider"
-	"github.com/Automaat/cache-buster/pkg/size"
 	"github.com/mattn/go-runewidth"
+	"github.com/smykla-skalski/bilgie/internal/config"
+	"github.com/smykla-skalski/bilgie/internal/provider"
+	"github.com/smykla-skalski/bilgie/pkg/size"
 	"github.com/spf13/cobra"
 )
 
@@ -375,7 +375,7 @@ func (m model) View() tea.View {
 
 	var b strings.Builder
 
-	title := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("205")).Render("Cache Buster - Interactive Mode")
+	title := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("205")).Render("Bilgie - Interactive Mode")
 	b.WriteString(title)
 	b.WriteString("\n\n")
 

@@ -1,4 +1,4 @@
-module github.com/Automaat/cache-buster
+module github.com/smykla-skalski/bilgie
 
 go 1.26.0
 

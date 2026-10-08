@@ -1,5 +1,5 @@
 $ErrorActionPreference = 'Stop'
-$title = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('RGlzayBzcGFjZSBpcyBsb3c='))
+$title = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('YmlsZ2llOiBkaXNrIHNwYWNlIGlzIGxvdw=='))
 $message = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('MTIgR2lCIGZyZWUgb2YgNTAwIEdpQiBhZnRlciBjbGVhbnVwLg=='))
 [Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] | Out-Null
 [Windows.UI.Notifications.ToastNotification, Windows.UI.Notifications, ContentType = WindowsRuntime] | Out-Null

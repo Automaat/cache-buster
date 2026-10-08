@@ -7,9 +7,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Automaat/cache-buster/internal/cache"
-	"github.com/Automaat/cache-buster/internal/config"
 	"github.com/kballard/go-shellquote"
+	"github.com/smykla-skalski/bilgie/internal/cache"
+	"github.com/smykla-skalski/bilgie/internal/config"
 )
 
 // DefaultCleanTimeout bounds a clean command so a hung tool cannot stall a run.

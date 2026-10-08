@@ -6,10 +6,12 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+
+	"github.com/smykla-skalski/bilgie/internal/appname"
 )
 
 const (
-	configDir  = ".config/cache-buster"
+	configDir  = ".config/" + appname.Name
 	configFile = "config.yaml"
 )
 
@@ -62,7 +64,7 @@ func ExpandPaths(patterns []string) ([]string, error) {
 	return result, nil
 }
 
-// DirPath returns ~/.config/cache-buster.
+// DirPath returns ~/.config/bilgie.
 func DirPath() (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -71,7 +73,7 @@ func DirPath() (string, error) {
 	return filepath.Join(home, configDir), nil
 }
 
-// Path returns ~/.config/cache-buster/config.yaml.
+// Path returns ~/.config/bilgie/config.yaml.
 func Path() (string, error) {
 	dir, err := DirPath()
 	if err != nil {

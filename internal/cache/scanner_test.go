@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Automaat/cache-buster/internal/config"
+	"github.com/smykla-skalski/bilgie/internal/config"
 )
 
 // buildNestedTree creates dirs nested directories, each holding files files.

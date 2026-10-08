@@ -1,11 +1,11 @@
 [Unit]
-Description=cache-buster automatic cache cleanup
+Description=bilgie automatic cache cleanup
 
 [Service]
 Type=oneshot
-ExecStart="/usr/local/bin/cache-buster" auto
+ExecStart="/usr/local/bin/bilgie" auto
 Environment="PATH=/home/linuxbrew/.linuxbrew/bin:/usr/local/bin:/home/me/.local/bin:/home/me/.local/share/mise/shims:/home/me/go/bin:/home/me/.cargo/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 Nice=10
 IOSchedulingClass=idle
-StandardOutput=append:/home/me/.local/state/cache-buster/auto.log
-StandardError=append:/home/me/.local/state/cache-buster/auto.log
+StandardOutput=append:/home/me/.local/state/bilgie/auto.log
+StandardError=append:/home/me/.local/state/bilgie/auto.log

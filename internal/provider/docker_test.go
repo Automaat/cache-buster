@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Automaat/cache-buster/internal/config"
 	"github.com/kballard/go-shellquote"
+	"github.com/smykla-skalski/bilgie/internal/config"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

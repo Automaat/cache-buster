@@ -14,8 +14,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Automaat/cache-buster/internal/config"
-	"github.com/Automaat/cache-buster/internal/provider"
+	"github.com/smykla-skalski/bilgie/internal/config"
+	"github.com/smykla-skalski/bilgie/internal/provider"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -496,7 +496,7 @@ func newAgent(t *testing.T, rec *recorder) Agent {
 		Exec:       rec.exec,
 		Out:        &bytes.Buffer{},
 		Home:       home,
-		Exe:        "/opt/homebrew/bin/cache-buster",
+		Exe:        "/opt/homebrew/bin/bilgie",
 		StateDir:   filepath.Join(home, "state"),
 		UID:        501,
 		Interval:   45 * time.Minute,
@@ -516,6 +516,7 @@ func TestAgentInstall_WritesPlistArmsDryRunAndLoads(t *testing.T) {
 	assert.Equal(t, filepath.Join(a.Home, "Library", "LaunchAgents", AgentLabel+".plist"), a.PlistPath())
 	assert.True(t, FirstRunPending(a.StateDir))
 	assert.Equal(t, [][]string{
+		{"launchctl", "bootout", "gui/501/" + legacyIdentity.label},
 		{"launchctl", "bootout", "gui/501/" + AgentLabel},
 		{"launchctl", "bootstrap", "gui/501", a.PlistPath()},
 	}, rec.calls)
@@ -570,7 +571,7 @@ func TestAgentInstall_GivesUpAfterFiveBootstrapAttempts(t *testing.T) {
 }
 
 func TestAgentInstall_RefusesGoRunBinaryAndRelativePath(t *testing.T) {
-	for _, exe := range []string{"/var/folders/x/go-build123/b001/exe/cache-buster", "cache-buster"} {
+	for _, exe := range []string{"/var/folders/x/go-build123/b001/exe/bilgie", "bilgie"} {
 		rec := &recorder{}
 		a := newAgent(t, rec)
 		a.Exe = exe
@@ -592,7 +593,10 @@ func TestAgentUninstall_UnloadsRemovesPlistAndMarker(t *testing.T) {
 
 	assert.NoFileExists(t, a.PlistPath())
 	assert.False(t, FirstRunPending(a.StateDir))
-	assert.Equal(t, [][]string{{"launchctl", "bootout", "gui/501/" + AgentLabel}}, rec.calls)
+	assert.Equal(t, [][]string{
+		{"launchctl", "bootout", "gui/501/" + legacyIdentity.label},
+		{"launchctl", "bootout", "gui/501/" + AgentLabel},
+	}, rec.calls)
 }
 
 func TestAgentUninstall_NotInstalledIsNotAnError(t *testing.T) {
@@ -638,7 +642,7 @@ func TestRenderPlist_PassesPlutilLint(t *testing.T) {
 	if err != nil {
 		t.Skip("plutil not available")
 	}
-	data, err := RenderPlist("/opt/homebrew/bin/cache-buster", "/Users/me", "/Users/me/log", time.Hour)
+	data, err := RenderPlist("/opt/homebrew/bin/bilgie", "/Users/me", "/Users/me/log", time.Hour)
 	require.NoError(t, err)
 	path := filepath.Join(t.TempDir(), "x.plist")
 	require.NoError(t, os.WriteFile(path, data, 0o600))
@@ -902,6 +906,8 @@ func TestAgentUninstall_UnrecognisedBootoutWithFailingPrintStillRemoves(t *testi
 	assert.NoFileExists(t, a.PlistPath())
 	assert.False(t, FirstRunPending(a.StateDir))
 	assert.Equal(t, [][]string{
+		{"launchctl", "bootout", "gui/501/" + legacyIdentity.label},
+		{"launchctl", "print", "gui/501/" + legacyIdentity.label},
 		{"launchctl", "bootout", "gui/501/" + AgentLabel},
 		{"launchctl", "print", "gui/501/" + AgentLabel},
 	}, rec.calls)

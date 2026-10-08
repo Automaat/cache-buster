@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Automaat/cache-buster/internal/osshim"
+	"github.com/smykla-skalski/bilgie/internal/osshim"
 )
 
 const cleanWaitDelay = 5 * time.Second

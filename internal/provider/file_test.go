@@ -3,7 +3,7 @@ package provider
 import (
 	"testing"
 
-	"github.com/Automaat/cache-buster/internal/cache"
+	"github.com/smykla-skalski/bilgie/internal/cache"
 )
 
 func TestFormatResultWithErrors(t *testing.T) {

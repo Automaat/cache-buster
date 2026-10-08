@@ -1,20 +1,27 @@
-# cache-buster
+# bilgie
 
 Developer cache manager for macOS, Linux and Windows with configurable size limits. Monitors and cleans caches for Go, npm, Docker, Homebrew, and other dev tools.
 
 ## Project Structure
 
 ```
-cmd/cache-buster/     - CLI entrypoint
+cmd/bilgie/     - CLI entrypoint
 internal/
+  appname/            - Single source of the project name (Name) and its pre-rename value (Legacy)
   cache/              - Cache size scanning
   auto/               - Free-space tiers, auto run, per-OS scheduler (launchd, systemd/cron, schtasks), notifiers, first-run marker
   cli/                - Cobra command implementations (status, clean, config, auto, history, install-agent)
   config/             - Config loading, defaults, validation
+  migrate/            - First-run move of ~/.config and ~/.local/state dirs from the legacy name
   osshim/             - Per-OS shims (lock, process list, kill tree, open files, free space)
   provider/           - Provider interface + implementations (command, file, docker)
 pkg/size/             - Human-readable size parsing/formatting
 ```
+
+Names derived from the project name (binary, config and state dirs, launchd label, systemd unit,
+cron tag, Task Scheduler task, notifier title) come from `appname.Name`. The pre-rename values live
+in `appname.Legacy` and are used only by `migrate` and by the legacy cleanup in `install-agent` and
+`uninstall-agent`; never hardcode either name elsewhere.
 
 ## Tech Stack
 
@@ -32,9 +39,9 @@ pkg/size/             - Human-readable size parsing/formatting
 1. Create `internal/cli/{command}.go` with Cobra command
 2. Add flags in `init()` function
 3. Create `run{Command}WithLoader()` for testability
-4. Register in `cmd/cache-buster/main.go`
+4. Register in `cmd/bilgie/main.go`
 5. Add tests in `internal/cli/{command}_test.go`
-6. Test: `go run ./cmd/cache-buster {command} --help`
+6. Test: `go run ./cmd/bilgie {command} --help`
 
 ### Adding New Provider
 
@@ -90,7 +97,7 @@ type Provider interface {
 
 ### Config Structure
 
-Location: `~/.config/cache-buster/config.yaml`
+Location: `~/.config/bilgie/config.yaml`
 
 ```yaml
 version: "1"
@@ -142,11 +149,11 @@ Total: 6.6 GiB
 ### Clean Command
 
 ```bash
-cache-buster clean go-build npm  # specific providers
-cache-buster clean --all         # all enabled
-cache-buster clean --dry-run     # preview only
-cache-buster clean --force       # skip confirmation
-cache-buster clean --quiet       # minimal output
+bilgie clean go-build npm  # specific providers
+bilgie clean --all         # all enabled
+bilgie clean --dry-run     # preview only
+bilgie clean --force       # skip confirmation
+bilgie clean --quiet       # minimal output
 ```
 
 ## Quality Gates
@@ -155,14 +162,14 @@ Before committing:
 
 - [ ] `golangci-lint run` passes
 - [ ] `go test -race ./...` passes
-- [ ] `go build ./cmd/cache-buster` succeeds
+- [ ] `go build ./cmd/bilgie` succeeds
 - [ ] `mise run vuln` (govulncheck) reports no vulnerabilities
 - [ ] Manual test of changed commands
 
 ```bash
 golangci-lint run
 go test -race ./...
-go build -o cache-buster ./cmd/cache-buster
+go build -o bilgie ./cmd/bilgie
 mise run vuln
 ```
 
@@ -170,13 +177,13 @@ mise run vuln
 
 ```bash
 # Build and run
-go build -o cache-buster ./cmd/cache-buster
-./cache-buster status
-./cache-buster status --json
+go build -o bilgie ./cmd/bilgie
+./bilgie status
+./bilgie status --json
 
 # Development
-go run ./cmd/cache-buster status
-go run ./cmd/cache-buster clean --dry-run --all
+go run ./cmd/bilgie status
+go run ./cmd/bilgie clean --dry-run --all
 
 # Testing
 go test ./...
@@ -247,7 +254,7 @@ Output uses binary units: `GiB`, `MiB`, `KiB`, `B`
 
 Errors bubble up through commands and display to stderr:
 ```
-Error: load config: open ~/.config/cache-buster/config.yaml: no such file or directory
+Error: load config: open ~/.config/bilgie/config.yaml: no such file or directory
 ```
 
 Exit codes:

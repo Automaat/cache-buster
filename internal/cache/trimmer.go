@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Automaat/cache-buster/pkg/size"
+	"github.com/smykla-skalski/bilgie/pkg/size"
 )
 
 // TrimOptions configures cache trimming.

@@ -8,8 +8,8 @@ import (
 	"runtime"
 	"time"
 
-	"github.com/Automaat/cache-buster/internal/config"
-	"github.com/Automaat/cache-buster/pkg/size"
+	"github.com/smykla-skalski/bilgie/internal/config"
+	"github.com/smykla-skalski/bilgie/pkg/size"
 )
 
 // Notifier shows a desktop notification. It is the seam between the run
@@ -43,9 +43,9 @@ func NotifyIfStillLow(ctx context.Context, notify Notifier, report Report, cfg c
 	if err != nil || !low {
 		return false, err
 	}
-	msg := fmt.Sprintf("%s free of %s after cleanup. Run cache-buster status for large unmanaged directories.",
-		size.FormatSize(report.End.Free), size.FormatSize(report.End.Total))
-	if err := notify(ctx, "Disk space is low", msg); err != nil {
+	msg := fmt.Sprintf("%s free of %s after cleanup. Run %s status for large unmanaged directories.",
+		size.FormatSize(report.End.Free), size.FormatSize(report.End.Total), agentName)
+	if err := notify(ctx, agentName+": disk space is low", msg); err != nil {
 		return false, fmt.Errorf("send notification: %w", err)
 	}
 	return true, nil

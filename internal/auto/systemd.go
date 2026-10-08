@@ -24,12 +24,12 @@ func (a Agent) unitDir() string {
 
 // ServicePath is where the systemd user service definition lives.
 func (a Agent) ServicePath() string {
-	return filepath.Join(a.unitDir(), SystemdUnit+".service")
+	return filepath.Join(a.unitDir(), a.id().unit+".service")
 }
 
 // TimerPath is where the systemd user timer definition lives.
 func (a Agent) TimerPath() string {
-	return filepath.Join(a.unitDir(), SystemdUnit+".timer")
+	return filepath.Join(a.unitDir(), a.id().unit+".timer")
 }
 
 func (a Agent) systemctl(ctx context.Context, args ...string) ([]byte, error) {
@@ -86,7 +86,7 @@ func (a Agent) installSystemd(ctx context.Context) error {
 		return err
 	}
 
-	timerUnit := SystemdUnit + ".timer"
+	timerUnit := a.id().unit + ".timer"
 	for _, args := range [][]string{{"daemon-reload"}, {"enable", timerUnit}, {"restart", timerUnit}} {
 		if out, err := a.systemctl(ctx, args...); err != nil {
 			return fmt.Errorf("systemctl %s: %w: %s", args[0], err, strings.TrimSpace(string(out)))
@@ -105,7 +105,7 @@ func (a Agent) installSystemd(ctx context.Context) error {
 // error. With no user manager reachable and no unit files on disk there is
 // nothing of ours to disable, which is the cron-fallback case.
 func (a Agent) disableTimer(ctx context.Context, unitsOnDisk bool) error {
-	timerUnit := SystemdUnit + ".timer"
+	timerUnit := a.id().unit + ".timer"
 	out, err := a.systemctl(ctx, "disable", "--now", timerUnit)
 	if err == nil || binaryMissing(err) {
 		return nil
@@ -187,7 +187,7 @@ func RenderSystemdService(exe, home, logPath string) ([]byte, error) {
 	}
 	var b bytes.Buffer
 	fmt.Fprintf(&b, `[Unit]
-Description=cache-buster automatic cache cleanup
+Description=%s automatic cache cleanup
 
 [Service]
 Type=oneshot
@@ -197,7 +197,7 @@ Nice=10
 IOSchedulingClass=idle
 StandardOutput=append:%s
 StandardError=append:%s
-`, systemdQuote(exe), systemdEnvQuote("PATH="+systemdPath(home)), strings.ReplaceAll(logPath, "%", "%%"), strings.ReplaceAll(logPath, "%", "%%"))
+`, agentName, systemdQuote(exe), systemdEnvQuote("PATH="+systemdPath(home)), strings.ReplaceAll(logPath, "%", "%%"), strings.ReplaceAll(logPath, "%", "%%"))
 	return b.Bytes(), nil
 }
 
@@ -210,7 +210,7 @@ func RenderSystemdTimer(interval time.Duration) ([]byte, error) {
 	}
 	var b bytes.Buffer
 	fmt.Fprintf(&b, `[Unit]
-Description=Run cache-buster automatic cache cleanup every %s
+Description=Run %s automatic cache cleanup every %s
 
 [Timer]
 OnActiveSec=1min
@@ -220,6 +220,6 @@ Unit=%s.service
 
 [Install]
 WantedBy=timers.target
-`, interval, seconds, SystemdUnit)
+`, agentName, interval, seconds, SystemdUnit)
 	return b.Bytes(), nil
 }

@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Automaat/cache-buster/internal/auto"
-	"github.com/Automaat/cache-buster/internal/config"
-	"github.com/Automaat/cache-buster/internal/provider"
+	"github.com/smykla-skalski/bilgie/internal/auto"
+	"github.com/smykla-skalski/bilgie/internal/config"
+	"github.com/smykla-skalski/bilgie/internal/provider"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -69,7 +69,7 @@ providers:
 		out:      f.out,
 		stateDir: filepath.Join(home, "state"),
 		home:     home,
-		exe:      "/opt/homebrew/bin/cache-buster",
+		exe:      "/opt/homebrew/bin/bilgie",
 		uid:      501,
 		goos:     "darwin",
 	}
@@ -272,8 +272,9 @@ func TestInstallAgent_WritesPlistWithoutRealLaunchctl(t *testing.T) {
 	require.NoError(t, err)
 	assert.Contains(t, string(data), "<integer>3600</integer>")
 	assert.True(t, auto.FirstRunPending(f.env.stateDir))
-	require.Len(t, f.launchd, 2)
-	assert.Equal(t, "launchctl", f.launchd[0][0])
+	require.Len(t, f.launchd, 3)
+	assert.Equal(t, []string{"launchctl", "bootout", "gui/501/dev.mskalski.cache-buster"}, f.launchd[0])
+	assert.Equal(t, []string{"launchctl", "bootout", "gui/501/" + auto.AgentLabel}, f.launchd[1])
 }
 
 func TestInstallAgent_RejectsTooShortInterval(t *testing.T) {
@@ -294,7 +295,10 @@ func TestUninstallAgent_RemovesPlist(t *testing.T) {
 
 	assert.NoFileExists(t, filepath.Join(f.home, "Library", "LaunchAgents", auto.AgentLabel+".plist"))
 	assert.False(t, auto.FirstRunPending(f.env.stateDir))
-	assert.Equal(t, [][]string{{"launchctl", "bootout", "gui/501/" + auto.AgentLabel}}, f.launchd)
+	assert.Equal(t, [][]string{
+		{"launchctl", "bootout", "gui/501/dev.mskalski.cache-buster"},
+		{"launchctl", "bootout", "gui/501/" + auto.AgentLabel},
+	}, f.launchd)
 }
 
 func TestAssumedFree(t *testing.T) {
@@ -318,7 +322,9 @@ func TestInstallAgent_PicksTheBackendOfTheOS(t *testing.T) {
 		wantCmds [][]string
 		wantFile func(home, state string) string
 	}{
-		{"linux", "/usr/local/bin/cache-buster", [][]string{
+		{"linux", "/usr/local/bin/bilgie", [][]string{
+			{"systemctl", "--user", "disable", "--now", "cache-buster.timer"},
+			{"crontab", "-l"},
 			{"systemctl", "--user", "show-environment"},
 			{"systemctl", "--user", "daemon-reload"},
 			{"systemctl", "--user", "enable", auto.SystemdUnit + ".timer"},
@@ -327,7 +333,7 @@ func TestInstallAgent_PicksTheBackendOfTheOS(t *testing.T) {
 		}, func(home, _ string) string {
 			return filepath.Join(home, ".config", "systemd", "user", auto.SystemdUnit+".timer")
 		}},
-		{"windows", `C:\bin\cache-buster.exe`, nil, func(_, state string) string {
+		{"windows", `C:\bin\bilgie.exe`, nil, func(_, state string) string {
 			return filepath.Join(state, auto.TaskName+"-task.xml")
 		}},
 	}
@@ -344,8 +350,9 @@ func TestInstallAgent_PicksTheBackendOfTheOS(t *testing.T) {
 			if tt.wantCmds != nil {
 				assert.Equal(t, tt.wantCmds, f.launchd)
 			} else {
-				require.Len(t, f.launchd, 1)
-				assert.Equal(t, "schtasks", f.launchd[0][0])
+				require.Len(t, f.launchd, 2)
+				assert.Equal(t, []string{"schtasks", "/Delete", "/TN", "cache-buster", "/F"}, f.launchd[0])
+				assert.Equal(t, "schtasks", f.launchd[1][0])
 			}
 
 			f.launchd = nil
@@ -386,7 +393,7 @@ func TestUserConfigDir_HonoursAbsoluteXDGConfigHome(t *testing.T) {
 func TestInstallAgent_WritesSystemdUnitsUnderTheConfigDir(t *testing.T) {
 	f := newAutoFixture(t, 100*autoGiB, "")
 	f.env.goos = "linux"
-	f.env.exe = "/usr/local/bin/cache-buster"
+	f.env.exe = "/usr/local/bin/bilgie"
 	f.env.configDir = filepath.Join(f.home, "xdg")
 
 	require.NoError(t, runInstallAgentWithLoader(t.Context(), f.loader, f.env))

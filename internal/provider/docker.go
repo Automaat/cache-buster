@@ -9,9 +9,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Automaat/cache-buster/internal/config"
-	"github.com/Automaat/cache-buster/pkg/size"
 	"github.com/kballard/go-shellquote"
+	"github.com/smykla-skalski/bilgie/internal/config"
+	"github.com/smykla-skalski/bilgie/pkg/size"
 )
 
 // DockerProvider cleans Docker caches when daemon is available.

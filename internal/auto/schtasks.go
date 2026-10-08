@@ -17,7 +17,7 @@ const taskStartDelay = time.Minute
 
 // TaskXMLPath is where the Task Scheduler definition is kept on disk.
 func (a Agent) TaskXMLPath() string {
-	return filepath.Join(a.StateDir, TaskName+"-task.xml")
+	return filepath.Join(a.StateDir, a.id().task+"-task.xml")
 }
 
 func (a Agent) installTask(ctx context.Context) error {
@@ -28,11 +28,11 @@ func (a Agent) installTask(ctx context.Context) error {
 	if err := writeFileAtomic(a.TaskXMLPath(), EncodeTaskXML(definition)); err != nil {
 		return err
 	}
-	out, err := a.Exec(ctx, "schtasks", "/Create", "/TN", TaskName, "/XML", a.TaskXMLPath(), "/F")
+	out, err := a.Exec(ctx, "schtasks", "/Create", "/TN", a.id().task, "/XML", a.TaskXMLPath(), "/F")
 	if err != nil {
 		return fmt.Errorf("schtasks create: %w: %s", err, strings.TrimSpace(string(out)))
 	}
-	fmt.Fprintf(a.Out, "installed task %s (every %s)\n", TaskName, a.Interval)
+	fmt.Fprintf(a.Out, "installed task %s (every %s)\n", a.id().task, a.Interval)
 	return nil
 }
 
@@ -52,7 +52,7 @@ func (a Agent) taskExists(ctx context.Context) (bool, error) {
 		return false, fmt.Errorf("parse schtasks query: %w", err)
 	}
 	for _, rec := range records {
-		if len(rec) > 0 && strings.EqualFold(strings.TrimPrefix(rec[0], `\`), TaskName) {
+		if len(rec) > 0 && strings.EqualFold(strings.TrimPrefix(rec[0], `\`), a.id().task) {
 			return true, nil
 		}
 	}
@@ -63,7 +63,7 @@ func (a Agent) taskExists(ctx context.Context) (bool, error) {
 // caller wants; when the delete fails, a successful listing without the task
 // confirms it is absent and anything else keeps the delete error.
 func (a Agent) deleteTask(ctx context.Context) (bool, error) {
-	out, err := a.Exec(ctx, "schtasks", "/Delete", "/TN", TaskName, "/F")
+	out, err := a.Exec(ctx, "schtasks", "/Delete", "/TN", a.id().task, "/F")
 	if err == nil {
 		return true, nil
 	}
@@ -88,7 +88,7 @@ func (a Agent) uninstallTask(ctx context.Context) (bool, error) {
 		return false, fmt.Errorf("remove task definition: %w", err)
 	}
 	if deleted {
-		fmt.Fprintf(a.Out, "removed task %s\n", TaskName)
+		fmt.Fprintf(a.Out, "removed task %s\n", a.id().task)
 	}
 	return deleted || fileRemoved, nil
 }
@@ -128,7 +128,7 @@ func RenderTaskXML(exe string, interval time.Duration, start time.Time) (string,
 	return fmt.Sprintf(`<?xml version="1.0" encoding="UTF-16"?>
 <Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
   <RegistrationInfo>
-    <Description>cache-buster automatic cache cleanup</Description>
+    <Description>%s automatic cache cleanup</Description>
   </RegistrationInfo>
   <Triggers>
     <TimeTrigger>
@@ -164,7 +164,7 @@ func RenderTaskXML(exe string, interval time.Duration, start time.Time) (string,
     </Exec>
   </Actions>
 </Task>
-`, repeat, start.Format("2006-01-02T15:04:05"), xmlText(exe)), nil
+`, agentName, repeat, start.Format("2006-01-02T15:04:05"), xmlText(exe)), nil
 }
 
 // EncodeTaskXML converts the definition to the UTF-16 little-endian text

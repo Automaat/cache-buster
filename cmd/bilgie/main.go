@@ -4,20 +4,24 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/Automaat/cache-buster/internal/cli"
-	"github.com/Automaat/cache-buster/internal/config"
+	"github.com/smykla-skalski/bilgie/internal/appname"
+	"github.com/smykla-skalski/bilgie/internal/cli"
+	"github.com/smykla-skalski/bilgie/internal/config"
 	"github.com/spf13/cobra"
 )
 
 var version = "dev"
 
 var rootCmd = &cobra.Command{
-	Use:     "cache-buster",
+	Use:     appname.Name,
 	Version: version,
-	Short:   "macOS developer cache manager with size limits",
-	Long:    `A CLI tool to manage developer caches on macOS with configurable size limits.`,
-	Args:    cobra.NoArgs,
-	RunE:    runRoot,
+	Short:   "Developer cache manager that keeps free disk space in check",
+	Long: `Bilgie works like a bilge pump with a float switch: it idles while free space is above the
+configured level, pumps caches out below it and sweeps hard at the critical level.
+It manages developer caches on macOS, Linux and Windows with configurable size limits.`,
+	Args:              cobra.NoArgs,
+	PersistentPreRunE: func(*cobra.Command, []string) error { cli.MigrateLegacy(os.Stderr); return nil },
+	RunE:              runRoot,
 }
 
 func runRoot(_ *cobra.Command, _ []string) error {
