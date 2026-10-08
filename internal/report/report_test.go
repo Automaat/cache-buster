@@ -9,6 +9,7 @@ import (
 
 	"github.com/smykla-skalski/bilgie/internal/provider"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func entries(sizes ...int64) []provider.Entry {
@@ -24,6 +25,7 @@ func TestLargest(t *testing.T) {
 	snapshot := append([]provider.Entry(nil), in...)
 
 	got := Largest(in, 5)
+	require.Len(t, got, 5)
 
 	var sizes []int64
 	for _, e := range got {
