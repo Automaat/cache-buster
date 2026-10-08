@@ -174,6 +174,7 @@ func (g *busyGuard) busyReason(ctx context.Context) string {
 var toolAliases = map[string]string{
 	"uvx": "uv",
 	"org.gradle.launcher.daemon.bootstrap.GradleDaemon": "gradle",
+	"org.gradle.launcher.daemon.bootstrap.gradledaemon": "gradle",
 }
 
 // matchProcess reports which wanted tool a process command line involves.

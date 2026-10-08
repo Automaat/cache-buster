@@ -645,3 +645,33 @@ func TestTreeProvider_TreesStayWhileUnderMaxSizeEvenAboveBuffer(t *testing.T) {
 
 	assert.DirExists(t, filepath.Join(root, "_npx", "a"))
 }
+
+func TestMatchProcess_GradleDaemonLowercasedOnWindows(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("windows lowercases process tokens")
+	}
+	line := "java.exe -cp x.jar org.gradle.launcher.daemon.bootstrap.GradleDaemon 8.5"
+	assert.Equal(t, "gradle", matchProcess(line, busyProcesses["gradle"]))
+}
+
+func TestTreeProvider_GoModSymlinkedRootStillEvicts(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink creation needs privileges on windows")
+	}
+	real := t.TempDir()
+	link := filepath.Join(t.TempDir(), "mod")
+	require.NoError(t, os.Symlink(real, link))
+	oldMod := filepath.Join(real, "github.com", "a", "b@v1.0.0")
+	newMod := filepath.Join(real, "github.com", "a", "b@v1.1.0")
+	writeAged(t, filepath.Join(oldMod, "go.mod"), 100, 90*day)
+	writeAged(t, filepath.Join(newMod, "go.mod"), 100, 80*day)
+	ageAll(t, oldMod, 90*day)
+	ageAll(t, newMod, 80*day)
+	p := newTree(t, "go-mod", config.Provider{Paths: []string{link}, MaxSize: "1", MaxAge: "30d"})
+
+	_, err := p.Clean(context.Background(), CleanOptions{Mode: CleanModeSmart})
+	require.NoError(t, err)
+
+	assert.NoDirExists(t, oldMod)
+	assert.DirExists(t, newMod)
+}

@@ -487,27 +487,40 @@ func matchEntries(root string, segs []string) (matches, junk []string) {
 // leaving the top-level cache directory (download archives) alone.
 func moduleEntries(root string) (matches, junk []string) {
 	root = filepath.Clean(root)
-	_ = filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
+	walkRoot := root
+	if info, err := os.Lstat(root); err == nil && info.Mode()&fs.ModeSymlink != 0 {
+		if resolved, evalErr := filepath.EvalSymlinks(root); evalErr == nil {
+			walkRoot = resolved
+		}
+	}
+	atConfigured := func(p string) string {
+		rel, err := filepath.Rel(walkRoot, p)
+		if err != nil {
+			return p
+		}
+		return filepath.Join(root, rel)
+	}
+	_ = filepath.WalkDir(walkRoot, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
 			if d != nil && d.IsDir() {
 				return fs.SkipDir
 			}
 			return nil
 		}
-		if p == root || !d.IsDir() {
+		if p == walkRoot || !d.IsDir() {
 			return nil
 		}
 		name := d.Name()
 		switch {
 		case strings.HasPrefix(name, trashPrefix):
-			junk = append(junk, p)
+			junk = append(junk, atConfigured(p))
 			return fs.SkipDir
 		case strings.HasPrefix(name, "."):
 			return fs.SkipDir
-		case name == "cache" && filepath.Dir(p) == filepath.Clean(root):
+		case name == "cache" && filepath.Dir(p) == walkRoot:
 			return fs.SkipDir
 		case strings.Contains(name, "@"):
-			matches = append(matches, p)
+			matches = append(matches, atConfigured(p))
 			return fs.SkipDir
 		}
 		return nil
