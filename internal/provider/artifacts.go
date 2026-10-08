@@ -233,7 +233,9 @@ func (p *ProjectArtifactsProvider) Clean(ctx context.Context, opts CleanOptions)
 			reason = p.finalReason(ctx, c)
 		}
 		if reason == "" {
-			pass.procs, pass.procsErr = p.processes(ctx)
+			if !opts.DryRun {
+				pass.procs, pass.procsErr = p.processes(ctx)
+			}
 			reason = pass.busyReason(c)
 		}
 		if err := ctx.Err(); err != nil {
@@ -246,8 +248,7 @@ func (p *ProjectArtifactsProvider) Clean(ctx context.Context, opts CleanOptions)
 
 		detail := c.detail(p.now())
 		if !opts.DryRun {
-			trash, gone, rmErr := removeAside(c.art.Path)
-			p.settleProject(c.proj)
+			gone, partial, rmErr := p.removeCandidate(ctx, c)
 			switch {
 			case !gone:
 				skipLine(&out, &result, c, "cannot rename aside: "+rmErr.Error())
@@ -255,13 +256,11 @@ func (p *ProjectArtifactsProvider) Clean(ctx context.Context, opts CleanOptions)
 			case rmErr != nil:
 				errs = append(errs, fmt.Errorf("remove %s: %w", c.art.Path, rmErr))
 				fmt.Fprintf(&out, "error: %s (%v)\n", c.art.Path, rmErr)
-				left, leftFiles, _ := measureTree(ctx, trash)
-				bytesGone, filesGone := max(c.art.Size-left, 0), max(c.art.Files-leftFiles, 0)
-				freed += bytesGone
-				result.BytesCleaned += bytesGone
-				result.FilesDeleted += filesGone
-				if bytesGone > 0 || filesGone > 0 {
-					result.Entries = append(result.Entries, Entry{Path: c.art.Path, Size: bytesGone, Detail: detail + ", partly removed"})
+				freed += partial.bytes
+				result.BytesCleaned += partial.bytes
+				result.FilesDeleted += partial.files
+				if partial.bytes > 0 || partial.files > 0 {
+					result.Entries = append(result.Entries, Entry{Path: c.art.Path, Size: partial.bytes, Detail: detail + ", partly removed"})
 				}
 				continue
 			}
@@ -278,6 +277,21 @@ func (p *ProjectArtifactsProvider) Clean(ctx context.Context, opts CleanOptions)
 	}
 
 	return finish(errors.Join(errs...))
+}
+
+type removedPart struct{ bytes, files int64 }
+
+// removeCandidate renames the artifact aside and deletes it. When the delete
+// fails after the rename, partial says how much did go, measured from what is
+// left in the trash directory.
+func (p *ProjectArtifactsProvider) removeCandidate(ctx context.Context, c *candidate) (gone bool, partial removedPart, err error) {
+	trash, gone, err := removeAside(c.art.Path)
+	p.settleProject(c.proj)
+	if !gone || err == nil {
+		return gone, partial, err
+	}
+	left, leftFiles, _ := measureTree(ctx, trash)
+	return true, removedPart{bytes: max(c.art.Size-left, 0), files: max(c.art.Files-leftFiles, 0)}, err
 }
 
 func (p *ProjectArtifactsProvider) satisfied(opts CleanOptions, left, freed int64) bool {

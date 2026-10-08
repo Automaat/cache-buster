@@ -672,3 +672,19 @@ func TestProjectArtifacts_SnapshotAgeStartsWhenTheListingStarts(t *testing.T) {
 
 	assert.Equal(t, 2, calls, "a listing that outlasts the TTL is not reused")
 }
+
+func TestProjectArtifacts_DryRunListsProcessesOnce(t *testing.T) {
+	h := newArtifactHarness(t, nil)
+	for i := range 30 {
+		nodeProject(t, h.path(fmt.Sprintf("p%02d", i)), 10, 90*day)
+	}
+	calls := 0
+	h.p.processes = func(context.Context) ([]toolProcess, error) {
+		calls++
+		return nil, nil
+	}
+
+	h.clean(CleanOptions{DryRun: true, Mode: CleanModeFull})
+
+	assert.Equal(t, 1, calls)
+}
