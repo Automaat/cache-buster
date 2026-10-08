@@ -136,7 +136,13 @@ type invocation struct {
 }
 
 func newInvocation(text string, windows bool) invocation {
-	fields := strings.Fields(normalizeSeparators(text, windows))
+	norm := normalizeSeparators(text, windows)
+	fields := strings.Fields(norm)
+	if windows {
+		if flat, ok := flattenCommand(norm, 0); ok {
+			fields = flat
+		}
+	}
 	if len(fields) < 2 {
 		return invocation{}
 	}
@@ -175,7 +181,7 @@ const maxWrapperDepth = 8
 // flattenCommand splits text with shell quoting rules and splits every token
 // that still holds whitespace again, so nested "sh -c" strings and quoted
 // paths with spaces reduce to the whitespace-separated words a process listing
-// shows. It reports false when any level does not parse.
+// shows, with shell operators glued to a word trimmed off. It reports false when any level does not parse.
 func flattenCommand(text string, depth int) ([]string, bool) {
 	if depth > maxWrapperDepth {
 		return nil, false
@@ -187,8 +193,8 @@ func flattenCommand(text string, depth int) ([]string, bool) {
 	var out []string
 	for _, w := range words {
 		if len(strings.Fields(w)) <= 1 {
-			if w != "" {
-				out = append(out, strings.TrimSpace(w))
+			if t := strings.Trim(w, " \t\n;&|()"); t != "" {
+				out = append(out, t)
 			}
 			continue
 		}
