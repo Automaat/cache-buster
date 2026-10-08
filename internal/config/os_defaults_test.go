@@ -392,9 +392,11 @@ providers:
 		platform Platform
 		want     string
 	}{
-		"linux":                         {linPlatform, filepath.Join("/tmp", "sail*")},
-		"windows":                       {winPlatform, filepath.Join(`C:\Temp`, "sail*")},
-		"macOS keeps the explicit path": {macPlatform, "/private/tmp/sail*"},
+		"linux":   {linPlatform, filepath.Join("/tmp", "sail*")},
+		"windows": {winPlatform, filepath.Join(`C:\Temp`, "sail*")},
+		"macOS keeps the explicit path": {
+			Platform{OS: OSDarwin, Home: "/Users/u", TempDir: "/var/folders/ab/cd/T"}, "/private/tmp/sail*",
+		},
 	}
 	for name, tt := range tests {
 		t.Run(name, func(t *testing.T) {
