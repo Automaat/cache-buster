@@ -51,6 +51,7 @@ func (p *EntryProvider) Clean(ctx context.Context, opts CleanOptions) (CleanResu
 	var (
 		freed   int64
 		removed int64
+		failed  int
 		output  strings.Builder
 	)
 	for i, e := range entries {
@@ -65,6 +66,7 @@ func (p *EntryProvider) Clean(ctx context.Context, opts CleanOptions) (CleanResu
 			fmt.Fprintf(&output, "would remove: %s (%s)\n", e.path, size.FormatSize(e.size))
 		} else if err := os.RemoveAll(e.path); err != nil {
 			fmt.Fprintf(&output, "error removing %s: %v\n", e.path, err)
+			failed++
 			continue
 		}
 		freed += e.size
@@ -72,6 +74,10 @@ func (p *EntryProvider) Clean(ctx context.Context, opts CleanOptions) (CleanResu
 	}
 
 	res := CleanResult{BytesCleaned: freed, FilesDeleted: removed}
+	if failed > 0 {
+		res.Output = strings.TrimSpace(output.String())
+		return res, fmt.Errorf("%d entries could not be removed", failed)
+	}
 	switch {
 	case opts.DryRun:
 		res.Output = strings.TrimSpace(output.String())

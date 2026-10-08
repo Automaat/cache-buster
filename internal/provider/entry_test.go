@@ -104,3 +104,18 @@ func TestEntryProvider_KeepsNewestEntryOverLimit(t *testing.T) {
 	require.NoError(t, err)
 	assert.DirExists(t, only)
 }
+
+func TestEntryProvider_RemovalFailureIsAnError(t *testing.T) {
+	root := t.TempDir()
+	makeEntry(t, root, "old", 2048, 48*time.Hour)
+	makeEntry(t, root, "new", 10, time.Hour)
+	require.NoError(t, os.Chmod(root, 0o500))
+	t.Cleanup(func() { _ = os.Chmod(root, 0o700) })
+
+	res, err := newEntryProvider(t, root, "1K", "").Clean(context.Background(), CleanOptions{})
+	if err == nil {
+		t.Skip("removal succeeded despite read-only parent (running as root?)")
+	}
+	assert.Contains(t, res.Output, "error removing")
+	assert.Equal(t, int64(0), res.BytesCleaned)
+}

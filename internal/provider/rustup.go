@@ -5,7 +5,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
@@ -59,6 +61,17 @@ func execRustup(ctx context.Context, args ...string) (string, error) {
 	return strings.TrimSpace(stdout.String()), nil
 }
 
+// ownsRustupHome reports whether home is the directory holding a configured
+// toolchains path, so measured size and rustup's own view agree.
+func (p *RustupProvider) ownsRustupHome(home string) bool {
+	for _, path := range p.paths {
+		if filepath.Clean(filepath.Dir(path)) == filepath.Clean(home) {
+			return true
+		}
+	}
+	return false
+}
+
 func (p *RustupProvider) runBounded(ctx context.Context, args ...string) (string, error) {
 	if p.timeout > 0 {
 		var cancel context.CancelFunc
@@ -79,6 +92,10 @@ func (p *RustupProvider) Available() bool {
 func (p *RustupProvider) Clean(ctx context.Context, opts CleanOptions) (CleanResult, error) {
 	if skipped, ok := p.skipIfBusy(ctx); ok {
 		return skipped, nil
+	}
+
+	if home := os.Getenv("RUSTUP_HOME"); home != "" && !p.ownsRustupHome(home) {
+		return CleanResult{}, fmt.Errorf("RUSTUP_HOME %q is not the parent of the configured paths", home)
 	}
 
 	current, sizeErr := p.CurrentSize(ctx)

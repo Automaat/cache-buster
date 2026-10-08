@@ -266,3 +266,17 @@ func TestRustupProvider_UnmeasurableSizeRemovesNothing(t *testing.T) {
 	}
 	assert.Empty(t, f.calls)
 }
+
+func TestRustupProvider_ForeignRustupHomeRemovesNothing(t *testing.T) {
+	f := &fakeRustup{list: rustupListing}
+	p := newFakeRustupProvider(t, f)
+
+	t.Setenv("RUSTUP_HOME", t.TempDir())
+	_, err := p.Clean(context.Background(), CleanOptions{})
+	require.Error(t, err)
+	assert.Empty(t, f.calls)
+
+	t.Setenv("RUSTUP_HOME", filepath.Dir(p.paths[0]))
+	_, err = p.Clean(context.Background(), CleanOptions{DryRun: true})
+	require.NoError(t, err)
+}
