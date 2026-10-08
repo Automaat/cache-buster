@@ -139,7 +139,7 @@ type Provider struct {
 	CleanCmd string `mapstructure:"clean_cmd" yaml:"clean_cmd,omitempty"`
 	// CleanTimeout bounds the clean command (default 2m); a hung command is cancelled.
 	CleanTimeout string   `mapstructure:"clean_timeout" yaml:"clean_timeout,omitempty"`
-	Paths        []string `mapstructure:"paths" yaml:"paths"`
+	Paths        []string `mapstructure:"paths" yaml:"paths,omitempty"`
 	Enabled      bool     `mapstructure:"enabled" yaml:"enabled"`
 
 	// Type selects a special provider implementation (see TypeDirPattern).

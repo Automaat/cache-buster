@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -212,15 +213,49 @@ func TestLoader_DefaultsFollowInjectedPlatform(t *testing.T) {
 	assert.NotContains(t, cfg.Providers, "homebrew")
 }
 
-func TestExpandTilde_BackslashSeparator(t *testing.T) {
+func TestExpandTilde_BackslashSeparatorOnlyOnWindows(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
+	in := `~\AppData\Local\go-build`
 
-	got, err := ExpandTilde(`~\AppData\Local\go-build`)
+	got, err := ExpandTilde(in)
 
 	require.NoError(t, err)
-	assert.Equal(t, filepath.Join(home, "AppData", "Local", "go-build"), got)
+	if runtime.GOOS == "windows" {
+		assert.Equal(t, filepath.Join(home, "AppData", "Local", "go-build"), got)
+		return
+	}
+	assert.Equal(t, in, got, "a backslash is an ordinary character off Windows")
+}
+
+func TestLoader_SavedConfigResolvesDefaultsOnTheLoadingOS(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	mac := macPlatform
+	mac.TempDir = "/var/folders/ab/cd/T"
+	saver := NewLoader()
+	saver.SetConfigPath(path)
+	saver.SetPlatform(mac)
+	cfg := DefaultConfigFor(mac)
+	custom := cfg.Providers["npm"]
+	custom.MaxSize = "9G"
+	cfg.Providers["npm"] = custom
+	require.NoError(t, saver.Save(cfg))
+
+	raw, err := os.ReadFile(path)
+	require.NoError(t, err)
+	assert.NotContains(t, string(raw), "/var/folders", "machine specific defaults stay out of the file")
+	assert.NotContains(t, string(raw), "Library/Caches")
+
+	loader := NewLoader()
+	loader.SetConfigPath(path)
+	loader.SetPlatform(linPlatform)
+	loaded, err := loader.Load()
+	require.NoError(t, err)
+
+	assert.Equal(t, []string{filepath.Join("/tmp", "sail*")}, loaded.Providers["sail-dirs"].Paths)
+	assert.Equal(t, []string{"~/.cache/go-build"}, loaded.Providers["go-build"].Paths)
+	assert.Equal(t, "9G", loaded.Providers["npm"].MaxSize)
 }
 
 func TestIsAbsPortable(t *testing.T) {

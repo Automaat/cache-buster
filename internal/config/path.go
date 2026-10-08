@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 )
 
@@ -27,7 +28,10 @@ func ExpandTilde(path string) (string, error) {
 		return home, nil
 	}
 
-	if strings.HasPrefix(path, "~/") || strings.HasPrefix(path, `~\`) {
+	if strings.HasPrefix(path, "~/") {
+		return filepath.Join(home, filepath.FromSlash(path[2:])), nil
+	}
+	if runtime.GOOS == "windows" && strings.HasPrefix(path, `~\`) {
 		return filepath.Join(home, filepath.FromSlash(strings.ReplaceAll(path[2:], `\`, "/"))), nil
 	}
 

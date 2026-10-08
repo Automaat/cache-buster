@@ -172,7 +172,7 @@ func (l *Loader) Save(cfg *Config) error {
 
 	for key, value := range map[string]any{
 		"version":   cfg.Version,
-		"providers": cfg.Providers,
+		"providers": l.portableProviders(cfg.Providers),
 	} {
 		l.v.Set(key, value)
 	}
@@ -245,4 +245,20 @@ func (l *Loader) isForeignDefault(name string, paths []string) bool {
 		}
 	}
 	return false
+}
+
+// portableProviders drops paths that equal this OS's built-in defaults, some
+// of which are machine specific (temp dir, XDG roots), so the saved file
+// resolves to the right defaults on whichever OS loads it.
+func (l *Loader) portableProviders(providers map[string]Provider) map[string]Provider {
+	defaults := DefaultProvidersFor(l.platform)
+	out := make(map[string]Provider, len(providers))
+	for name := range providers {
+		p := providers[name]
+		if def, ok := defaults[name]; ok && slices.Equal(p.Paths, def.Paths) {
+			p.Paths = nil
+		}
+		out[name] = p
+	}
+	return out
 }
