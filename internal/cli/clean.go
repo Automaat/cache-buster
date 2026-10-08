@@ -90,17 +90,24 @@ func runCleanWithContext(newCtx func() (context.Context, context.CancelFunc), lo
 	if len(providers) == 0 {
 		if opts.json {
 			results := make([]ProviderCleanResult, 0, len(unavailable))
-			for _, name := range unavailable {
-				results = append(results, ProviderCleanResult{Name: name, Status: statusUnavailable})
+			for _, u := range unavailable {
+				results = append(results, ProviderCleanResult{Name: u.Name, Status: statusUnavailable, Reason: u.Reason})
 			}
 			_ = finishClean(results, 0, opts, nil, false)
+		}
+		if len(unavailable) > 0 {
+			details := make([]string, len(unavailable))
+			for i, u := range unavailable {
+				details[i] = u.String()
+			}
+			return fmt.Errorf("no available providers to clean: %s", strings.Join(details, ", "))
 		}
 		return fmt.Errorf("no available providers to clean")
 	}
 
-	for _, name := range unavailable {
+	for _, u := range unavailable {
 		if !quiet && !opts.json {
-			fmt.Fprintf(os.Stderr, "Skipping %s: unavailable\n", name)
+			fmt.Fprintf(os.Stderr, "Skipping %s: %s\n", u.Name, u.Reason)
 		}
 	}
 
@@ -161,16 +168,29 @@ func resolveProviders(cfg *config.Config, args []string, allFlag, smart bool) ([
 	return args, nil
 }
 
-func loadAndFilterProviders(cfg *config.Config, names []string) (providers []provider.Provider, unavailable []string) {
+// unavailableProvider is a provider that could not be loaded or is not installed.
+type unavailableProvider struct {
+	Name   string
+	Reason string
+}
+
+func (u unavailableProvider) String() string {
+	if u.Reason == "" {
+		return u.Name
+	}
+	return fmt.Sprintf("%s (%s)", u.Name, u.Reason)
+}
+
+func loadAndFilterProviders(cfg *config.Config, names []string) (providers []provider.Provider, unavailable []unavailableProvider) {
 	for _, name := range names {
 		p, err := provider.LoadProvider(name, cfg)
 		if err != nil {
-			unavailable = append(unavailable, fmt.Sprintf("%s (load error: %v)", name, err))
+			unavailable = append(unavailable, unavailableProvider{Name: name, Reason: fmt.Sprintf("load error: %v", err)})
 			continue
 		}
 
 		if !p.Available() {
-			unavailable = append(unavailable, name)
+			unavailable = append(unavailable, unavailableProvider{Name: name, Reason: "unavailable"})
 			continue
 		}
 
@@ -226,12 +246,13 @@ const (
 	statusSkipped     = "skipped"
 	statusError       = "error"
 	statusUnavailable = "unavailable"
+	statusCancelled   = "cancelled"
 )
 
 func executeClean(
 	ctx context.Context,
 	providers []provider.Provider,
-	unavailable []string,
+	unavailable []unavailableProvider,
 	opts cleanOptions,
 	mode provider.CleanMode,
 ) error {
@@ -241,8 +262,8 @@ func executeClean(
 	var errors []string
 	results := make([]ProviderCleanResult, 0, len(providers)+len(unavailable))
 
-	for _, name := range unavailable {
-		results = append(results, ProviderCleanResult{Name: name, Status: statusUnavailable})
+	for _, u := range unavailable {
+		results = append(results, ProviderCleanResult{Name: u.Name, Status: statusUnavailable, Reason: u.Reason})
 	}
 
 	for _, p := range providers {
@@ -263,6 +284,13 @@ func executeClean(
 		totalCleaned += result.BytesCleaned
 		if err != nil && ctx.Err() != nil {
 			// An interrupt killed the command; report it like any other cancel.
+			results = append(results, ProviderCleanResult{
+				Name:       p.Name(),
+				Status:     statusCancelled,
+				Output:     strings.TrimSpace(result.Output),
+				Freed:      size.FormatSize(result.BytesCleaned),
+				FreedBytes: result.BytesCleaned,
+			})
 			if !quiet && text {
 				fmt.Println("error")
 				fmt.Println("\nCancelled")

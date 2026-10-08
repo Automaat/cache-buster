@@ -206,7 +206,9 @@ func TestNewBusyGuard(t *testing.T) {
 	assert.Equal(t, []string{"/a/.lock", "/b/.lock"}, uv.locks)
 	assert.Equal(t, []string{"uv"}, uv.processes)
 
-	assert.Equal(t, []string{"cargo", "rustc"}, newBusyGuard("cargo", nil).processes)
+	cargo := newBusyGuard("cargo", nil)
+	require.NotNil(t, cargo)
+	assert.Equal(t, []string{"cargo", "rustc"}, cargo.processes)
 }
 
 func TestCommandProvider_CleanTimeout(t *testing.T) {

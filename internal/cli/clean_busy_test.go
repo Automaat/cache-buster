@@ -166,7 +166,26 @@ providers:
 	var got CleanOutput
 	require.NoError(t, json.Unmarshal([]byte(output), &got), output)
 	require.Len(t, got.Providers, 1)
+	assert.Equal(t, "ghost", got.Providers[0].Name)
 	assert.Equal(t, statusUnavailable, got.Providers[0].Status)
+	assert.Contains(t, err.Error(), "ghost")
+}
+
+func TestClean_LoadErrorNamesProviderAndCause(t *testing.T) {
+	loader, _ := busyUVLoader(t, `  badtimeout:
+    enabled: true
+    paths:
+      - `+t.TempDir()+`
+    max_size: 1GB
+    clean_cmd: "echo x"
+    clean_timeout: abc
+`)
+
+	err := runCleanWithOptions(loader, []string{"badtimeout"}, cleanOptions{force: true, dryRun: true}, os.Stdin)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "badtimeout")
+	assert.Contains(t, err.Error(), "clean_timeout")
 }
 
 func TestClean_InterruptedCleanIsNotAnErrorInJSON(t *testing.T) {
@@ -190,4 +209,7 @@ func TestClean_InterruptedCleanIsNotAnErrorInJSON(t *testing.T) {
 	var got CleanOutput
 	require.NoError(t, json.Unmarshal([]byte(output), &got), output)
 	assert.True(t, got.Cancelled)
+	require.Len(t, got.Providers, 1)
+	assert.Equal(t, "slow", got.Providers[0].Name)
+	assert.Equal(t, statusCancelled, got.Providers[0].Status)
 }

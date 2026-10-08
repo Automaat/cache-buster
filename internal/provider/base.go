@@ -48,7 +48,7 @@ func NewBaseProvider(name string, cfg config.Provider) (*BaseProvider, error) {
 // skipIfBusy returns a skipped result when the provider's tool is active.
 func (b *BaseProvider) skipIfBusy(ctx context.Context) (CleanResult, bool) {
 	reason := b.busy.busyReason(ctx)
-	if reason == "" {
+	if reason == "" || ctx.Err() != nil {
 		return CleanResult{}, false
 	}
 	return CleanResult{SkipReason: reason, Output: "skipped: " + reason}, true
