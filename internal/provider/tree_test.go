@@ -47,6 +47,8 @@ func makePackage(t *testing.T, dir string, n int, age time.Duration) {
 	ageAll(t, dir, age)
 }
 
+const fakeVerifyTool = "bilgie-fake-verify"
+
 func newTree(t *testing.T, name string, cfg config.Provider) *TreeProvider {
 	t.Helper()
 	spec, ok := treeSpecs[name]
@@ -537,12 +539,13 @@ func TestTreeProvider_XcodeBundlesAreWholeEntries(t *testing.T) {
 
 func TestTreeProvider_VerifyRunsAfterFileTrim(t *testing.T) {
 	root, _ := npxFixture(t)
-	installFakeTool(t, "npm", fakeToolSpec{Default: fakeReply{Stdout: "verified\n"}})
+	installFakeTool(t, fakeVerifyTool, fakeToolSpec{Default: fakeReply{Stdout: "verified\n"}})
 	p := newTree(t, "npm", config.Provider{Paths: []string{root}, MaxSize: "1G", MaxAge: "30d"})
+	p.spec.verify = []string{fakeVerifyTool, "cache", "verify"}
 
 	res, err := p.Clean(context.Background(), CleanOptions{Mode: CleanModeSmart})
 	require.NoError(t, err)
-	assert.Contains(t, res.Output, "ran: npm cache verify")
+	assert.Contains(t, res.Output, "ran: "+fakeVerifyTool+" cache verify")
 
 	dry, err := p.Clean(context.Background(), CleanOptions{Mode: CleanModeSmart, DryRun: true})
 	require.NoError(t, err)
@@ -551,13 +554,14 @@ func TestTreeProvider_VerifyRunsAfterFileTrim(t *testing.T) {
 
 func TestTreeProvider_VerifyFailureIsReportedNotFatal(t *testing.T) {
 	root, _ := npxFixture(t)
-	installFakeTool(t, "npm", fakeToolSpec{Default: fakeReply{Stderr: "broken", Exit: 1}})
+	installFakeTool(t, fakeVerifyTool, fakeToolSpec{Default: fakeReply{Stderr: "broken", Exit: 1}})
 	p := newTree(t, "npm", config.Provider{Paths: []string{root}, MaxSize: "1G", MaxAge: "30d"})
+	p.spec.verify = []string{fakeVerifyTool, "cache", "verify"}
 
 	res, err := p.Clean(context.Background(), CleanOptions{Mode: CleanModeSmart})
 
 	require.NoError(t, err)
-	assert.Contains(t, res.Output, "note: npm cache verify failed")
+	assert.Contains(t, res.Output, "note: "+fakeVerifyTool+" cache verify failed")
 }
 
 func TestTreeProvider_CargoSkipsWhileCargoRuns(t *testing.T) {
@@ -645,12 +649,15 @@ func TestTreeProvider_TreesStayWhileUnderMaxSizeEvenAboveBuffer(t *testing.T) {
 	assert.DirExists(t, filepath.Join(root, "_npx", "a"))
 }
 
-func TestMatchProcess_GradleDaemonLowercasedOnWindows(t *testing.T) {
-	if runtime.GOOS != "windows" {
-		t.Skip("windows lowercases process tokens")
+func TestMatchProcess_GradleLaunchersAndDaemon(t *testing.T) {
+	for line, want := range map[string]string{
+		"java.exe -cp x.jar org.gradle.launcher.daemon.bootstrap.GradleDaemon 8.5": "gradle",
+		"java -cp x.jar org.gradle.launcher.daemon.bootstrap.gradledaemon 8.5":     "gradle",
+		"cmd /c C:/proj/gradlew.bat build":                                         "gradlew",
+		"C:/gradle/bin/gradle.bat test":                                            "gradle",
+	} {
+		assert.Equal(t, want, matchProcess(line, busyProcesses["gradle"]), line)
 	}
-	line := "java.exe -cp x.jar org.gradle.launcher.daemon.bootstrap.GradleDaemon 8.5"
-	assert.Equal(t, "gradle", matchProcess(line, busyProcesses["gradle"]))
 }
 
 func TestTreeProvider_GoModSymlinkedRootStillEvicts(t *testing.T) {

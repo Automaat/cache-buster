@@ -269,10 +269,16 @@ func (g *busyGuard) busyReason(ctx context.Context) string {
 
 // toolAliases maps a sibling binary to the tool it belongs to.
 var toolAliases = map[string]string{
-	"uvx": "uv",
-	"org.gradle.launcher.daemon.bootstrap.GradleDaemon": "gradle",
-	"org.gradle.launcher.daemon.bootstrap.gradledaemon": "gradle",
+	"uvx":                             "uv",
+	"gradle.bat":                      "gradle",
+	"gradle.cmd":                      "gradle",
+	"gradlew.bat":                     "gradlew",
+	"gradlew.cmd":                     "gradlew",
+	gradleDaemonMain:                  "gradle",
+	strings.ToLower(gradleDaemonMain): "gradle",
 }
+
+const gradleDaemonMain = "org.gradle.launcher.daemon.bootstrap.GradleDaemon"
 
 // matchProcess reports which wanted tool a process command line involves.
 // Any token whose basename is the tool counts, wherever it sits (wrappers,
@@ -281,11 +287,8 @@ var toolAliases = map[string]string{
 func matchProcess(commandLine string, wanted []string) string {
 	for field := range strings.FieldsSeq(commandLine) {
 		base := filepath.Base(strings.Trim(field, `"';&|()`))
-		if runtime.GOOS == "windows" {
-			base = strings.ToLower(base)
-			for _, ext := range []string{".exe", ".bat", ".cmd"} {
-				base = strings.TrimSuffix(base, ext)
-			}
+		if runtime.GOOS == "windows" && strings.HasSuffix(strings.ToLower(base), ".exe") {
+			base = strings.ToLower(base[:len(base)-len(".exe")])
 		}
 		if alias, ok := toolAliases[base]; ok {
 			base = alias
