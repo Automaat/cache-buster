@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -95,7 +96,7 @@ func TestClean_LoadErrorsNamedInTextAndOthersRun(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Contains(t, stderr, `provider rel: path "relative/dirs-*" must be absolute or start with ~/`)
-	assert.Contains(t, stderr, `provider lit: path "`+literal+`" must contain a glob`)
+	assert.Contains(t, stderr, fmt.Sprintf("provider lit: path %q must contain a glob", literal))
 	assert.Contains(t, stderr, "provider idle: parse min_idle: ")
 	assert.NotContains(t, stderr, "load error")
 	assert.Contains(t, stdout, "Cleaning good... done")

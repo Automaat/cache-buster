@@ -509,7 +509,7 @@ func TestDirPatternCountsHardlinkAcrossDirectoriesOnce(t *testing.T) {
 	p := newTestDirProvider(t, root, nil)
 	dry, err := p.Clean(t.Context(), CleanOptions{DryRun: true})
 	require.NoError(t, err)
-	assert.Equal(t, int64(1300), dry.BytesCleaned, "the shared 1000 bytes appear in the dry-run total once")
+	assert.Equal(t, int64(1300), dry.BytesCleaned, "the shared 1000 bytes appear in the dry-run total once: %s", dry.Output)
 	var sum int64
 	for _, e := range dry.Entries {
 		sum += e.Size

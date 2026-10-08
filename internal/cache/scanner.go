@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -48,7 +49,7 @@ func CalculateSizeContext(ctx context.Context, paths []string) (ScanResult, erro
 	var links osshim.LinkSet
 
 	var wg sync.WaitGroup
-	for _, path := range paths {
+	for _, path := range slices.Compact(slices.Sorted(slices.Values(paths))) {
 		wg.Add(1)
 		go func(p string) {
 			defer wg.Done()
