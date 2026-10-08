@@ -181,15 +181,17 @@ func executeClean(ctx context.Context, providers []provider.Provider, dryRun, qu
 		}
 
 		result, err := p.Clean(ctx, provider.CleanOptions{DryRun: dryRun, Mode: mode})
+		totalCleaned += result.BytesCleaned
 		if err != nil {
 			errors = append(errors, fmt.Sprintf("%s: %v", p.Name(), err))
 			if !quiet {
 				fmt.Println("error")
+				if result.Output != "" {
+					fmt.Print(result.Output)
+				}
 			}
 			continue
 		}
-
-		totalCleaned += result.BytesCleaned
 
 		if dryRun {
 			if !quiet {

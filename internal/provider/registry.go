@@ -17,6 +17,10 @@ var fileBasedProviders = map[string]bool{
 
 // NewProvider creates a provider from config.
 func NewProvider(name string, cfg config.Provider) (Provider, error) {
+	if cfg.Type == config.TypeDirPattern {
+		return NewDirPatternProvider(name, cfg)
+	}
+
 	if name == "docker" {
 		return NewDockerProvider(name, cfg)
 	}
