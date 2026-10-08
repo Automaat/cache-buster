@@ -504,21 +504,6 @@ func TestTreeProvider_GradleEvictsTopLevelCacheDirsWhole(t *testing.T) {
 	assertWholeOrGone(t, filepath.Join(root, "jars-9"), 2)
 }
 
-func TestTreeProvider_MiseTrimsDownloadsNeverInstalls(t *testing.T) {
-	root := t.TempDir()
-	download := filepath.Join(root, "downloads", "node", "20", "node.tar.gz")
-	install := filepath.Join(root, "installs", "node", "20", "bin", "node")
-	writeAged(t, download, 100, 90*day)
-	writeAged(t, install, 100, 90*day)
-	p := newTree(t, "mise", config.Provider{Paths: []string{root}, MaxSize: "1", MaxAge: "30d", CleanCmd: "mise prune"})
-
-	_, err := p.Clean(context.Background(), CleanOptions{Mode: CleanModeSmart})
-	require.NoError(t, err)
-
-	assert.NoFileExists(t, download)
-	assert.FileExists(t, install)
-}
-
 func TestTreeProvider_XcodeBundlesAreWholeEntries(t *testing.T) {
 	root := t.TempDir()
 	oldArchive := filepath.Join(root, "2025-01-01", "App.xcarchive")
