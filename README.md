@@ -206,11 +206,13 @@ An artifact is skipped, with the reason in `--verbose` output, when:
   `pnpm`, `yarn` or `bun` for Node, `python`, `pip`, `uv` or `poetry` for Python. A process
   counts when its command line names the project, its working directory is inside it, or a
   relative path in its arguments, or the value of `--manifest-path`, `--prefix`, `--cwd` or
-  `-C`, resolves to a place inside it (`cd ~/code && node app/server.js`,
-  `npm --prefix app start`). A working directory above the project is not enough. A process
-  whose working directory cannot be read counts as busy when the lookup fails outright (always
-  on Windows, where only image names are visible)
-- a process has an open file in it (`lsof`; `skip_if_open: false` turns this off). Windows
+  `-C`, `-w` or `--workspace`, resolves to a place inside it (`cd ~/code && node app/server.js`,
+  `npm --prefix app start`, `node app`). Dev servers such as `vite`, `next-server`, `tsx`
+  and `nodemon` count as Node tools. A working directory above the project is not enough. A process
+  whose working directory cannot be read counts as busy, and the skip reason names the tool and
+  pid (always on Windows, where only image names are visible)
+- a process has an open file in it (`lsof`, one listing for the whole pass, or `/proc` on Linux;
+  `skip_if_open: false` turns this off). Windows
   cannot list handles, but refuses to rename a directory that has open files, so the rename is
   the check there
 
@@ -220,7 +222,14 @@ marker check accepts, never a half-deleted `target`. The next run sweeps leftove
 names of exactly that shape inside a project folder; any other `.bilgie-trash-*` directory is
 yours and stays. If the delete fails after the rename, the bytes that did go are counted and the
 rest is swept next time. A file edited while artifacts are being removed blocks the project's
-remaining artifacts.
+remaining artifacts. A trash directory that cannot be swept is reported as a warning with its
+path in text, JSON and the `auto` run log.
+
+One pass is bounded by `pass_budget` (default `30s`): candidates still waiting when it runs out
+are skipped with the reason `pass time budget`, so a slow disk never turns a clean into an
+endless one. Names such as `Target` are the same directory as `target` on macOS and Windows and
+are matched there; on case-sensitive volumes names are exact. A `.git` entry is matched in any
+case on every OS, which only makes the dirty and idleness checks stricter.
 
 `clean project-artifacts` removes every eligible artifact (full mode). `clean --smart` and
 `auto` remove only until the artifacts are under `max_size`; `auto` under low-space pressure
@@ -237,6 +246,7 @@ providers:
     min_idle: 60d
     max_depth: 4
     scan_budget: 10s
+    pass_budget: 30s
     rust: true
     node: true
     python: false
@@ -509,7 +519,8 @@ providers:
 | `min_idle` | `dir-pattern`: minimum idle time, from the newest mtime in the tree (default `2h`); `project-artifacts`: project idle time (default `60d`) |
 | `skip_if_open` | `dir-pattern`, `project-artifacts`: skip directories with open files via `lsof +D` (default `true`) |
 | `skip_if_git_worktree` | `dir-pattern`: skip directories containing a `.git` entry (default `true`) |
-| `max_depth` | `project-artifacts`: directory levels searched below each root (default `4`, at most 16) |
+| `max_depth` | `project-artifacts`: directory levels searched below each root (default `4`, from 1 to 16; a negative value is an error) |
+| `pass_budget` | `project-artifacts`: time one clean pass may spend before the remaining candidates are skipped (default `30s`) |
 | `scan_budget` | `project-artifacts`: time allowed for finding projects per pass (default `10s`) |
 | `rust`, `node`, `python` | `project-artifacts`: per-kind switches (default `true`, `true`, `false`) |
 | `skip_if_dirty` | `project-artifacts`: skip projects with uncommitted changes (default `true`) |

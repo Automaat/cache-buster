@@ -22,8 +22,11 @@ import (
 const gitStatusTimeout = 15 * time.Second
 
 var kindTools = map[artifactKind][]string{
-	kindRust:   {"cargo", "rustc"},
-	kindNode:   {"node", "npm", "npx", "pnpm", "yarn", "bun"},
+	kindRust: {"cargo", "rustc"},
+	kindNode: {
+		"node", "npm", "npx", "pnpm", "yarn", "bun", "deno", "tsx", "ts-node", "vite", "next", "next-server",
+		"nuxt", "webpack", "nodemon", "vitest", "jest", "turbo", "esbuild",
+	},
 	kindPython: {"python", "python3", "pip", "pip3", "uv", "poetry"},
 }
 
@@ -282,17 +285,22 @@ func (ps *pass) busyReason(c *candidate) string {
 		switch {
 		case foldContains(proc.CommandLine, proj.Dir), foldContains(proc.CommandLine, proj.alias):
 			return tool + " is running in the project"
-		case proc.CwdUnknown:
-			return tool + " is running and its directory cannot be read"
-		case proc.Cwd == "":
-			return tool + " is running and its directory cannot be read"
+		case proc.CwdUnknown, proc.Cwd == "":
+			return tool + procLabel(proc) + " is running and its directory cannot be read"
 		case pathWithin(proc.Cwd, proj.Dir):
 			return tool + " is running in the project"
-		case argsReach(proc, proj.Dir, proj.alias):
+		case argsReach(proc, proj.Dir, proj.alias), namesRelative(proc, proj.Dir):
 			return tool + " is running on the project"
 		case proj.repoRoot != "" && pathWithin(proc.Cwd, proj.repoRoot) && pathWithin(proj.Dir, proc.Cwd):
 			return tool + " is running in the repository"
 		}
+	}
+	return ""
+}
+
+func procLabel(proc toolProcess) string {
+	if proc.pid > 0 {
+		return fmt.Sprintf(" (pid %d)", proc.pid)
 	}
 	return ""
 }
@@ -333,7 +341,7 @@ func fieldsReach(fields []string, cwd string, dirs []string) bool {
 				value = strings.Trim(fields[i+1], `"';&|()`)
 			}
 			tok = value
-		} else if !strings.ContainsAny(tok, `/\`) && !strings.HasPrefix(tok, ".") {
+		} else if !strings.ContainsAny(tok, `/\`) && !strings.HasPrefix(tok, ".") && !existsBelow(cwd, tok) {
 			continue
 		}
 		if tok == "" {
@@ -356,6 +364,40 @@ func fieldsReach(fields []string, cwd string, dirs []string) bool {
 		}
 	}
 	return false
+}
+
+// namesRelative reports whether the command line spells the project's path
+// relative to the process's working directory, which sits above it. This
+// catches names ps shows without quoting, such as `node my app/server.js`.
+func namesRelative(proc toolProcess, projDir string) bool {
+	rel, err := filepath.Rel(proc.Cwd, projDir)
+	if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return false
+	}
+	line, want := foldPathText(proc.CommandLine), foldPathText(filepath.ToSlash(rel))
+	for from := 0; ; {
+		i := strings.Index(line[from:], want)
+		if i < 0 {
+			return false
+		}
+		start, end := from+i, from+i+len(want)
+		leftOK := start == 0 || strings.ContainsRune(" \t\"'=/", rune(line[start-1]))
+		rightOK := end == len(line) || strings.ContainsRune(" \t\"'/", rune(line[end]))
+		if leftOK && rightOK {
+			return true
+		}
+		from = start + 1
+	}
+}
+
+// existsBelow reports whether tok, a bare word such as the app in `node app`,
+// names something that exists in cwd.
+func existsBelow(cwd, tok string) bool {
+	if tok == "" || strings.HasPrefix(tok, "-") {
+		return false
+	}
+	_, err := os.Lstat(filepath.Join(cwd, tok))
+	return err == nil
 }
 
 // splitQuoted splits a command line on spaces, keeping a quoted run, which may

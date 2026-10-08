@@ -150,10 +150,10 @@ func (p *ProjectArtifactsProvider) discover(ctx context.Context) (*artifactScan,
 	seen := map[string]bool{}
 	for _, root := range p.paths {
 		resolved, ok := p.usableRoot(root)
-		if !ok || seen[resolved] {
+		if !ok || seen[foldPathText(resolved)] {
 			continue
 		}
-		seen[resolved] = true
+		seen[foldPathText(resolved)] = true
 		w := &walker{p: p, scan: scan, root: resolved, raw: filepath.Clean(root), seen: seen}
 		w.walk(searchCtx, resolved, 0)
 	}
@@ -238,9 +238,9 @@ func (w *walker) walk(ctx context.Context, dir string, depth int) {
 			if ownsTrash(dir, name) {
 				w.scan.trash = append(w.scan.trash, child)
 			}
-		case neverDescend[strings.ToLower(name)], depth >= w.p.maxDepth, lexicallyProtected(child), w.seen[child]:
+		case neverDescend[strings.ToLower(name)], depth >= w.p.maxDepth, lexicallyProtected(child), w.seen[foldPathText(child)]:
 		default:
-			w.seen[child] = true
+			w.seen[foldPathText(child)] = true
 			w.walk(ctx, child, depth+1)
 		}
 	}

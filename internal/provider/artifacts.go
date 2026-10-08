@@ -19,11 +19,13 @@ import (
 
 // Project artifact defaults.
 const (
-	defaultArtifactMinIdle = 60 * 24 * time.Hour
-	defaultArtifactBudget  = 10 * time.Second
-	defaultArtifactDepth   = 4
-	openCheckTimeout       = time.Minute
-	scanCacheTTL           = 2 * time.Minute
+	defaultArtifactMinIdle    = 60 * 24 * time.Hour
+	defaultArtifactBudget     = 10 * time.Second
+	defaultArtifactPassBudget = 30 * time.Second
+	openSnapshotTTL           = 5 * time.Second
+	defaultArtifactDepth      = 4
+	openCheckTimeout          = time.Minute
+	scanCacheTTL              = 2 * time.Minute
 )
 
 // ProjectArtifactsProvider removes whole build artifact directories (Rust
@@ -36,6 +38,7 @@ type ProjectArtifactsProvider struct {
 
 	minIdle    time.Duration
 	budget     time.Duration
+	passBudget time.Duration
 	maxDepth   int
 	kinds      map[artifactKind]bool
 	skipDirty  bool
@@ -44,6 +47,9 @@ type ProjectArtifactsProvider struct {
 
 	now       func() time.Time
 	openCheck func(ctx context.Context, dir string) (bool, error)
+	// openMany answers for many directories from one listing of open files;
+	// when set it replaces the per-directory openCheck.
+	openMany  func(ctx context.Context, dirs []string) (map[string]bool, error)
 	git       gitRunner
 	processes processLookup
 
@@ -68,11 +74,17 @@ func NewProjectArtifactsProvider(name string, cfg config.Provider) (*ProjectArti
 	if err != nil {
 		return nil, err
 	}
-	depth := cfg.MaxDepth
-	if depth > config.MaxProjectDepth {
-		return nil, fmt.Errorf("max_depth must be at most %d, got %d", config.MaxProjectDepth, depth)
+	passBudget, err := durationOr(cfg.PassBudget, defaultArtifactPassBudget, "pass_budget")
+	if err != nil {
+		return nil, err
 	}
-	if depth <= 0 {
+	depth := cfg.MaxDepth
+	switch {
+	case depth < 0:
+		return nil, fmt.Errorf("max_depth must be at least 1, got %d", depth)
+	case depth > config.MaxProjectDepth:
+		return nil, fmt.Errorf("max_depth must be at most %d, got %d", config.MaxProjectDepth, depth)
+	case depth == 0:
 		depth = defaultArtifactDepth
 	}
 
@@ -81,6 +93,7 @@ func NewProjectArtifactsProvider(name string, cfg config.Provider) (*ProjectArti
 		BaseProvider: base,
 		minIdle:      minIdle,
 		budget:       budget,
+		passBudget:   passBudget,
 		maxDepth:     depth,
 		kinds: map[artifactKind]bool{
 			kindRust:   boolOr(cfg.Rust, true),
@@ -92,6 +105,7 @@ func NewProjectArtifactsProvider(name string, cfg config.Provider) (*ProjectArti
 		home:       home,
 		now:        time.Now,
 		openCheck:  osshim.HasOpenFiles,
+		openMany:   osshim.OpenFilesUnder,
 		git:        runGit,
 		processes:  lookupToolProcesses,
 	}
@@ -184,17 +198,19 @@ func (p *ProjectArtifactsProvider) Clean(ctx context.Context, opts CleanOptions)
 	}
 
 	if !opts.DryRun {
-		p.sweepTrash(scan, &out)
+		result.Warnings = p.sweepTrash(scan, &out)
 	}
 	if scan.partial {
 		fmt.Fprintf(&out, "note: scan stopped at its %s budget, some projects may be missing\n", p.budget)
 	}
 
 	pass := p.newPass(ctx, scan)
+	pass.cands = pass.candidates(ctx)
 	remaining := scan.total()
 	var freed int64
+	started := p.now()
 
-	for _, c := range pass.candidates(ctx) {
+	for _, c := range pass.cands {
 		if err := ctx.Err(); err != nil {
 			return finish(err)
 		}
@@ -205,9 +221,13 @@ func (p *ProjectArtifactsProvider) Clean(ctx context.Context, opts CleanOptions)
 		if p.satisfied(opts, remaining-freed, freed) {
 			break
 		}
+		if p.passBudget > 0 && p.now().Sub(started) > p.passBudget {
+			skipLine(&out, &result, c, "pass time budget")
+			continue
+		}
 		reason := pass.guard(ctx, c)
 		if reason == "" {
-			reason = p.openReason(ctx, c)
+			reason = pass.openReason(ctx, c)
 		}
 		if reason == "" {
 			reason = p.finalReason(ctx, c)
@@ -276,16 +296,39 @@ func skipLine(out *strings.Builder, result *CleanResult, c *candidate, reason st
 	result.SkippedEntries++
 }
 
+type pass struct {
+	p        *ProjectArtifactsProvider
+	scan     *artifactScan
+	procs    []toolProcess
+	procsErr error
+	dirty    map[string]string
+
+	cands    []*candidate
+	openSnap map[string]bool
+	openErr  error
+	openAt   time.Time
+}
+
 // openReason runs the slow open-file probe. Windows cannot list handles, but
 // it also refuses to rename a directory with open files, so the rename that
-// follows is the check there.
-func (p *ProjectArtifactsProvider) openReason(ctx context.Context, c *candidate) string {
+// follows is the check there. One listing of open files answers for every
+// candidate and is reused for openSnapshotTTL.
+func (ps *pass) openReason(ctx context.Context, c *candidate) string {
+	p := ps.p
 	if !p.skipIfOpen {
 		return ""
 	}
-	probeCtx, cancel := context.WithTimeout(ctx, openCheckTimeout)
-	defer cancel()
-	open, err := p.openCheck(probeCtx, c.art.Path)
+	var (
+		open bool
+		err  error
+	)
+	if p.openMany != nil {
+		open, err = ps.openInSnapshot(ctx, c.art.Path)
+	} else {
+		probeCtx, cancel := context.WithTimeout(ctx, openCheckTimeout)
+		defer cancel()
+		open, err = p.openCheck(probeCtx, c.art.Path)
+	}
 	switch {
 	case errors.Is(err, osshim.ErrOpenFilesUnsupported):
 		return ""
@@ -295,6 +338,28 @@ func (p *ProjectArtifactsProvider) openReason(ctx context.Context, c *candidate)
 		return "has open files"
 	}
 	return ""
+}
+
+func (ps *pass) openInSnapshot(ctx context.Context, path string) (bool, error) {
+	p := ps.p
+	if ps.openAt.IsZero() || p.now().Sub(ps.openAt) > openSnapshotTTL {
+		seen := map[string]bool{}
+		var dirs []string
+		for _, c := range ps.cands {
+			if !seen[c.art.Path] {
+				seen[c.art.Path] = true
+				dirs = append(dirs, c.art.Path)
+			}
+		}
+		probeCtx, cancel := context.WithTimeout(ctx, openCheckTimeout)
+		defer cancel()
+		ps.openSnap, ps.openErr = p.openMany(probeCtx, dirs)
+		ps.openAt = p.now()
+	}
+	if ps.openErr != nil {
+		return false, ps.openErr
+	}
+	return ps.openSnap[path], nil
 }
 
 // finalReason revalidates just before removal: the markers must still be
@@ -364,7 +429,10 @@ func (p *ProjectArtifactsProvider) settleProject(proj *project) {
 	}
 }
 
-func (p *ProjectArtifactsProvider) sweepTrash(scan *artifactScan, out *strings.Builder) {
+// sweepTrash removes our leftover trash directories and returns a warning for
+// each one it could not remove.
+func (p *ProjectArtifactsProvider) sweepTrash(scan *artifactScan, out *strings.Builder) []string {
+	var warnings []string
 	for _, trash := range scan.trash {
 		if p.protectedReason(trash) != "" {
 			continue
@@ -374,10 +442,12 @@ func (p *ProjectArtifactsProvider) sweepTrash(scan *artifactScan, out *strings.B
 		restore()
 		if err != nil {
 			fmt.Fprintf(out, "error: sweeping %s (%v)\n", trash, err)
+			warnings = append(warnings, fmt.Sprintf("cannot sweep leftover %s: %v", trash, err))
 			continue
 		}
 		fmt.Fprintf(out, "swept: %s\n", trash)
 	}
+	return warnings
 }
 
 func (p *ProjectArtifactsProvider) invalidate() {
@@ -421,14 +491,6 @@ func idleDays(now, then time.Time) int {
 		return 0
 	}
 	return int(now.Sub(then) / (24 * time.Hour))
-}
-
-type pass struct {
-	p        *ProjectArtifactsProvider
-	scan     *artifactScan
-	procs    []toolProcess
-	procsErr error
-	dirty    map[string]string
 }
 
 func (p *ProjectArtifactsProvider) newPass(ctx context.Context, scan *artifactScan) *pass {

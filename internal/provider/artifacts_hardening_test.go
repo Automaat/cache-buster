@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -504,4 +505,152 @@ func TestProjectArtifacts_ArtifactNamesFollowFilesystemCase(t *testing.T) {
 	}
 	assert.Empty(t, res.Entries, "exact names only on a case-sensitive volume")
 	assert.DirExists(t, h.path("api", "Target"))
+}
+
+func TestProjectArtifacts_OneOpenFileListingServesEveryCandidate(t *testing.T) {
+	h := newArtifactHarness(t, nil)
+	for i := range 200 {
+		nodeProject(t, h.path(fmt.Sprintf("p%03d", i)), 10, 90*day)
+	}
+	busy := h.path("p007", "node_modules")
+	calls := 0
+	h.p.openMany = func(_ context.Context, dirs []string) (map[string]bool, error) {
+		calls++
+		assert.Len(t, dirs, 200)
+		return map[string]bool{busy: true}, nil
+	}
+	h.p.openCheck = func(context.Context, string) (bool, error) {
+		t.Error("the per-directory probe must not run")
+		return false, nil
+	}
+
+	res := h.clean(CleanOptions{Mode: CleanModeFull})
+
+	assert.Equal(t, 1, calls)
+	assert.Len(t, res.Entries, 199)
+	assert.DirExists(t, busy)
+	assert.Contains(t, res.Output, "has open files")
+}
+
+func TestProjectArtifacts_OpenFileListingFailureFailsClosed(t *testing.T) {
+	h := newArtifactHarness(t, nil)
+	nodeProject(t, h.path("web"), 10, 90*day)
+	h.p.openMany = func(context.Context, []string) (map[string]bool, error) {
+		return nil, errors.New("lsof exploded")
+	}
+
+	res := h.clean(CleanOptions{Mode: CleanModeFull})
+
+	assert.DirExists(t, h.path("web", "node_modules"))
+	assert.Contains(t, res.Output, "open-file check failed")
+}
+
+func TestProjectArtifacts_PassBudgetSkipsTheRest(t *testing.T) {
+	h := newArtifactHarness(t, nil)
+	h.p.passBudget = 30 * time.Second
+	for i := range 5 {
+		nodeProject(t, h.path(fmt.Sprintf("p%d", i)), 10, time.Duration(100+i)*day)
+	}
+	clock := time.Now()
+	h.p.now = func() time.Time { return clock }
+	h.p.openMany = func(_ context.Context, _ []string) (map[string]bool, error) {
+		clock = clock.Add(time.Minute)
+		return map[string]bool{}, nil
+	}
+
+	res := h.clean(CleanOptions{Mode: CleanModeFull})
+
+	assert.Len(t, res.Entries, 1)
+	assert.Equal(t, 4, strings.Count(res.Output, "(pass time budget)"))
+	assert.Equal(t, 4, res.SkippedEntries)
+	assert.NoDirExists(t, h.path("p4", "node_modules"), "oldest first")
+	assert.DirExists(t, h.path("p0", "node_modules"))
+}
+
+func TestProjectArtifacts_NegativeMaxDepthIsRejected(t *testing.T) {
+	_, err := NewProjectArtifactsProvider("project-artifacts", config.Provider{
+		Type: config.TypeProjectArtifacts, Paths: []string{t.TempDir()}, MaxSize: "1G", MaxDepth: -1,
+	})
+
+	require.ErrorContains(t, err, "max_depth must be at least 1")
+}
+
+func TestProjectArtifacts_TrashSweepFailureIsAWarning(t *testing.T) {
+	if runtime.GOOS == "windows" || os.Geteuid() == 0 {
+		t.Skip("needs POSIX permissions and a non-root user")
+	}
+	h := newArtifactHarness(t, nil)
+	rustProject(t, h.path("api"), 100, 90*day)
+	stuck := h.path("api", trashPrefix+"target-abcdefgh")
+	writeFile(t, filepath.Join(stuck, "ro", "x"), "x")
+	ageTree(t, h.path("api"), 90*day)
+	require.NoError(t, os.Chmod(filepath.Join(stuck, "ro"), 0o500))
+	t.Cleanup(func() { _ = os.Chmod(filepath.Join(stuck, "ro"), 0o700) })
+
+	res := h.clean(CleanOptions{Mode: CleanModeFull})
+
+	require.Len(t, res.Warnings, 1)
+	assert.Contains(t, res.Warnings[0], stuck)
+}
+
+func TestProjectArtifacts_UnreadableDirectoryNamesToolAndPid(t *testing.T) {
+	h := newArtifactHarness(t, nil)
+	nodeProject(t, h.path("web"), 10, 90*day)
+	h.p.processes = func(context.Context) ([]toolProcess, error) {
+		return []toolProcess{{Tool: "node", pid: 4242, CommandLine: "node x.js"}}, nil
+	}
+
+	res := h.clean(CleanOptions{Mode: CleanModeFull})
+
+	assert.Contains(t, res.Output, "node (pid 4242) is running and its directory cannot be read")
+}
+
+func TestProjectArtifacts_RootsDifferingOnlyByCaseScanOnce(t *testing.T) {
+	probe := t.TempDir()
+	writeFile(t, filepath.Join(probe, "a"), "x")
+	if _, err := os.Lstat(filepath.Join(probe, "A")); err != nil {
+		t.Skip("case-sensitive filesystem: the spellings are different directories")
+	}
+	h := newArtifactHarness(t, nil)
+	nodeProject(t, h.path("Web"), 10, 90*day)
+	upper := filepath.Join(filepath.Dir(h.root), strings.ToUpper(filepath.Base(h.root)))
+	h.p.paths = append(h.p.paths, upper)
+
+	size, err := h.p.CurrentSize(context.Background())
+
+	require.NoError(t, err)
+	assert.Equal(t, int64(10), size)
+}
+
+func TestProjectArtifacts_BareProjectNameInArgumentsBlocks(t *testing.T) {
+	h := newArtifactHarness(t, nil)
+	nodeProject(t, h.path("app"), 10, 90*day)
+	root := evalDir(t, h.root)
+	h.p.processes = func(context.Context) ([]toolProcess, error) {
+		return []toolProcess{{Tool: "node", CommandLine: "node app", Cwd: root}}, nil
+	}
+
+	res := h.clean(CleanOptions{Mode: CleanModeFull})
+
+	assert.DirExists(t, h.path("app", "node_modules"))
+	assert.Contains(t, res.Output, "is running")
+}
+
+func TestProjectArtifacts_ProjectNameWithSpaceInUnquotedArgumentsBlocks(t *testing.T) {
+	h := newArtifactHarness(t, nil)
+	nodeProject(t, h.path("my app"), 10, 90*day)
+	root := evalDir(t, h.root)
+	h.p.processes = func(context.Context) ([]toolProcess, error) {
+		return []toolProcess{{Tool: "node", CommandLine: "node my app/server.js", Cwd: root}}, nil
+	}
+
+	res := h.clean(CleanOptions{Mode: CleanModeFull})
+
+	assert.DirExists(t, h.path("my app", "node_modules"))
+	assert.Contains(t, res.Output, "is running")
+}
+
+func TestProjectArtifacts_DevServersCountAsNodeTools(t *testing.T) {
+	assert.Equal(t, "vite", matchKind("vite --port 3000", kindNode))
+	assert.Equal(t, "next-server", matchKind("next-server (v14.0.0)", kindNode))
 }

@@ -94,6 +94,7 @@ func newArtifactHarness(t *testing.T, mutate func(*config.Provider)) *artifactHa
 	h := &artifactHarness{t: t, root: root, p: p, dirty: map[string]bool{}}
 	p.home = filepath.Join(t.TempDir(), "home")
 	p.openCheck = func(context.Context, string) (bool, error) { return false, nil }
+	p.openMany = nil
 	p.processes = func(context.Context) ([]toolProcess, error) { return nil, nil }
 	p.git = func(_ context.Context, dir string, args ...string) (string, error) {
 		h.git = append(h.git, dir+" "+strings.Join(args, " "))
@@ -837,6 +838,7 @@ func TestProjectArtifacts_BroadRootsAreRejected(t *testing.T) {
 	require.NoError(t, err)
 	p.home = home
 	p.openCheck = func(context.Context, string) (bool, error) { return false, nil }
+	p.openMany = nil
 	p.processes = func(context.Context) ([]toolProcess, error) { return nil, nil }
 
 	size, err := p.CurrentSize(context.Background())
@@ -1283,6 +1285,7 @@ func TestProjectArtifacts_CommandLineThroughSymlinkedRootBlocks(t *testing.T) {
 	require.NoError(t, err)
 	p.home = filepath.Join(t.TempDir(), "home")
 	p.openCheck = func(context.Context, string) (bool, error) { return false, nil }
+	p.openMany = nil
 	p.processes = func(context.Context) ([]toolProcess, error) {
 		return []toolProcess{{Tool: "node", CommandLine: "node " + filepath.Join(link, "zz", "server.js"), Cwd: "/nowhere"}}, nil
 	}

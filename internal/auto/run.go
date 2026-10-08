@@ -64,6 +64,7 @@ type Result struct {
 	// Entries are the paths removed, or that a dry-run would remove.
 	Entries        []provider.Entry
 	SkippedEntries int
+	Warnings       []string
 	Freed          int64
 }
 
@@ -76,6 +77,7 @@ func (r Result) Block() report.Block {
 		Output:  r.Output,
 		Summary: report.Summarize(r.Status, r.Freed, r.Entries, r.SkippedEntries),
 	}
+	b.Summary.Warnings = r.Warnings
 	if r.Err != nil {
 		b.Err = r.Err.Error()
 	}
@@ -107,7 +109,8 @@ func (r Report) Previewed() bool {
 // Err summarizes provider failures, or returns nil when there were none.
 func (r Report) Err() error {
 	var errs []error
-	for _, res := range r.Results {
+	for i := range r.Results {
+		res := &r.Results[i]
 		switch {
 		case res.Err == nil:
 		case report.IsLoadFailure(res.Name, res.Err.Error()):
@@ -205,8 +208,8 @@ func Run(ctx context.Context, cfg *config.Config, dryRun bool, deps Deps) (Repor
 
 func blocksOf(results []Result) []report.Block {
 	blocks := make([]report.Block, len(results))
-	for i, r := range results {
-		blocks[i] = r.Block()
+	for i := range results {
+		blocks[i] = results[i].Block()
 	}
 	return blocks
 }
@@ -346,6 +349,7 @@ func runCandidate(ctx context.Context, cfg *config.Config, c *candidate, tier Ti
 	res.Freed = out.BytesCleaned
 	res.Entries = out.Entries
 	res.SkippedEntries = out.SkippedEntries
+	res.Warnings = out.Warnings
 	switch {
 	case err != nil:
 		res.Status, res.Err = StatusError, err
@@ -402,6 +406,7 @@ func printResult(out io.Writer, res Result) {
 	default:
 		fmt.Fprintf(out, "%s: freed %s\n", res.Name, size.FormatSize(res.Freed))
 	}
+	report.WriteWarnings(out, res.Warnings)
 }
 
 func printError(out io.Writer, res Result) {
