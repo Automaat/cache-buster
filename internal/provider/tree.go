@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"time"
@@ -179,7 +180,8 @@ func (p *TreeProvider) collect(ctx context.Context) (units []treeUnit, warnings 
 		}
 	}
 
-	for _, root := range p.paths {
+	for _, configured := range p.paths {
+		root := filepath.Clean(configured)
 		for _, rel := range p.spec.files {
 			dir := filepath.Join(root, filepath.FromSlash(rel))
 			if info, statErr := os.Lstat(dir); statErr != nil || !info.IsDir() {
@@ -296,7 +298,7 @@ func (p *TreeProvider) markHeld(ctx context.Context, units []treeUnit) {
 			continue
 		}
 		for _, line := range lines {
-			if strings.Contains(line, u.path) {
+			if strings.Contains(foldPath(line), foldPath(u.path)) {
 				u.hold = "in use by a running process"
 				break
 			}
@@ -346,6 +348,9 @@ func (p *TreeProvider) plan(units []treeUnit, smart bool) []treeUnit {
 		}
 	}
 
+	if remaining <= p.maxSize {
+		return plan
+	}
 	for _, u := range sorted {
 		if remaining <= target {
 			break
@@ -399,6 +404,7 @@ func (p *TreeProvider) execute(
 			}
 		default:
 			if err := os.Remove(u.path); err != nil {
+				fmt.Fprintf(&out, "error deleting %s: %v\n", u.path, err)
 				filesFailed++
 				continue
 			}
@@ -480,6 +486,7 @@ func matchEntries(root string, segs []string) (matches, junk []string) {
 // moduleEntries finds name@version directories below a Go module cache root,
 // leaving the top-level cache directory (download archives) alone.
 func moduleEntries(root string) (matches, junk []string) {
+	root = filepath.Clean(root)
 	_ = filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
 			if d != nil && d.IsDir() {
@@ -497,7 +504,7 @@ func moduleEntries(root string) (matches, junk []string) {
 			return fs.SkipDir
 		case strings.HasPrefix(name, "."):
 			return fs.SkipDir
-		case filepath.Dir(p) == root && name == "cache":
+		case name == "cache" && filepath.Dir(p) == filepath.Clean(root):
 			return fs.SkipDir
 		case strings.Contains(name, "@"):
 			matches = append(matches, p)
@@ -514,6 +521,9 @@ func moduleEntries(root string) (matches, junk []string) {
 func evictTree(dir string) error {
 	trash := filepath.Join(filepath.Dir(dir), fmt.Sprintf("%s%d-%d", trashPrefix, os.Getpid(), time.Now().UnixNano()))
 	if err := os.Rename(dir, trash); err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil
+		}
 		return fmt.Errorf("move aside: %w", err)
 	}
 	return removeTree(trash)
@@ -539,4 +549,15 @@ func removeTree(dir string) error {
 		return errors.Join(err, retry)
 	}
 	return nil
+}
+
+// foldPath makes a path comparable with a process command line: slashes
+// are unified and, on the case-insensitive Windows and macOS file systems,
+// so is the case.
+func foldPath(s string) string {
+	s = strings.ReplaceAll(s, `\`, "/")
+	if runtime.GOOS == "windows" || runtime.GOOS == "darwin" {
+		s = strings.ToLower(s)
+	}
+	return s
 }

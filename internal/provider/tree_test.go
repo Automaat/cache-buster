@@ -179,12 +179,12 @@ func TestEvictTree_RemovesWholeTreeAndLeavesNoTrash(t *testing.T) {
 	assert.Empty(t, left)
 }
 
-func TestEvictTree_MissingTreeFailsWithoutSideEffects(t *testing.T) {
+func TestEvictTree_VanishedTreeCountsAsGone(t *testing.T) {
 	parent := t.TempDir()
 
 	err := evictTree(filepath.Join(parent, "absent"))
 
-	require.Error(t, err)
+	require.NoError(t, err)
 	left, readErr := os.ReadDir(parent)
 	require.NoError(t, readErr)
 	assert.Empty(t, left)
@@ -610,4 +610,38 @@ func TestDefaults_NpmAndCargoStayEnabled(t *testing.T) {
 	defaults := config.DefaultProvidersFor(config.Platform{OS: config.OSLinux})
 	assert.True(t, defaults["npm"].Enabled)
 	assert.True(t, defaults["cargo"].Enabled)
+}
+
+func TestTreeProvider_GoModUncleanRootStillSkipsDownloadCache(t *testing.T) {
+	root := t.TempDir()
+	mod := filepath.Join(root, "github.com", "acme", "lib@v1.0.0")
+	writeAged(t, filepath.Join(mod, "go.mod"), 100, 90*day)
+	other := filepath.Join(root, "github.com", "acme", "lib@v1.1.0")
+	writeAged(t, filepath.Join(other, "go.mod"), 100, 80*day)
+	ageAll(t, mod, 90*day)
+	ageAll(t, other, 80*day)
+	download := filepath.Join(root, "cache", "download", "github.com", "acme", "lib", "@v", "v1.0.0.zip")
+	writeAged(t, download, 500, 200*day)
+	p := newTree(t, "go-mod", config.Provider{
+		Paths: []string{root}, MaxSize: "1", MaxAge: "30d",
+	})
+	p.paths = []string{root + string(filepath.Separator) + string(filepath.Separator)}
+
+	res, err := p.Clean(context.Background(), CleanOptions{Mode: CleanModeSmart})
+	require.NoError(t, err)
+
+	assert.FileExists(t, download)
+	assert.NoDirExists(t, mod, res.Output)
+}
+
+func TestTreeProvider_TreesStayWhileUnderMaxSizeEvenAboveBuffer(t *testing.T) {
+	root := t.TempDir()
+	makePackage(t, filepath.Join(root, "_npx", "a"), 4, 90*day)
+	makePackage(t, filepath.Join(root, "_npx", "b"), 4, 80*day)
+	p := newTree(t, "npm", config.Provider{Paths: []string{root}, MaxSize: "1100", MaxAge: "30d"})
+
+	_, err := p.Clean(context.Background(), CleanOptions{Mode: CleanModeSmart})
+	require.NoError(t, err)
+
+	assert.DirExists(t, filepath.Join(root, "_npx", "a"))
 }

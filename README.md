@@ -328,8 +328,8 @@ Some caches hold trees that are only valid complete: an installed package under
 tree. Independent files (`_cacache`, `.crate` archives, mise `downloads`) are trimmed
 by age, then oldest first. Trees go whole, oldest first by newest file mtime, and only while
 over `max_size`; `max_age` does not apply to them because mtime records install time, not use.
-`max_size` counts only what the provider may delete, so untouched parts such as
-`registry/index` do not count.
+`max_size` limits only what the provider may delete; untouched parts such as
+`registry/index` still show in the size `status` reports but never count toward eviction.
 
 A tree is kept when it is the newest of its pattern, was modified in the last 2 hours or is named
 on the command line of a running process. A tree is first renamed aside and then deleted, so it is
