@@ -31,6 +31,7 @@ func init() {
 	rootCmd.AddCommand(cli.ConfigCmd)
 	rootCmd.AddCommand(cli.InteractiveCmd)
 	rootCmd.AddCommand(cli.AutoCmd)
+	rootCmd.AddCommand(cli.HistoryCmd)
 	rootCmd.AddCommand(cli.InstallAgentCmd)
 	rootCmd.AddCommand(cli.UninstallAgentCmd)
 }
