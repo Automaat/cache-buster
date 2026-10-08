@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -54,7 +55,7 @@ func TestDefaultProvidersFor_CacheRoots(t *testing.T) {
 		{"macOS gh", macPlatform, "gh", []string{"~/.cache/gh"}},
 		{"windows huggingface", winPlatform, "huggingface", []string{"~/.cache/huggingface/hub"}},
 		{"linux pnpm", linPlatform, "pnpm", []string{"~/.local/share/pnpm/store"}},
-		{"linux docker", linPlatform, "docker", []string{"/var/lib/docker", "~/.docker/desktop"}},
+		{"linux docker", linPlatform, "docker", []string{"/var/lib/docker/overlay2", "~/.docker/desktop"}},
 		{"linux edge", linPlatform, "edge", []string{"~/.cache/microsoft-edge"}},
 	}
 	for _, tt := range tests {
@@ -356,4 +357,17 @@ func TestTempGlob_EscapesMetacharactersInTempDir(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Equal(t, []string{filepath.Join(odd, "sail-1")}, matches)
+}
+
+func TestDefaultProvidersFor_NoPathContainsAProtectedEntry(t *testing.T) {
+	for _, p := range []Platform{macPlatform, linPlatform, winPlatform} {
+		for name, prov := range DefaultProvidersFor(p) {
+			for _, path := range prov.Paths {
+				for _, protected := range DefaultProtected() {
+					assert.False(t, strings.HasPrefix(protected+"/", strings.TrimRight(path, "/")+"/"),
+						"%s on %s: %q would be skipped as containing protected %q", name, p.OS, path, protected)
+				}
+			}
+		}
+	}
 }
