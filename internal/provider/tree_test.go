@@ -16,8 +16,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-const day = 24 * time.Hour
-
 func writeAged(t *testing.T, path string, bytes int, age time.Duration) {
 	t.Helper()
 	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o750))
@@ -57,6 +55,7 @@ func newTree(t *testing.T, name string, cfg config.Provider) *TreeProvider {
 	p, err := NewTreeProvider(name, cfg, spec)
 	require.NoError(t, err)
 	p.procLines = func(context.Context) ([]string, error) { return nil, nil }
+	p.imageOnly = false
 	if p.busy != nil {
 		p.busy.listProcesses = func(context.Context) ([]string, error) { return nil, nil }
 	}
@@ -78,13 +77,13 @@ func assertWholeOrGone(t *testing.T, dir string, wantFiles int) {
 	assert.Equal(t, wantFiles, got, "%s is partly deleted", dir)
 }
 
-func npxFixture(t *testing.T) (root string, hashes []string) {
+func npxFixture(t *testing.T) (root string, hashes [3]string) {
 	t.Helper()
 	root = t.TempDir()
 	for i, h := range []string{"h1", "h2", "h3"} {
 		dir := filepath.Join(root, "_npx", h)
 		makePackage(t, dir, 20, time.Duration(100-10*i)*day)
-		hashes = append(hashes, dir)
+		hashes[i] = dir
 	}
 	writeAged(t, filepath.Join(root, "_cacache", "content-v2", "sha512", "aa", "old"), 100, 90*day)
 	writeAged(t, filepath.Join(root, "_cacache", "content-v2", "sha512", "bb", "fresh"), 100, day)
@@ -192,7 +191,7 @@ func TestEvictTree_VanishedTreeCountsAsGone(t *testing.T) {
 
 func TestTreeProvider_SweepsLeftoverTrash(t *testing.T) {
 	root, _ := npxFixture(t)
-	trash := filepath.Join(root, "_npx", trashPrefix+"1-2")
+	trash := filepath.Join(root, "_npx", treeTrashPrefix+"1-2")
 	makePackage(t, trash, 2, day)
 	p := newTree(t, "npm", config.Provider{Paths: []string{root}, MaxSize: "1G", MaxAge: "30d"})
 

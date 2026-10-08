@@ -20,9 +20,9 @@ import (
 	"github.com/smykla-skalski/bilgie/pkg/size"
 )
 
-// trashPrefix names a directory that eviction moved aside before deleting it.
+// treeTrashPrefix names a directory that eviction moved aside before deleting it.
 // A leftover is garbage and the next run removes it.
-const trashPrefix = ".bilgie-trash-"
+const treeTrashPrefix = ".bilgie-trash-"
 
 // treeSpec says which parts below a provider path may be deleted and how.
 // Everything else (indexes, lock files, bookkeeping) is never touched.
@@ -205,7 +205,7 @@ func (p *TreeProvider) collect(ctx context.Context) (units []treeUnit, warnings 
 
 		found, trash, groups := p.findTrees(root)
 		for _, dir := range found {
-			u, ok, measureErr := measureTree(ctx, dir, groups[dir])
+			u, ok, measureErr := measureEntry(ctx, dir, groups[dir])
 			if measureErr != nil {
 				return nil, 0, measureErr
 			}
@@ -214,7 +214,7 @@ func (p *TreeProvider) collect(ctx context.Context) (units []treeUnit, warnings 
 			}
 		}
 		for _, dir := range trash {
-			u, ok, measureErr := measureTree(ctx, dir, -1)
+			u, ok, measureErr := measureEntry(ctx, dir, -1)
 			if measureErr != nil {
 				return nil, 0, measureErr
 			}
@@ -248,9 +248,9 @@ func (p *TreeProvider) findTrees(root string) (found, trash []string, groups map
 	return found, trash, groups
 }
 
-// measureTree sizes dir and dates it by its newest file, because a directory
+// measureEntry sizes dir and dates it by its newest file, because a directory
 // mtime misses writes below it. A symlink or a non-directory is not a tree.
-func measureTree(ctx context.Context, dir string, group int) (treeUnit, bool, error) {
+func measureEntry(ctx context.Context, dir string, group int) (treeUnit, bool, error) {
 	info, err := os.Lstat(dir)
 	if errors.Is(err, fs.ErrNotExist) {
 		return treeUnit{}, false, nil
@@ -473,7 +473,7 @@ func matchEntries(root string, segs []string) (matches, junk []string) {
 	last := len(segs) == 1
 	for _, d := range dirents {
 		name := d.Name()
-		if last && d.IsDir() && strings.HasPrefix(name, trashPrefix) {
+		if last && d.IsDir() && strings.HasPrefix(name, treeTrashPrefix) {
 			junk = append(junk, filepath.Join(root, name))
 			continue
 		}
@@ -524,7 +524,7 @@ func moduleEntries(root string) (matches, junk []string) {
 		}
 		name := d.Name()
 		switch {
-		case strings.HasPrefix(name, trashPrefix):
+		case strings.HasPrefix(name, treeTrashPrefix):
 			junk = append(junk, atConfigured(p))
 			return fs.SkipDir
 		case strings.HasPrefix(name, "."):
@@ -544,7 +544,7 @@ func moduleEntries(root string) (matches, junk []string) {
 // path is either intact or gone, never half removed; a failed delete leaves
 // only a trash directory that the next run removes.
 func evictTree(dir string) error {
-	trash := filepath.Join(filepath.Dir(dir), fmt.Sprintf("%s%d-%d", trashPrefix, os.Getpid(), time.Now().UnixNano()))
+	trash := filepath.Join(filepath.Dir(dir), fmt.Sprintf("%s%d-%d", treeTrashPrefix, os.Getpid(), time.Now().UnixNano()))
 	if err := os.Rename(dir, trash); err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
 			return nil
