@@ -85,7 +85,13 @@ func systemProviders() map[string]Provider {
 			Paths:    []string{"~/Library/Containers/com.docker.docker"},
 			MaxSize:  "50G",
 			MaxAge:   "30d",
-			CleanCmd: "docker system prune -af --volumes",
+			CleanCmd: "docker system prune -af",
+		},
+		"docker-volumes": {
+			Enabled:  false,
+			Paths:    []string{"~/Library/Containers/com.docker.docker"},
+			MaxSize:  "50G",
+			CleanCmd: "docker volume prune -f",
 		},
 	}
 }

@@ -166,6 +166,26 @@ func TestDefaultConfig(t *testing.T) {
 	}
 }
 
+func TestDefaultConfig_DockerVolumes(t *testing.T) {
+	cfg := DefaultConfig()
+
+	docker, ok := cfg.GetProvider("docker")
+	if !ok {
+		t.Fatal("missing docker provider")
+	}
+	if containsString(docker.CleanCmd, "--volumes") {
+		t.Errorf("docker clean_cmd must not prune volumes: %q", docker.CleanCmd)
+	}
+
+	vols, ok := cfg.GetProvider("docker-volumes")
+	if !ok {
+		t.Fatal("missing docker-volumes provider")
+	}
+	if vols.Enabled {
+		t.Error("docker-volumes must be disabled by default")
+	}
+}
+
 func containsString(s, substr string) bool {
 	return len(s) >= len(substr) && (s == substr || len(s) > 0 && containsStringHelper(s, substr))
 }

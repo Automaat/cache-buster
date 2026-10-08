@@ -21,6 +21,10 @@ func NewProvider(name string, cfg config.Provider) (Provider, error) {
 		return NewDockerProvider(name, cfg)
 	}
 
+	if name == "docker-volumes" {
+		return NewDockerVolumesProvider(name, cfg)
+	}
+
 	if name == "jetbrains" {
 		return NewJetBrainsProvider(name, cfg)
 	}

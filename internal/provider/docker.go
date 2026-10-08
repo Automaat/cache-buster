@@ -17,6 +17,8 @@ import (
 type DockerProvider struct {
 	*BaseProvider
 	cleanCmd string
+	// dfType restricts docker system df rows to one Type; empty sums all rows.
+	dfType string
 }
 
 // NewDockerProvider creates a Docker provider with availability checking.
@@ -32,8 +34,22 @@ func NewDockerProvider(name string, cfg config.Provider) (*DockerProvider, error
 	}, nil
 }
 
+// dockerVolumesDFType is the docker system df row type for volumes.
+const dockerVolumesDFType = "Local Volumes"
+
+// NewDockerVolumesProvider creates a provider that prunes only Docker volumes.
+func NewDockerVolumesProvider(name string, cfg config.Provider) (*DockerProvider, error) {
+	p, err := NewDockerProvider(name, cfg)
+	if err != nil {
+		return nil, err
+	}
+	p.dfType = dockerVolumesDFType
+	return p, nil
+}
+
 // dockerDFRow is one line of docker system df --format '{{json .}}' output.
 type dockerDFRow struct {
+	Type string `json:"Type"`
 	Size string `json:"Size"`
 }
 
@@ -80,6 +96,9 @@ func (p *DockerProvider) dockerDataSize(ctx context.Context) (int64, error) {
 			}
 			continue
 		}
+		if p.dfType != "" && row.Type != p.dfType {
+			continue
+		}
 		b, parseErr := size.ParseSize(row.Size)
 		if parseErr != nil {
 			if firstErr == nil {
@@ -120,7 +139,9 @@ func (p *DockerProvider) Clean(ctx context.Context, opts CleanOptions) (CleanRes
 		}, nil
 	}
 
-	if opts.Mode == CleanModeSmart {
+	// The until filter does not apply to volumes, so the volumes provider
+	// always runs its configured command.
+	if opts.Mode == CleanModeSmart && p.dfType == "" {
 		return p.smartClean(ctx, opts)
 	}
 	return p.fullClean(ctx, opts)
@@ -129,7 +150,7 @@ func (p *DockerProvider) Clean(ctx context.Context, opts CleanOptions) (CleanRes
 func (p *DockerProvider) smartClean(ctx context.Context, opts CleanOptions) (CleanResult, error) {
 	hours := max(int64(p.maxAge.Hours()), 1)
 	filterArg := fmt.Sprintf("until=%dh", hours)
-	args := []string{"docker", "system", "prune", "-af", "--volumes", "--filter", filterArg}
+	args := []string{"docker", "system", "prune", "-af", "--filter", filterArg}
 
 	if opts.DryRun {
 		return CleanResult{
