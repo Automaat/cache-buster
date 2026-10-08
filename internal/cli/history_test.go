@@ -213,14 +213,14 @@ func TestStatus_ListsUnmanagedDirsFromInjectedScan(t *testing.T) {
 	}
 
 	var err error
-	out := captureStdout(t, func() { err = runStatusWithLoader(loader, false, scan) })
+	out := captureStdout(t, func() { err = runStatusWithLoader(loader, false, scan, nil) })
 	require.NoError(t, err)
 	assert.Contains(t, out, "/x/y")
 	assert.Contains(t, out, "3.0 GiB")
 	assert.Contains(t, out, "time budget")
 	assert.Equal(t, []string{cacheDir}, coveredSeen)
 
-	jsonOut := captureStdout(t, func() { err = runStatusWithLoader(loader, true, scan) })
+	jsonOut := captureStdout(t, func() { err = runStatusWithLoader(loader, true, scan, nil) })
 	require.NoError(t, err)
 	var parsed struct {
 		Unmanaged struct {
@@ -236,7 +236,7 @@ func TestStatus_ListsUnmanagedDirsFromInjectedScan(t *testing.T) {
 	assert.Equal(t, "/x/y", parsed.Unmanaged.Dirs[0].Path)
 	assert.True(t, parsed.Unmanaged.Incomplete)
 
-	noScan := captureStdout(t, func() { err = runStatusWithLoader(loader, true, nil) })
+	noScan := captureStdout(t, func() { err = runStatusWithLoader(loader, true, nil, nil) })
 	require.NoError(t, err)
 	assert.NotContains(t, noScan, "unmanaged")
 }
@@ -277,4 +277,69 @@ func TestHistoryNotes(t *testing.T) {
 	notes := historyNotes(auto.RunRecord{DryRun: true, Recovered: true, Notified: true, Error: "x"})
 
 	assert.Equal(t, "dry-run, recovered, notified, run error", notes)
+}
+
+func TestStatus_ListsProtectedEntriesFromInjectedScan(t *testing.T) {
+	tmp := t.TempDir()
+	cacheDir := filepath.Join(tmp, "cache")
+	require.NoError(t, os.MkdirAll(cacheDir, 0o750))
+	cfgPath := filepath.Join(tmp, "config.yaml")
+	require.NoError(t, os.WriteFile(cfgPath, []byte("version: \"1\"\nproviders:\n  tool:\n    enabled: true\n    paths:\n      - "+cacheDir+"\n    max_size: 1G\n"), 0o600))
+	loader := config.NewLoader()
+	loader.SetConfigPath(cfgPath)
+	loader.SkipDefaults()
+	protect := func(_ context.Context, _ *config.Config) auto.ProtectedReport {
+		return auto.ProtectedReport{
+			Entries:    []auto.ProtectedEntry{{Path: "/p/Downloads", Bytes: 5 * autoGiB, Partial: true}},
+			Incomplete: true,
+		}
+	}
+
+	var err error
+	out := captureStdout(t, func() { err = runStatusWithLoader(loader, false, nil, protect) })
+	require.NoError(t, err)
+	assert.Contains(t, out, "Needs a human")
+	assert.Contains(t, out, "/p/Downloads")
+	assert.Contains(t, out, "5.0 GiB")
+	assert.Contains(t, out, "at least")
+
+	jsonOut := captureStdout(t, func() { err = runStatusWithLoader(loader, true, nil, protect) })
+	require.NoError(t, err)
+	var parsed struct {
+		Protected struct {
+			Entries []struct {
+				Path  string `json:"path"`
+				Bytes int64  `json:"bytes"`
+			} `json:"entries"`
+			Incomplete bool `json:"incomplete"`
+		} `json:"protected"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(jsonOut), &parsed))
+	require.Len(t, parsed.Protected.Entries, 1)
+	assert.Equal(t, "/p/Downloads", parsed.Protected.Entries[0].Path)
+	assert.Equal(t, 5*autoGiB, parsed.Protected.Entries[0].Bytes)
+	assert.True(t, parsed.Protected.Incomplete)
+
+	none := captureStdout(t, func() { err = runStatusWithLoader(loader, true, nil, nil) })
+	require.NoError(t, err)
+	assert.NotContains(t, none, "protected")
+}
+
+func TestStatus_NoEnabledProvidersStillListsProtectedEntries(t *testing.T) {
+	tmp := t.TempDir()
+	cfgPath := filepath.Join(tmp, "config.yaml")
+	require.NoError(t, os.WriteFile(cfgPath, []byte("version: \"1\"\nproviders: {}\n"), 0o600))
+	loader := config.NewLoader()
+	loader.SetConfigPath(cfgPath)
+	loader.SkipDefaults()
+	protect := func(_ context.Context, _ *config.Config) auto.ProtectedReport {
+		return auto.ProtectedReport{Entries: []auto.ProtectedEntry{{Path: "/p/Downloads", Bytes: autoGiB}}}
+	}
+
+	var err error
+	out := captureStdout(t, func() { err = runStatusWithLoader(loader, false, nil, protect) })
+
+	require.NoError(t, err)
+	assert.Contains(t, out, "No enabled providers")
+	assert.Contains(t, out, "/p/Downloads")
 }

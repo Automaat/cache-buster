@@ -37,11 +37,15 @@ type StatusOutput struct {
 	Total      string                `json:"total"`
 	Providers  []ProviderStatus      `json:"providers"`
 	Unmanaged  *auto.UnmanagedReport `json:"unmanaged,omitempty"`
+	Protected  *auto.ProtectedReport `json:"protected,omitempty"`
 	TotalBytes int64                 `json:"total_bytes"`
 }
 
 // unmanagedScan finds large directories no provider covers; nil skips the scan.
 type unmanagedScan func(ctx context.Context, cfg *config.Config) auto.UnmanagedReport
+
+// protectedScan measures protected data that needs a human; nil skips the scan.
+type protectedScan func(ctx context.Context, cfg *config.Config) auto.ProtectedReport
 
 // StatusCmd shows cache status for all enabled providers.
 var StatusCmd = &cobra.Command{
@@ -65,7 +69,12 @@ func runStatus(cmd *cobra.Command, _ []string) error {
 	if top > 0 {
 		scan = defaultUnmanagedScan(top)
 	}
-	return runStatusWithLoader(config.NewLoader(), jsonFlag, scan)
+	return runStatusWithLoader(config.NewLoader(), jsonFlag, scan, defaultProtectedScan)
+}
+
+func defaultProtectedScan(ctx context.Context, cfg *config.Config) auto.ProtectedReport {
+	home, _ := os.UserHomeDir()
+	return auto.ScanProtected(ctx, cfg, home, auto.DefaultProtectedBudget)
 }
 
 func defaultUnmanagedScan(top int) unmanagedScan {
@@ -81,7 +90,7 @@ func defaultUnmanagedScan(top int) unmanagedScan {
 	}
 }
 
-func runStatusWithLoader(loader *config.Loader, jsonOutput bool, scan unmanagedScan) error {
+func runStatusWithLoader(loader *config.Loader, jsonOutput bool, scan unmanagedScan, protect protectedScan) error {
 	cfg, err := loader.Load()
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
@@ -90,6 +99,9 @@ func runStatusWithLoader(loader *config.Loader, jsonOutput bool, scan unmanagedS
 	providers := cfg.EnabledProviders()
 	if len(providers) == 0 {
 		fmt.Println("No enabled providers")
+		if protect != nil && !jsonOutput {
+			outputProtected(protect(context.Background(), cfg))
+		}
 		return nil
 	}
 
@@ -104,17 +116,27 @@ func runStatusWithLoader(loader *config.Loader, jsonOutput bool, scan unmanagedS
 			unmanaged = &report
 		})
 	}
+	var protected *auto.ProtectedReport
+	if protect != nil {
+		wg.Go(func() {
+			report := protect(ctx, cfg)
+			protected = &report
+		})
+	}
 	statuses := scanProviders(ctx, cfg, providers)
 	wg.Wait()
 
 	if jsonOutput {
-		return outputJSON(statuses, unmanaged)
+		return outputJSON(statuses, unmanaged, protected)
 	}
 	if err := outputTable(statuses); err != nil {
 		return err
 	}
 	if unmanaged != nil {
 		outputUnmanaged(*unmanaged)
+	}
+	if protected != nil {
+		outputProtected(*protected)
 	}
 	return nil
 }
@@ -167,7 +189,7 @@ func scanProvider(ctx context.Context, cfg *config.Config, name string) Provider
 	return status
 }
 
-func outputJSON(statuses []ProviderStatus, unmanaged *auto.UnmanagedReport) error {
+func outputJSON(statuses []ProviderStatus, unmanaged *auto.UnmanagedReport, protected *auto.ProtectedReport) error {
 	var total int64
 	for _, s := range statuses {
 		total += s.Current
@@ -178,6 +200,7 @@ func outputJSON(statuses []ProviderStatus, unmanaged *auto.UnmanagedReport) erro
 		TotalBytes: total,
 		Total:      size.FormatSize(total),
 		Unmanaged:  unmanaged,
+		Protected:  protected,
 	}
 	if unmanaged != nil && unmanaged.Dirs == nil {
 		unmanaged.Dirs = []auto.UnmanagedDir{}
@@ -255,6 +278,25 @@ func outputUnmanaged(report auto.UnmanagedReport) {
 				mark = " (at least)"
 			}
 			fmt.Printf("  %10s%s  %s\n", size.FormatSize(d.Bytes), mark, d.Path)
+		}
+	}
+	if report.Incomplete {
+		fmt.Println(dimStyle.Render("Scan stopped at its time budget; sizes may be incomplete."))
+	}
+}
+
+func outputProtected(report auto.ProtectedReport) {
+	fmt.Println()
+	if len(report.Entries) == 0 {
+		fmt.Println(dimStyle.Render("Needs a human: no protected data found"))
+	} else {
+		fmt.Println(headerStyle.Render("Needs a human (protected, never auto-deleted)"))
+		for _, e := range report.Entries {
+			mark := ""
+			if e.Partial {
+				mark = " (at least)"
+			}
+			fmt.Printf("  %10s%s  %s\n", size.FormatSize(e.Bytes), mark, e.Path)
 		}
 	}
 	if report.Incomplete {

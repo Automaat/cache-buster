@@ -2,6 +2,9 @@ package config
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -14,6 +17,29 @@ type Config struct {
 	Providers map[string]Provider `mapstructure:"providers" yaml:"providers"`
 	Version   string              `mapstructure:"version" yaml:"version"`
 	Auto      Auto                `mapstructure:"auto" yaml:"auto"`
+	// Protected lists paths auto never deletes and status reports for a human.
+	// User entries are added to the built-in ones, never replace them.
+	Protected []string `mapstructure:"protected" yaml:"protected,omitempty"`
+}
+
+// DefaultProtected returns the built-in protected paths. The docker volumes
+// path is the Linux location; Docker Desktop keeps volumes in a VM image
+// that auto never prunes.
+func DefaultProtected() []string {
+	return []string{"~/Downloads", "~/.local/share/opencode", "/var/lib/docker/volumes"}
+}
+
+// MergeProtected returns the built-in protected paths followed by the extra
+// ones, without duplicates.
+func MergeProtected(extra []string) []string {
+	out := DefaultProtected()
+	for _, p := range extra {
+		p = strings.TrimSpace(p)
+		if p != "" && !slices.Contains(out, p) {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 // Auto configures the unattended auto command and its launchd agent.
@@ -122,6 +148,9 @@ func (c *Config) Validate() error {
 	if err := c.Auto.Validate(); err != nil {
 		return fmt.Errorf("auto: %w", err)
 	}
+	if err := c.validateProtected(); err != nil {
+		return err
+	}
 	for name := range c.Providers {
 		p := c.Providers[name]
 		if strings.Contains(name, ".") {
@@ -196,4 +225,101 @@ func (c *Config) AllEnabledProviders() []string {
 	}
 	sort.Strings(enabled)
 	return enabled
+}
+
+// validateProtected rejects entries that are malformed or so broad they would
+// protect everything: relative paths, whitespace, empty, "." or ".." elements,
+// the filesystem root, home and any parent of home.
+func (c *Config) validateProtected() error {
+	home, _ := os.UserHomeDir()
+	for _, path := range c.Protected {
+		if err := validateProtectedEntry(path, home); err != nil {
+			return fmt.Errorf("protected: %w", err)
+		}
+	}
+	return nil
+}
+
+func validateProtectedEntry(path, home string) error {
+	if path != strings.TrimSpace(path) {
+		return fmt.Errorf("%q has leading or trailing whitespace", path)
+	}
+	rest, tilde := strings.CutPrefix(path, "~/")
+	if !tilde {
+		var abs bool
+		rest, abs = strings.CutPrefix(path, "/")
+		if !abs {
+			return fmt.Errorf("paths must be absolute or start with ~/, got %q", path)
+		}
+	}
+	if rest == "" {
+		return fmt.Errorf("%q is too broad, name a specific directory", path)
+	}
+	for elem := range strings.SplitSeq(rest, "/") {
+		if elem == "" || elem == "." || elem == ".." {
+			return fmt.Errorf("%q has an empty, '.' or '..' path element", path)
+		}
+	}
+
+	if strings.ContainsAny(path, "*?[") {
+		return fmt.Errorf("%q contains glob characters, protected entries are literal paths", path)
+	}
+	if !tilde && !strings.Contains(strings.TrimPrefix(stripDataAlias(path), "/"), "/") {
+		return fmt.Errorf("%q is a top-level system directory, name a deeper path", path)
+	}
+
+	expanded := "/" + rest
+	if tilde {
+		if home == "" {
+			return nil
+		}
+		expanded = filepath.Join(home, rest)
+	}
+	homes := []string{filepath.Clean(home)}
+	if resolved, err := filepath.EvalSymlinks(home); err == nil {
+		homes = append(homes, resolved)
+	}
+	candidates := []string{filepath.Clean(expanded)}
+	if resolved, err := filepath.EvalSymlinks(expanded); err == nil {
+		candidates = append(candidates, resolved)
+	}
+	for _, c := range slices.Clone(candidates) {
+		candidates = append(candidates, stripDataAlias(c))
+	}
+	for _, h := range slices.Clone(homes) {
+		homes = append(homes, stripDataAlias(h))
+	}
+	for _, cand := range candidates {
+		if cand == "/" {
+			return fmt.Errorf("%q is the filesystem root, name a specific directory", path)
+		}
+		for _, h := range homes {
+			if h == "." || h == "" {
+				continue
+			}
+			if strings.EqualFold(cand, h) || strings.HasPrefix(strings.ToLower(h), strings.ToLower(cand)+"/") {
+				return fmt.Errorf("%q is home or a parent of home, name a specific directory", path)
+			}
+		}
+	}
+	return nil
+}
+
+// dataVolumeAlias is the macOS firmlink that spells the root filesystem
+// again under the user data volume.
+const dataVolumeAlias = "/System/Volumes/Data"
+
+// stripDataAlias returns p without the data volume firmlink prefix.
+func stripDataAlias(p string) string {
+	if len(p) < len(dataVolumeAlias) || !strings.EqualFold(p[:len(dataVolumeAlias)], dataVolumeAlias) {
+		return p
+	}
+	rest := p[len(dataVolumeAlias):]
+	if rest == "" {
+		return "/"
+	}
+	if strings.HasPrefix(rest, "/") {
+		return rest
+	}
+	return p
 }

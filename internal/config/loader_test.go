@@ -5,6 +5,9 @@ import (
 	"path/filepath"
 	"slices"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestLoader_LoadSaveCycle(t *testing.T) {
@@ -311,4 +314,131 @@ func TestLoader_SkipPrefixesAreUnioned(t *testing.T) {
 			t.Errorf("user prefix lost: %v", p.SkipPrefixes)
 		}
 	}
+}
+
+func TestLoader_ProtectedIsUnionWithDefaults(t *testing.T) {
+	tests := []struct {
+		name string
+		yaml string
+		want []string
+		not  []string
+	}{
+		{"absent", "version: \"1\"\n", DefaultProtected(), nil},
+		{"empty list keeps defaults", "version: \"1\"\nprotected: []\n", DefaultProtected(), nil},
+		{"user entries added", "version: \"1\"\nprotected:\n  - ~/keep\n  - ~/Downloads\n", append(DefaultProtected(), "~/keep"), nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "config.yaml")
+			require.NoError(t, os.WriteFile(path, []byte(tt.yaml), 0o600))
+			loader := NewLoader()
+			loader.SetConfigPath(path)
+
+			cfg, err := loader.Load()
+
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, cfg.Protected)
+		})
+	}
+}
+
+func TestLoader_SaveKeepsUserProtectedEntries(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	loader := NewLoader()
+	loader.SetConfigPath(path)
+	cfg := DefaultConfig()
+	cfg.Protected = MergeProtected([]string{"~/keep"})
+	require.NoError(t, loader.Save(cfg))
+
+	reloader := NewLoader()
+	reloader.SetConfigPath(path)
+	got, err := reloader.Load()
+
+	require.NoError(t, err)
+	assert.Contains(t, got.Protected, "~/keep")
+	assert.Subset(t, got.Protected, DefaultProtected())
+}
+
+func TestConfigValidate_ProtectedPaths(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Protected = append(cfg.Protected, "relative/dir")
+	require.Error(t, cfg.Validate())
+
+	cfg.Protected = MergeProtected([]string{"~/ok", "/abs/ok"})
+	require.NoError(t, cfg.Validate())
+}
+
+func TestLoader_RejectsUnsafeProtectedEntries(t *testing.T) {
+	for _, entry := range []string{"Downloads2", "$HOME/x", "~", "~/", "/"} {
+		t.Run(entry, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "config.yaml")
+			require.NoError(t, os.WriteFile(path, []byte("version: \"1\"\nprotected:\n  - \""+entry+"\"\n"), 0o600))
+			loader := NewLoader()
+			loader.SetConfigPath(path)
+
+			_, err := loader.Load()
+
+			require.Error(t, err)
+		})
+	}
+}
+
+func TestValidateProtected_RejectsBroadAndMalformedEntries(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	bad := []string{
+		"~/.", "~/..", "/ ", "//", "/./", "/", "~", "~/", " /x", "/x ", "~/x/", "/x//y",
+		"/x/./y", "/x/../y", "$HOME/x", "rel/dir", home, filepath.Dir(home), "/Users",
+		"~/a/..", home + "/.", filepath.Dir(filepath.Dir(home)),
+		"~/scratch/*", "/data/*/keep", "/data/k?ep", "/data/[ab]/keep",
+		"/System/Volumes/Data", "/System/Volumes/Data/", "/System/Volumes/Data/Users",
+		"/system/volumes/data" + home, "/System/Volumes/Data" + home,
+	}
+	for _, entry := range bad {
+		t.Run(entry, func(t *testing.T) {
+			cfg := &Config{Protected: []string{entry}}
+			require.Error(t, cfg.validateProtected())
+		})
+	}
+	good := &Config{Protected: []string{"~/keep", "/data/keep", filepath.Join(home, "x", "y")}}
+	require.NoError(t, good.validateProtected())
+}
+
+func TestValidateProtected_RejectsSymlinkToHome(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	link := filepath.Join(t.TempDir(), "alias")
+	require.NoError(t, os.Symlink(home, link))
+
+	cfg := &Config{Protected: []string{link}}
+
+	require.Error(t, cfg.validateProtected())
+}
+
+func TestLoader_SaveWritesOnlyUserProtectedEntries(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	loader := NewLoader()
+	loader.SetConfigPath(path)
+	cfg := DefaultConfig()
+	cfg.Protected = MergeProtected([]string{"~/keep"})
+	require.NoError(t, loader.Save(cfg))
+
+	raw, err := os.ReadFile(path)
+	require.NoError(t, err)
+	assert.Contains(t, string(raw), "~/keep")
+	assert.NotContains(t, string(raw), "Downloads")
+	assert.NotContains(t, string(raw), "opencode")
+
+	reloader := NewLoader()
+	reloader.SetConfigPath(path)
+	got, err := reloader.Load()
+	require.NoError(t, err)
+	assert.Equal(t, MergeProtected([]string{"~/keep"}), got.Protected)
+
+	require.NoError(t, reloader.Save(DefaultConfig()))
+	raw, err = os.ReadFile(path)
+	require.NoError(t, err)
+	assert.NotContains(t, string(raw), "~/keep")
 }
