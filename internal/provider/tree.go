@@ -158,9 +158,19 @@ func (p *TreeProvider) trim(ctx context.Context, opts CleanOptions) (CleanResult
 
 	plan := p.plan(units, opts.Mode == CleanModeSmart)
 	if len(plan) == 0 {
-		return CleanResult{Output: noopOutput(units, warnings)}, nil
+		return CleanResult{Output: noopOutput(units, warnings), SkippedEntries: countHeld(units)}, nil
 	}
-	return p.execute(ctx, plan, units, warnings, opts.DryRun)
+	return p.execute(ctx, plan, units, warnings, opts)
+}
+
+func countHeld(units []treeUnit) int {
+	var n int
+	for i := range units {
+		if units[i].hold != "" {
+			n++
+		}
+	}
+	return n
 }
 
 func noopOutput(units []treeUnit, warnings int) string {
@@ -381,10 +391,11 @@ func (p *TreeProvider) plan(units []treeUnit, smart bool) []treeUnit {
 const trimBufferFactor = 0.9
 
 func (p *TreeProvider) execute(
-	ctx context.Context, plan, all []treeUnit, warnings int, dryRun bool,
+	ctx context.Context, plan, all []treeUnit, warnings int, opts CleanOptions,
 ) (CleanResult, error) {
+	dryRun := opts.DryRun
 	var (
-		res         CleanResult
+		res         = CleanResult{SkippedEntries: countHeld(all)}
 		out         strings.Builder
 		failed      int
 		filesFailed int
@@ -423,10 +434,14 @@ func (p *TreeProvider) execute(
 		}
 		res.BytesCleaned += u.size
 		res.FilesDeleted += u.files
+		res.Entries = append(res.Entries, Entry{Path: u.path, Size: u.size})
 		if u.isTree {
 			treesGone++
 		} else {
 			filesGone++
+		}
+		if opts.Recovered != nil && opts.Recovered(res.BytesCleaned) {
+			break
 		}
 	}
 

@@ -697,3 +697,38 @@ func TestTreeProvider_ImageOnlyProcessTableHoldsEveryTree(t *testing.T) {
 	require.NoError(t, err)
 	assert.NoDirExists(t, filepath.Join(root, "_npx", "a"))
 }
+
+func TestTreeProvider_ReportsEntriesAndSkips(t *testing.T) {
+	root := t.TempDir()
+	makePackage(t, filepath.Join(root, "_npx", "old"), 4, 90*day)
+	makePackage(t, filepath.Join(root, "_npx", "fresh"), 4, time.Minute)
+	makePackage(t, filepath.Join(root, "_npx", "newest"), 4, 50*day)
+	p := newTree(t, "npm", config.Provider{Paths: []string{root}, MaxSize: "1", MaxAge: "30d"})
+
+	dry, err := p.Clean(context.Background(), CleanOptions{Mode: CleanModeSmart, DryRun: true})
+	require.NoError(t, err)
+
+	require.Len(t, dry.Entries, 2)
+	assert.Equal(t, filepath.Join(root, "_npx", "old"), dry.Entries[0].Path)
+	assert.Equal(t, filepath.Join(root, "_npx", "newest"), dry.Entries[1].Path)
+	assert.Equal(t, 1, dry.SkippedEntries)
+	assert.DirExists(t, filepath.Join(root, "_npx", "old"))
+}
+
+func TestTreeProvider_StopsOnceRecovered(t *testing.T) {
+	root := t.TempDir()
+	for i, name := range []string{"a", "b", "c", "d"} {
+		makePackage(t, filepath.Join(root, "_npx", name), 4, time.Duration(90-10*i)*day)
+	}
+	p := newTree(t, "npm", config.Provider{Paths: []string{root}, MaxSize: "1", MaxAge: "30d"})
+
+	res, err := p.Clean(context.Background(), CleanOptions{
+		Mode:      CleanModeSmart,
+		Recovered: func(freed int64) bool { return freed > 0 },
+	})
+	require.NoError(t, err)
+
+	assert.Len(t, res.Entries, 1)
+	assert.NoDirExists(t, filepath.Join(root, "_npx", "a"))
+	assert.DirExists(t, filepath.Join(root, "_npx", "b"))
+}
