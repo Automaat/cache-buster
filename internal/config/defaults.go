@@ -100,7 +100,7 @@ func jsProviders(p Platform) map[string]Provider {
 func systemProviders(p Platform) map[string]Provider {
 	dockerPaths := perOS(p,
 		[]string{"~/Library/Containers/com.docker.docker"},
-		[]string{"/var/lib/docker/overlay2", "~/.docker/desktop"},
+		[]string{"~/.docker/desktop"},
 		[]string{p.cache("Docker")})
 	return map[string]Provider{
 		"homebrew": {

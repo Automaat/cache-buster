@@ -55,7 +55,7 @@ func TestDefaultProvidersFor_CacheRoots(t *testing.T) {
 		{"macOS gh", macPlatform, "gh", []string{"~/.cache/gh"}},
 		{"windows huggingface", winPlatform, "huggingface", []string{"~/.cache/huggingface/hub"}},
 		{"linux pnpm", linPlatform, "pnpm", []string{"~/.local/share/pnpm/store"}},
-		{"linux docker", linPlatform, "docker", []string{"/var/lib/docker/overlay2", "~/.docker/desktop"}},
+		{"linux docker desktop", linPlatform, "docker", []string{"~/.docker/desktop"}},
 		{"linux edge", linPlatform, "edge", []string{"~/.cache/microsoft-edge"}},
 	}
 	for _, tt := range tests {
