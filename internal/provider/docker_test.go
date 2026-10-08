@@ -281,11 +281,16 @@ func TestStripVolumesFlag(t *testing.T) {
 
 func TestStripVolumesFlag_Wrapped(t *testing.T) {
 	tests := map[string]string{
-		`sh -c "docker system prune -af '--volumes'"`:        "docker system prune -af ''",
-		`sh -c "docker system prune -af \"--volumes\""`:      `docker system prune -af ""`,
-		`sh -c "docker system prune --volumes=true;echo ok"`: "docker system prune;echo ok",
-		`sh -c "docker system prune --volumes false"`:        "docker system prune false",
-		`sh -c "docker system prune --volumes=x&&echo ok"`:   "docker system prune&&echo ok",
+		`sh -c "docker system prune -af '--volumes'"`:          "docker system prune -af ''",
+		`sh -c "docker system prune -af \"--volumes\""`:        `docker system prune -af ""`,
+		`sh -c "docker system prune --volumes=true;echo ok"`:   "docker system prune;echo ok",
+		`sh -c "docker system prune --volumes false"`:          "docker system prune false",
+		`sh -c "docker system prune --volumes=x&&echo ok"`:     "docker system prune&&echo ok",
+		`sh -c "docker system prune --volumes=true)"`:          "docker system prune)",
+		`sh -c "docker system prune --volumes=true>/dev/null"`: "docker system prune>/dev/null",
+		`sh -c "docker system prune --volumes-from x"`:         "docker system prune --volumes-from x",
+		`sh -c "docker system prune --volumes --volumes"`:      "docker system prune",
+		`sh -c "docker system prune --volumes"`:                "docker system prune",
 	}
 	for in, want := range tests {
 		parts, err := shellquote.Split(stripVolumesFlag(in))

@@ -38,7 +38,8 @@ func NewDockerProvider(name string, cfg config.Provider) (*DockerProvider, error
 // The flag may follow whitespace, a quote or the string start; its value
 // stops at whitespace, quotes and shell operators. A leading quote is kept
 // so the surrounding quoting stays balanced.
-var embeddedVolumesFlag = regexp.MustCompile(`(?:\s+|^|(['"]))--volumes(=[^\s'";&|]*)?`)
+var embeddedVolumesFlag = regexp.MustCompile(
+	`(?:\s+|^|(['"]))--volumes(?:=[^\s'";&|()<>` + "`" + `]*)?($|[\s'";&|()<>` + "`" + `])`)
 
 // stripVolumesFlag drops --volumes from configs written by older versions,
 // whose saved clean_cmd would otherwise keep deleting volumes.
@@ -53,9 +54,21 @@ func stripVolumesFlag(cmd string) string {
 			continue
 		}
 		// Wrapped commands such as sh -c carry the flag inside one token.
-		kept = append(kept, embeddedVolumesFlag.ReplaceAllString(part, "$1"))
+		kept = append(kept, removeEmbeddedVolumes(part))
 	}
 	return shellquote.Join(kept...)
+}
+
+// removeEmbeddedVolumes repeats the replacement because each match consumes
+// the delimiter that the next adjacent flag needs.
+func removeEmbeddedVolumes(part string) string {
+	for {
+		next := embeddedVolumesFlag.ReplaceAllString(part, "$1$2")
+		if next == part {
+			return part
+		}
+		part = next
+	}
 }
 
 // dockerVolumesDFType is the docker system df row type for volumes.
