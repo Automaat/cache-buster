@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"time"
 
@@ -60,6 +61,7 @@ var UninstallAgentCmd = &cobra.Command{
 
 func init() {
 	AutoCmd.Flags().Bool("dry-run", false, "Preview without deleting")
+	AutoCmd.Flags().Bool("verbose", false, "List every entry instead of a per-provider summary")
 	AutoCmd.Flags().String("assume-free", "", "Pretend this much space is free (e.g. 3G) to exercise the tiers; implies --dry-run")
 	_ = AutoCmd.Flags().MarkHidden("assume-free")
 }
@@ -79,6 +81,8 @@ type autoEnv struct {
 	uid         int
 	goos        string
 	configDir   string
+	verbose     bool
+	lookPath    func(string) (string, error)
 }
 
 func defaultAutoEnv() (autoEnv, error) {
@@ -100,6 +104,7 @@ func defaultAutoEnv() (autoEnv, error) {
 		exec:        auto.ExecCommand,
 		notify:      auto.DefaultNotifier(auto.ExecCommand),
 		now:         time.Now,
+		lookPath:    exec.LookPath,
 		out:         os.Stdout,
 		stateDir:    stateDir,
 		home:        home,
@@ -121,11 +126,13 @@ func userConfigDir(home string) string {
 func runAuto(cmd *cobra.Command, _ []string) error {
 	dryRun, _ := cmd.Flags().GetBool("dry-run")
 	assume, _ := cmd.Flags().GetString("assume-free")
+	verbose, _ := cmd.Flags().GetBool("verbose")
 
 	env, err := defaultAutoEnv()
 	if err != nil {
 		return err
 	}
+	env.verbose = verbose
 	if assume != "" {
 		free, err := assumedFree(assume, env.free)
 		if err != nil {
@@ -188,6 +195,7 @@ func runAutoWithLoader(ctx context.Context, loader *config.Loader, env autoEnv, 
 		NewProvider: env.newProvider,
 		Out:         env.out,
 		Home:        env.home,
+		Verbose:     env.verbose,
 	})
 	env.recordRun(ctx, cfg.Auto, report, err)
 	if err != nil {

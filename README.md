@@ -178,17 +178,51 @@ bilgie clean --all         # All enabled
 bilgie clean --dry-run     # Preview only
 bilgie clean --force       # Skip confirmation
 bilgie clean --smart       # LRU-based trimming
+bilgie clean --dry-run --verbose  # List every entry
 ```
 
 **Clean modes:**
 - **Full** (default): Runs native tool commands (e.g., `go clean -cache`) or deletes files directly
 - **Smart** (`--smart`): Removes files older than `max_age`, then LRU-trims to `max_size`
 
+### Output
+
+`clean`, `auto` and every dry-run print one block per provider: the action, the bytes, the
+number of entries and the five largest entries, then the providers that were skipped with their
+reason and a total. A provider that cleans through a tool (`go clean -cache`) has no entry list
+and shows the command it would run instead.
+
+```text
+$ bilgie auto --dry-run
+free 18 GiB of 460 GiB: tier low (dry-run, nothing is deleted)
+npm: would free 12 GiB (56012 entries)
+  largest:
+       212 MiB  /Users/me/.npm/_cacache/content-v2/sha512/4e/9a/f3c1d0
+       198 MiB  /Users/me/.npm/_cacache/content-v2/sha512/b1/07/22ae94
+       171 MiB  /Users/me/.npm/_cacache/content-v2/sha512/0c/d8/7745be
+       160 MiB  /Users/me/.npm/_cacache/content-v2/sha512/e9/31/a0c2d7
+       155 MiB  /Users/me/.npm/_cacache/content-v2/sha512/73/5f/918b06
+    ... and 56007 more (--verbose lists all)
+go-build: would free 3.1 GiB
+  would run: go clean -cache
+skipped (2):
+  docker: unavailable
+  gradle: within limit
+total: would free 15 GiB across 2 providers, 56012 entries; 2 skipped
+done: free 18 GiB
+```
+
+`--verbose` prints every entry (`would delete: <path> (<size>)`) instead of the summary.
+`--json` keeps its fields and adds a `summary` object to each provider (`action`, `entries`,
+`bytes`, `top` with `path` and `size_bytes`, and `skipped_entries` for directory-pattern providers)
+and to the document (`providers`, `skipped`, `errors`, `entries`, `bytes`).
+
 ### auto
 
 ```bash
 bilgie auto             # Trim by free-space tier
 bilgie auto --dry-run   # Preview only
+bilgie auto --verbose   # List every entry
 bilgie install-agent    # Run auto every auto.interval with the OS scheduler
 bilgie uninstall-agent  # Unload and remove everything install-agent created
 ```
@@ -243,6 +277,16 @@ to `runs.jsonl.1` at 8 MiB.
 bilgie history           # Last 10 runs
 bilgie history -n 50     # More runs (0 shows all)
 bilgie history --json    # Full records, including per-provider detail
+bilgie history --providers -n 20   # Bytes freed per provider over the last 20 runs
+```
+
+```text
+$ bilgie history --providers -n 20
+Bytes freed per provider over the last 20 run(s); dry-runs count as WOULD FREE
+PROVIDER  RUNS  FREED     WOULD FREE  SKIPPED  ERRORS
+npm       18    41.2 GiB  12.0 GiB    11       0
+go-build  12    9.8 GiB   3.1 GiB     6        0
+docker    7     0 B       0 B         2        5
 ```
 
 `history` skips unreadable lines and reports how many. When a real run (not a dry-run) ends with
@@ -250,6 +294,40 @@ free space still under `min_free` or `min_free_pct`, `auto` shows one desktop no
 Windows); a run that recovered enough space stays quiet. A notifier that is not installed is logged as a skipped
 notification. A failed notification or log write is reported but does not fail the run, and a notifier is
 cancelled after 10 seconds so it cannot hold the run lock.
+
+### doctor
+
+```bash
+bilgie doctor
+```
+
+Checks, without changing anything, that the agent works: it is installed and loaded in the
+scheduler of this OS (`launchctl print`, `systemctl --user is-active` or the crontab, `schtasks`),
+the last run (time, tier, bytes freed, errors from `runs.jsonl`) is recent for `auto.interval`,
+free space is above the floors, the 7-day free-space trend from the run history, config problems
+(disabled providers, providers skipped on each of the last runs for a reason other than
+"within limit", providers on protected paths) and whether the notifier program exists.
+It exits non-zero when a finding needs attention; each one carries a "what to do" line.
+
+```text
+$ bilgie doctor
+[ok  ] agent: installed and loaded (launchd)
+[FAIL] last run: 9h ago (tier low, freed 4.1 GiB, 1 provider error(s)); failed: docker
+       what to do: see /Users/me/Library/Logs/bilgie/auto.log; run: bilgie auto --dry-run --verbose to see each error
+[FAIL] schedule: last run was 9h ago but the interval is 30m0s: the agent is not running
+       what to do: see /Users/me/Library/Logs/bilgie/auto.log; run: bilgie install-agent to reinstall it
+[ok  ] freed: 38 GiB freed by 21 deleting run(s) in the last 7 days
+[warn] free space: 24 GiB free of 460 GiB (5%), tier low
+       what to do: run: bilgie auto; run: bilgie status for large unmanaged directories
+[warn] trend: free space -41 GiB over 6d (65 GiB -> 24 GiB, 80 run(s)); min_free is reached in about 8 day(s) at this rate
+       what to do: find what grows: bilgie status shows large unmanaged directories
+[note] config: 3 provider(s) disabled: docker-volumes, sail-dirs, xcode-archives
+[warn] config: gradle was skipped on each of the last 5 runs: unavailable
+       what to do: install the tool gradle needs, or set providers.gradle.enabled: false
+[ok  ] notifier: osascript is available
+
+5 finding(s) need attention
+```
 
 ### config
 

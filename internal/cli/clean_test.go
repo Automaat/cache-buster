@@ -81,9 +81,9 @@ func TestClean_DryRun_All(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	assert.Contains(t, output, "[dry-run]")
-	assert.Contains(t, output, "test-provider")
+	assert.Contains(t, output, "test-provider: would free")
 	assert.Contains(t, output, "would run")
+	assert.Contains(t, output, "total: would free")
 }
 
 func TestClean_DryRun_SpecificProvider(t *testing.T) {
@@ -96,8 +96,7 @@ func TestClean_DryRun_SpecificProvider(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	assert.Contains(t, output, "[dry-run]")
-	assert.Contains(t, output, "test-provider")
+	assert.Contains(t, output, "test-provider: would free")
 }
 
 func TestClean_Force_SkipsConfirmation(t *testing.T) {
@@ -351,8 +350,7 @@ providers:
 	})
 	require.NoError(t, err)
 
-	assert.Contains(t, output, "[dry-run]")
-	assert.Contains(t, output, "test-provider")
+	assert.Contains(t, output, "test-provider: would free")
 }
 
 func TestClean_SmartMode_Force(t *testing.T) {

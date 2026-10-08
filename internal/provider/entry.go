@@ -50,10 +50,11 @@ func (p *EntryProvider) Clean(ctx context.Context, opts CleanOptions) (CleanResu
 	sortEntries(entries)
 
 	var (
-		freed   int64
-		removed int64
-		failed  int
-		output  strings.Builder
+		freed          int64
+		removed        int64
+		failed         int
+		output         strings.Builder
+		removedEntries []Entry
 	)
 	for i, e := range entries {
 		// The newest entry is likely in use; keep it even if over the limit.
@@ -74,9 +75,10 @@ func (p *EntryProvider) Clean(ctx context.Context, opts CleanOptions) (CleanResu
 		}
 		freed += e.size
 		removed++
+		removedEntries = append(removedEntries, Entry{Path: e.path, Size: e.size})
 	}
 
-	res := CleanResult{BytesCleaned: freed, FilesDeleted: removed}
+	res := CleanResult{BytesCleaned: freed, FilesDeleted: removed, Entries: removedEntries}
 	if failed > 0 {
 		res.Output = strings.TrimSpace(output.String())
 		return res, fmt.Errorf("%d entries could not be removed", failed)
