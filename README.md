@@ -103,7 +103,7 @@ Providers are auto-detected — only tools installed on your system appear in th
 | homebrew | 5G | `brew cleanup` |
 | mise | 8G | `mise prune` |
 | docker | 50G | `docker system prune -af` |
-| docker-volumes (disabled by default) | 50G | `docker volume prune -f` |
+| docker-volumes (disabled by default; ignores max_age) | 50G | `docker volume prune -f` |
 | jetbrains | 3G | file-based |
 
 ## Commands

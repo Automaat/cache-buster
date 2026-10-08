@@ -231,3 +231,35 @@ echo '{"Type":"Build Cache","Size":"750MB"}'
 	require.NoError(t, err)
 	assert.Equal(t, int64(2*1024*1024*1024), total)
 }
+
+func TestDockerLegacyConfigVolumesFlagStripped(t *testing.T) {
+	fakeDockerBin(t, `exit 0`)
+
+	p, err := NewProvider("docker", config.Provider{
+		Paths:    []string{t.TempDir()},
+		MaxSize:  "10G",
+		CleanCmd: "docker system prune -af --volumes",
+	})
+	require.NoError(t, err)
+
+	result, err := p.Clean(t.Context(), CleanOptions{Mode: CleanModeFull, DryRun: true})
+	require.NoError(t, err)
+	assert.Equal(t, "would run: docker system prune -af", result.Output)
+}
+
+func TestDockerVolumesSize_NoVolumesRow_NoPathFallback(t *testing.T) {
+	fakeDockerBin(t, `echo '{"Type":"Images","Size":"9GB"}'
+`)
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "Docker.raw"), []byte("hello"), 0o600))
+
+	p, err := NewDockerVolumesProvider("docker-volumes", config.Provider{
+		Paths:    []string{dir},
+		MaxSize:  "10G",
+		CleanCmd: "docker volume prune -f",
+	})
+	require.NoError(t, err)
+
+	_, err = p.CurrentSize(t.Context())
+	require.Error(t, err)
+}

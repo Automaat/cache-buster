@@ -30,8 +30,24 @@ func NewDockerProvider(name string, cfg config.Provider) (*DockerProvider, error
 
 	return &DockerProvider{
 		BaseProvider: base,
-		cleanCmd:     cfg.CleanCmd,
+		cleanCmd:     stripVolumesFlag(cfg.CleanCmd),
 	}, nil
+}
+
+// stripVolumesFlag drops --volumes from configs written by older versions,
+// whose saved clean_cmd would otherwise keep deleting volumes.
+func stripVolumesFlag(cmd string) string {
+	parts, err := shellquote.Split(cmd)
+	if err != nil {
+		return cmd
+	}
+	kept := parts[:0]
+	for _, part := range parts {
+		if part != "--volumes" {
+			kept = append(kept, part)
+		}
+	}
+	return shellquote.Join(kept...)
 }
 
 // dockerVolumesDFType is the docker system df row type for volumes.
@@ -56,6 +72,10 @@ type dockerDFRow struct {
 // CurrentSize returns actual Docker data usage from docker system df.
 // Falls back to path-based size if docker system df fails.
 func (p *DockerProvider) CurrentSize(ctx context.Context) (int64, error) {
+	// The path fallback measures the whole Docker VM, not just volumes.
+	if p.dfType != "" {
+		return p.dockerDataSize(ctx)
+	}
 	if b, err := p.dockerDataSize(ctx); err == nil {
 		return b, nil
 	}
