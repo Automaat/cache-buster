@@ -114,6 +114,10 @@ func (p *ProjectArtifactsProvider) measureActivity(ctx context.Context, proj *pr
 	}
 	proj.sampled = newest
 	proj.newest = newest
+	if truncated {
+		proj.problem = "too many files to judge idleness"
+		return
+	}
 
 	repoRoot, gitDir, err := findGit(proj.Dir, proj.root)
 	if err != nil {
@@ -122,9 +126,6 @@ func (p *ProjectArtifactsProvider) measureActivity(ctx context.Context, proj *pr
 	}
 	proj.repoRoot = repoRoot
 	if gitDir == "" {
-		if truncated {
-			proj.problem = "too many files to judge idleness without git"
-		}
 		return
 	}
 	gitTime, err := gitActivity(gitDir)
@@ -263,11 +264,66 @@ func (ps *pass) busyReason(c *candidate) string {
 			return tool + " is running and its directory cannot be read"
 		case pathWithin(proc.Cwd, proj.Dir):
 			return tool + " is running in the project"
+		case argsReach(proc, proj.Dir, proj.alias):
+			return tool + " is running on the project"
 		case proj.repoRoot != "" && pathWithin(proc.Cwd, proj.repoRoot) && pathWithin(proj.Dir, proc.Cwd):
 			return tool + " is running in the repository"
 		}
 	}
 	return ""
+}
+
+// pathFlags are the options whose value is a project path.
+var pathFlags = []string{"--manifest-path", "--prefix", "--cwd", "-C"}
+
+// argsReach reports whether a path in the process's arguments, resolved
+// against its working directory, lies inside one of dirs. This catches
+// `cd ~/code && node app/server.js` and `npm --prefix app start`, whose
+// working directory is above the project. Only path-like tokens and the
+// values of pathFlags count, and an ancestor working directory alone never
+// does.
+func argsReach(proc toolProcess, dirs ...string) bool {
+	if proc.Cwd == "" {
+		return false
+	}
+	fields := strings.Fields(proc.CommandLine)
+	for i, field := range fields {
+		tok := strings.Trim(field, `"';&|()`)
+		if strings.HasPrefix(tok, "-") {
+			flag, value, hasValue := strings.Cut(tok, "=")
+			if !slices.Contains(pathFlags, flag) {
+				continue
+			}
+			if !hasValue {
+				if i+1 == len(fields) {
+					continue
+				}
+				value = strings.Trim(fields[i+1], `"';&|()`)
+			}
+			tok = value
+		} else if !strings.ContainsAny(tok, `/\`) && !strings.HasPrefix(tok, ".") {
+			continue
+		}
+		if tok == "" {
+			continue
+		}
+		abs := tok
+		if !filepath.IsAbs(abs) {
+			abs = filepath.Join(proc.Cwd, tok)
+		}
+		spellings := []string{abs}
+		if resolved, err := filepath.EvalSymlinks(abs); err == nil && resolved != abs {
+			spellings = append(spellings, resolved)
+		}
+		for _, spelling := range spellings {
+			for _, dir := range dirs {
+				if dir != "" && pathWithin(spelling, dir) {
+					return true
+				}
+			}
+		}
+	}
+	return false
 }
 
 // dirtyReason skips projects whose git tree has uncommitted changes. Git

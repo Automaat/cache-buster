@@ -170,15 +170,29 @@ directory that merely shares the name is never touched:
 Roots default to whichever of `~/sideprojects`, `~/kong`, `~/work`, `~/src`, `~/code` and
 `~/projects` exist. Defaults are not written to the saved config, so one file works on every
 machine. The search goes `max_depth` levels below each root (default 4), never follows
-symlinks, never enters `.git`, `node_modules`, `target`, `.venv` or `venv`, and stops after
+symlinks, never enters `.git`, `node_modules`, `target`, `.venv` or `venv` while searching, and
+stops after
 `scan_budget` (default 10s) or on Ctrl-C. A nested project in a monorepo is found at its own
 level. A root that is home, a parent of home or the filesystem root is ignored.
 
-A project is idle when both of these are older than `min_idle` (default 30 days): the newest
-mtime among files outside the artifact directories and `.git` (a sample of the first 3000
-entries, breadth first), and the git `HEAD` and reflog time. A linked worktree is judged by its
-own `HEAD`. A directory-only removal never makes a project look active: the parent keeps its
-mtime.
+A project is idle when all of these are older than `min_idle` (default 60 days): the newest
+mtime among files outside the artifacts and `.git` (a sample of the first 3000 entries, breadth
+first; a sample cut short skips the project, with or without git), and the git `HEAD` and reflog
+time. A folder that merely shares an artifact's name, such as `src/target/`, is source and is
+sampled; only recognised artifacts (valid marker beside the project file) are left out. A
+linked worktree is judged by its own `HEAD`. A directory-only removal never makes a project look
+active: the parent keeps its mtime.
+
+An idle project's artifact must also be unused. It is skipped while any of these is newer than
+`min_idle`: the mtime of the artifact and of its top-level entries (for Rust also the entries of
+`target/{debug,release}` and `target/<triple>/{debug,release}`; for Node `node_modules/.bin`;
+for Python the venv's `bin` or `Scripts`), and the atime of the regular files among them, such
+as `target/release/<tool>`, `node_modules/.bin/<tool>` (followed to its script) and
+`node_modules/.package-lock.json`. This keeps a binary that a cron or launchd job still runs.
+atime is only an extra signal: `noatime` mounts never update it and `relatime` updates it at
+most daily, so a quiet atime proves nothing and the mtime checks, the running-process check and
+the open-file check stay in force. Directory atimes are ignored because listing a directory
+refreshes them.
 
 An artifact is skipped, with the reason in `--verbose` output, when:
 
@@ -190,16 +204,23 @@ An artifact is skipped, with the reason in `--verbose` output, when:
   Set `skip_if_dirty: false` to turn this off
 - a tool of that kind runs in the project: `cargo` or `rustc` for Rust, `node`, `npm`, `npx`,
   `pnpm`, `yarn` or `bun` for Node, `python`, `pip`, `uv` or `poetry` for Python. A process
-  counts when its command line names the project or its working directory is inside it. A
-  process whose working directory cannot be read counts as busy when the lookup fails outright
-  (always on Windows, where only image names are visible)
+  counts when its command line names the project, its working directory is inside it, or a
+  relative path in its arguments, or the value of `--manifest-path`, `--prefix`, `--cwd` or
+  `-C`, resolves to a place inside it (`cd ~/code && node app/server.js`,
+  `npm --prefix app start`). A working directory above the project is not enough. A process
+  whose working directory cannot be read counts as busy when the lookup fails outright (always
+  on Windows, where only image names are visible)
 - a process has an open file in it (`lsof`; `skip_if_open: false` turns this off). Windows
   cannot list handles, but refuses to rename a directory that has open files, so the rename is
   the check there
 
-Removal renames the directory aside (`.bilgie-trash-*` in the same folder) and then deletes it,
-so a crash leaves either the intact artifact or a trash directory that no marker check accepts,
-never a half-deleted `target`. The next run sweeps leftover trash.
+Removal renames the directory aside (`.bilgie-trash-<kind>-<8 characters>` in the same folder)
+and then deletes it, so a crash leaves either the intact artifact or a trash directory that no
+marker check accepts, never a half-deleted `target`. The next run sweeps leftover trash, but only
+names of exactly that shape inside a project folder; any other `.bilgie-trash-*` directory is
+yours and stays. If the delete fails after the rename, the bytes that did go are counted and the
+rest is swept next time. A file edited while artifacts are being removed blocks the project's
+remaining artifacts.
 
 `clean project-artifacts` removes every eligible artifact (full mode). `clean --smart` and
 `auto` remove only until the artifacts are under `max_size`; `auto` under low-space pressure
@@ -213,7 +234,7 @@ providers:
   project-artifacts:
     paths: [~/sideprojects, ~/work]
     max_size: 20G
-    min_idle: 30d
+    min_idle: 60d
     max_depth: 4
     scan_budget: 10s
     rust: true
@@ -485,7 +506,7 @@ providers:
 | `clean_cmd` | Command for full clean (empty = file-based deletion) |
 | `clean_timeout` | Max runtime of `clean_cmd` before it is cancelled and reported (default `2m`) |
 | `type` | `dir-pattern` removes whole stale directories matching a glob in `paths`; `project-artifacts` removes build artifacts of idle projects found below the roots in `paths` |
-| `min_idle` | `dir-pattern`: minimum idle time, from the newest mtime in the tree (default `2h`); `project-artifacts`: project idle time (default `30d`) |
+| `min_idle` | `dir-pattern`: minimum idle time, from the newest mtime in the tree (default `2h`); `project-artifacts`: project idle time (default `60d`) |
 | `skip_if_open` | `dir-pattern`, `project-artifacts`: skip directories with open files via `lsof +D` (default `true`) |
 | `skip_if_git_worktree` | `dir-pattern`: skip directories containing a `.git` entry (default `true`) |
 | `max_depth` | `project-artifacts`: directory levels searched below each root (default `4`, at most 16) |

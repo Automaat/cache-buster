@@ -19,7 +19,7 @@ import (
 
 // Project artifact defaults.
 const (
-	defaultArtifactMinIdle = 30 * 24 * time.Hour
+	defaultArtifactMinIdle = 60 * 24 * time.Hour
 	defaultArtifactBudget  = 10 * time.Second
 	defaultArtifactDepth   = 4
 	openCheckTimeout       = time.Minute
@@ -226,8 +226,8 @@ func (p *ProjectArtifactsProvider) Clean(ctx context.Context, opts CleanOptions)
 
 		detail := c.detail(p.now())
 		if !opts.DryRun {
-			gone, rmErr := removeAside(c.art.Path)
-			p.settleProject(ctx, c.proj)
+			trash, gone, rmErr := removeAside(c.art.Path)
+			p.settleProject(c.proj)
 			switch {
 			case !gone:
 				skipLine(&out, &result, c, "cannot rename aside: "+rmErr.Error())
@@ -235,6 +235,14 @@ func (p *ProjectArtifactsProvider) Clean(ctx context.Context, opts CleanOptions)
 			case rmErr != nil:
 				errs = append(errs, fmt.Errorf("remove %s: %w", c.art.Path, rmErr))
 				fmt.Fprintf(&out, "error: %s (%v)\n", c.art.Path, rmErr)
+				left, leftFiles, _ := measureTree(ctx, trash)
+				bytesGone, filesGone := max(c.art.Size-left, 0), max(c.art.Files-leftFiles, 0)
+				freed += bytesGone
+				result.BytesCleaned += bytesGone
+				result.FilesDeleted += filesGone
+				if bytesGone > 0 || filesGone > 0 {
+					result.Entries = append(result.Entries, Entry{Path: c.art.Path, Size: bytesGone, Detail: detail + ", partly removed"})
+				}
 				continue
 			}
 		}
@@ -295,12 +303,31 @@ func (p *ProjectArtifactsProvider) finalReason(ctx context.Context, c *candidate
 	if !markersValid(c.art) {
 		return "markers changed"
 	}
-	newest, _, err := sampleNewest(ctx, c.proj.Dir, sampleLimit)
+	root, below, _, err := sampleTree(ctx, c.proj.Dir, sampleLimit)
 	if err != nil {
 		return "recheck failed: " + err.Error()
 	}
-	if newest.After(c.proj.sampled) {
+	proj := c.proj
+	if below.After(proj.sampled) || (root.After(proj.sampled) && !root.Equal(proj.ownRoot)) {
 		return "modified during checks"
+	}
+	return p.useReason(c, true)
+}
+
+// useReason skips an artifact that was built or run within min_idle, however
+// long its sources have been idle: a cron job may still start target/release/x
+// or node_modules/.bin/x. fresh recomputes instead of reusing the first reading.
+func (p *ProjectArtifactsProvider) useReason(c *candidate, fresh bool) string {
+	art := c.art
+	if fresh || !art.usageRead {
+		art.used, art.usageErr = artifactUse(art)
+		art.usageRead = true
+	}
+	if art.usageErr != nil {
+		return art.usageErr.Error()
+	}
+	if idle := p.now().Sub(art.used); idle < p.minIdle {
+		return fmt.Sprintf("artifact in use %s ago, min_idle %s", idle.Round(time.Hour), p.minIdle)
 	}
 	return ""
 }
@@ -310,13 +337,13 @@ func (p *ProjectArtifactsProvider) finalReason(ctx context.Context, c *candidate
 // check accepts, never a half-deleted artifact under its real name. gone
 // reports whether the rename happened. The parent keeps its old mtime: the
 // removal is not project activity.
-func removeAside(dir string) (gone bool, err error) {
+func removeAside(dir string) (trash string, gone bool, err error) {
 	defer keepParentTime(dir)()
-	trash := filepath.Join(filepath.Dir(dir), trashName(filepath.Base(dir)))
+	trash = filepath.Join(filepath.Dir(dir), trashName(filepath.Base(dir)))
 	if err := os.Rename(dir, trash); err != nil {
-		return false, err
+		return "", false, err
 	}
-	return true, os.RemoveAll(trash)
+	return trash, true, os.RemoveAll(trash)
 }
 
 func keepParentTime(path string) func() {
@@ -328,11 +355,12 @@ func keepParentTime(path string) func() {
 	return func() { _ = os.Chtimes(parent, info.ModTime(), info.ModTime()) }
 }
 
-// settleProject re-baselines the activity sample after a removal, in case the
-// parent's mtime could not be restored.
-func (p *ProjectArtifactsProvider) settleProject(ctx context.Context, proj *project) {
-	if newest, _, err := sampleNewest(ctx, proj.Dir, sampleLimit); err == nil && newest.After(proj.sampled) {
-		proj.sampled = newest
+// settleProject accepts a bump of the project directory's own mtime after a
+// removal whose mtime restore failed. The sample itself is never re-baselined,
+// so a real edit made during a long removal still blocks the next artifact.
+func (p *ProjectArtifactsProvider) settleProject(proj *project) {
+	if info, err := os.Lstat(proj.Dir); err == nil && info.ModTime().After(proj.sampled) {
+		proj.ownRoot = info.ModTime()
 	}
 }
 
@@ -385,7 +413,7 @@ type candidate struct {
 }
 
 func (c *candidate) detail(now time.Time) string {
-	return fmt.Sprintf("%s, project %s, idle %dd", c.art.Kind, filepath.Base(c.proj.Dir), idleDays(now, c.proj.newest))
+	return fmt.Sprintf("%s, project %s, idle %dd", c.art.Kind, filepath.Base(c.proj.Dir), idleDays(now, latest(c.proj.newest, c.art.used)))
 }
 
 func idleDays(now, then time.Time) int {
@@ -454,7 +482,7 @@ func (ps *pass) cheapReason(c *candidate) string {
 	if idle := p.now().Sub(c.proj.newest); idle < p.minIdle {
 		return fmt.Sprintf("project active %s ago, min_idle %s", idle.Round(time.Hour), p.minIdle)
 	}
-	return ""
+	return p.useReason(c, false)
 }
 
 // guard runs every check that does not need the slow open-file probe.

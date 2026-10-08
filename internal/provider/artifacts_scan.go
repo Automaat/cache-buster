@@ -9,6 +9,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"sort"
 	"strings"
@@ -32,8 +33,46 @@ const (
 	cargoTagSignature = "Signature: 8a477f597d28d172789f06886806bc55"
 )
 
-// neverDescend are directory names the project search and the idleness
-// sample skip by name, marker or not.
+// trashPattern is the exact shape of the directories removeAside creates.
+var trashPattern = regexp.MustCompile(`^\.bilgie-trash-(target|node_modules|venv)-[0-9a-z]{8}$`)
+
+// ownsTrash reports whether name, found in dir, is a leftover of ours: it has
+// the exact trash shape and dir is a project of the matching kind.
+func ownsTrash(dir, name string) bool {
+	m := trashPattern.FindStringSubmatch(name)
+	if m == nil {
+		return false
+	}
+	switch m[1] {
+	case "target":
+		return isRegular(filepath.Join(dir, "Cargo.toml"))
+	case "node_modules":
+		return isRegular(filepath.Join(dir, "package.json"))
+	default:
+		return hasPythonProjectFile(dir)
+	}
+}
+
+// ownedArtifact reports whether the directory called name inside dir is a
+// recognised artifact (valid marker beside its project file), the only place
+// those names are skipped: src/target is source.
+func ownedArtifact(dir, name string) bool {
+	var kind artifactKind
+	switch name {
+	case "target":
+		kind = kindRust
+	case "node_modules":
+		kind = kindNode
+	case ".venv", "venv":
+		kind = kindPython
+	default:
+		return false
+	}
+	return markersValid(&artifactDir{Path: filepath.Join(dir, name), Kind: kind})
+}
+
+// neverDescend are directory names the project search skips by name, marker
+// or not. The idleness sample skips them only where they are artifacts.
 var neverDescend = map[string]bool{
 	".git":         true,
 	"node_modules": true,
@@ -49,6 +88,10 @@ type artifactDir struct {
 	Files int64
 
 	unreadable bool
+
+	used      time.Time
+	usageErr  error
+	usageRead bool
 }
 
 type project struct {
@@ -62,6 +105,9 @@ type project struct {
 	repoRoot string
 	newest   time.Time
 	sampled  time.Time
+	// ownRoot is the project directory's mtime after our own removals could
+	// not restore it; that bump is not an edit.
+	ownRoot time.Time
 }
 
 type artifactScan struct {
@@ -178,8 +224,10 @@ func (w *walker) walk(ctx context.Context, dir string, depth int) {
 		}
 		child := filepath.Join(dir, name)
 		switch {
-		case strings.HasPrefix(name, trashPrefix):
-			w.scan.trash = append(w.scan.trash, child)
+		case trashPattern.MatchString(name):
+			if ownsTrash(dir, name) {
+				w.scan.trash = append(w.scan.trash, child)
+			}
 		case neverDescend[name], depth >= w.p.maxDepth, lexicallyProtected(child), w.seen[child]:
 		default:
 			w.seen[child] = true
@@ -352,36 +400,52 @@ func measureTree(ctx context.Context, dir string) (total, files int64, unreadabl
 	return total, files, unreadable
 }
 
-// sampleNewest returns the newest mtime among the first limit entries of dir
-// in breadth-first order, skipping .git and artifact directories and never
-// following symlinks. truncated reports that the limit cut the walk short.
+// sampleNewest returns the newest mtime among dir and the first limit entries
+// below it. See sampleTree.
 func sampleNewest(ctx context.Context, dir string, limit int) (newest time.Time, truncated bool, err error) {
+	root, below, truncated, err := sampleTree(ctx, dir, limit)
+	return latest(root, below), truncated, err
+}
+
+func latest(a, b time.Time) time.Time {
+	if b.After(a) {
+		return b
+	}
+	return a
+}
+
+// sampleTree walks dir breadth first, never following symlinks, and returns
+// dir's own mtime and the newest mtime among the first limit entries below
+// it. It skips .git, our trash and the recognised artifact directories of each
+// directory; a source folder that merely shares an artifact's name is read.
+// truncated reports that the limit cut the walk short.
+func sampleTree(ctx context.Context, dir string, limit int) (root, below time.Time, truncated bool, err error) {
 	info, err := os.Lstat(dir)
 	if err != nil {
-		return time.Time{}, false, err
+		return time.Time{}, time.Time{}, false, err
 	}
-	newest = info.ModTime()
+	root = info.ModTime()
 	level := []string{dir}
 	seen := 0
 	for len(level) > 0 {
 		var next []string
 		for _, cur := range level {
 			if err := ctx.Err(); err != nil {
-				return newest, false, err
+				return root, below, false, err
 			}
 			entries, readErr := os.ReadDir(cur)
 			if readErr != nil {
 				if errors.Is(readErr, fs.ErrNotExist) {
 					continue
 				}
-				return newest, false, readErr
+				return root, below, false, readErr
 			}
 			for _, e := range entries {
 				if seen >= limit {
-					return newest, true, nil
+					return root, below, true, nil
 				}
 				name := e.Name()
-				if e.IsDir() && (neverDescend[name] || strings.HasPrefix(name, trashPrefix)) {
+				if e.IsDir() && (name == ".git" || ownedArtifact(cur, name) || (trashPattern.MatchString(name) && ownsTrash(cur, name))) {
 					continue
 				}
 				seen++
@@ -389,9 +453,7 @@ func sampleNewest(ctx context.Context, dir string, limit int) (newest time.Time,
 				if infoErr != nil {
 					continue
 				}
-				if fi.ModTime().After(newest) {
-					newest = fi.ModTime()
-				}
+				below = latest(below, fi.ModTime())
 				if e.IsDir() {
 					next = append(next, filepath.Join(cur, name))
 				}
@@ -399,5 +461,5 @@ func sampleNewest(ctx context.Context, dir string, limit int) (newest time.Time,
 		}
 		level = next
 	}
-	return newest, false, nil
+	return root, below, false, nil
 }

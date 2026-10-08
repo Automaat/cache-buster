@@ -645,7 +645,9 @@ func TestProjectArtifacts_SymlinksAreNeverFollowed(t *testing.T) {
 
 	nodeProject(t, h.path("web"), 10, 90*day)
 	writeFile(t, filepath.Join(outside, "pkgs", "x.js"), "x")
-	require.NoError(t, os.Symlink(filepath.Join(outside, "pkgs"), h.path("web", "node_modules", "linked")))
+	require.NoError(t, os.MkdirAll(h.path("web", "node_modules", "scope"), 0o750))
+	require.NoError(t, os.Symlink(filepath.Join(outside, "pkgs"), h.path("web", "node_modules", "scope", "linked")))
+	ageTree(t, h.path("web"), 90*day)
 
 	res := h.clean(CleanOptions{Mode: CleanModeFull})
 
@@ -883,12 +885,12 @@ func TestProjectArtifacts_OverlappingRootsCountOnce(t *testing.T) {
 func TestProjectArtifacts_TrashIsSweptAndNeverMistakenForAnArtifact(t *testing.T) {
 	h := newArtifactHarness(t, nil)
 	rustProject(t, h.path("api"), 100, 90*day)
-	leftover := h.path("api", trashPrefix+"target-abc123")
+	leftover := h.path("api", trashPrefix+"target-abc12345")
 	writeFile(t, filepath.Join(leftover, "CACHEDIR.TAG"), artifactTag())
 	writeFile(t, filepath.Join(leftover, "debug", "partial.rlib"), "half")
 	nodeProject(t, h.path("web"), 100, 90*day)
 	nested := h.path("web", "node_modules")
-	writeFile(t, filepath.Join(h.path("web"), trashPrefix+"node_modules-zzz", "a.js"), "x")
+	writeFile(t, filepath.Join(h.path("web"), trashPrefix+"node_modules-zzzzzzzz", "a.js"), "x")
 	ageTree(t, h.path("api"), 90*day)
 	ageTree(t, h.path("web"), 90*day)
 
@@ -903,7 +905,7 @@ func TestProjectArtifacts_TrashIsSweptAndNeverMistakenForAnArtifact(t *testing.T
 	res := h.clean(CleanOptions{Mode: CleanModeFull})
 
 	assert.NoDirExists(t, leftover)
-	assert.NoDirExists(t, h.path("web", trashPrefix+"node_modules-zzz"))
+	assert.NoDirExists(t, h.path("web", trashPrefix+"node_modules-zzzzzzzz"))
 	assert.NoDirExists(t, nested)
 	assert.Contains(t, res.Output, "swept: ")
 }
@@ -914,7 +916,7 @@ func TestProjectArtifacts_RemoveAsideLeavesNoPartialTree(t *testing.T) {
 	writeFile(t, filepath.Join(art, "CACHEDIR.TAG"), artifactTag())
 	writeFile(t, filepath.Join(art, "debug", "a.bin"), "data")
 
-	gone, err := removeAside(art)
+	_, gone, err := removeAside(art)
 
 	require.NoError(t, err)
 	assert.True(t, gone)
@@ -1039,7 +1041,7 @@ func TestProjectArtifacts_Defaults(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	assert.Equal(t, 30*day, p.minIdle)
+	assert.Equal(t, 60*day, p.minIdle)
 	assert.Equal(t, 10*time.Second, p.budget)
 	assert.Equal(t, 4, p.maxDepth)
 	assert.True(t, p.skipDirty)
