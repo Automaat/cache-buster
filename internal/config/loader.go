@@ -1,10 +1,10 @@
 package config
 
 import (
-	"slices"
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 
 	"github.com/spf13/viper"
 )

@@ -180,7 +180,7 @@ providers:
 | `min_idle` | `dir-pattern`: minimum idle time, from the newest mtime in the tree (default `2h`) |
 | `skip_if_open` | `dir-pattern`: skip directories with open files via `lsof +D` (default `true`) |
 | `skip_if_git_worktree` | `dir-pattern`: skip directories containing a `.git` entry (default `true`) |
-| `skip_prefixes` | Whole-entry providers never evict entries whose name starts with one of these prefixes |
+| `skip_prefixes` | Whole-entry providers never evict entries whose name starts with one of these prefixes; user values add to the built-in ones |
 
 ### Busy tools
 

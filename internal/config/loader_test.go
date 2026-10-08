@@ -1,9 +1,9 @@
 package config
 
 import (
-	"slices"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 )
 
