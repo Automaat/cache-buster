@@ -464,8 +464,12 @@ failure. If the check itself fails, the provider is skipped too.
 
 Busy detection errs toward skipping: any process whose command line contains
 the tool name counts, including wrappers such as `sudo` or `sh -c`. The
-bilgie process and its wrapper ancestors are not counted, but an
-ancestor that is the tool itself, such as `cargo run -- clean cargo`, is. A hung
+bilgie process and its wrapper ancestors are not counted: a wrapper is
+recognized by parsing its command string with shell quoting rules (quotes,
+backslash escapes, repeated spaces, nested `sh -c`, `env VAR=x`, `sudo`) and
+finding bilgie's own executable and arguments in it. A string that does not
+parse stays busy. An ancestor that is the tool itself, such as
+`cargo run -- clean cargo`, is counted. A hung
 `clean_cmd` is killed with its whole process group, so it must not need a
 terminal.
 
