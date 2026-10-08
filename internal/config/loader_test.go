@@ -384,16 +384,18 @@ func TestLoader_RejectsUnsafeProtectedEntries(t *testing.T) {
 }
 
 func TestValidateProtected_RejectsBroadAndMalformedEntries(t *testing.T) {
-	skipOnWindows(t, "#206 per-OS paths and permissions")
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	bad := []string{
 		"~/.", "~/..", "/ ", "//", "/./", "/", "~", "~/", " /x", "/x ", "~/x/", "/x//y",
 		"/x/./y", "/x/../y", "$HOME/x", "rel/dir", home, filepath.Dir(home), "/Users",
 		"~/a/..", home + "/.", filepath.Dir(filepath.Dir(home)),
 		"~/scratch/*", "/data/*/keep", "/data/k?ep", "/data/[ab]/keep",
 		"/System/Volumes/Data", "/System/Volumes/Data/", "/System/Volumes/Data/Users",
-		"/system/volumes/data" + home, "/System/Volumes/Data" + home,
+	}
+	if !hasDrive(home) {
+		bad = append(bad, "/system/volumes/data"+home, "/System/Volumes/Data"+home)
 	}
 	for _, entry := range bad {
 		t.Run(entry, func(t *testing.T) {
@@ -408,6 +410,7 @@ func TestValidateProtected_RejectsBroadAndMalformedEntries(t *testing.T) {
 func TestValidateProtected_RejectsSymlinkToHome(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	link := filepath.Join(t.TempDir(), "alias")
 	require.NoError(t, os.Symlink(home, link))
 
@@ -419,6 +422,7 @@ func TestValidateProtected_RejectsSymlinkToHome(t *testing.T) {
 func TestLoader_SaveWritesOnlyUserProtectedEntries(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	path := filepath.Join(t.TempDir(), "config.yaml")
 	loader := NewLoader()
 	loader.SetConfigPath(path)

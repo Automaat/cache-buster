@@ -4,28 +4,50 @@ import "maps"
 
 const currentVersion = "1"
 
-// DefaultProviders returns builtin provider definitions.
+// DefaultProviders returns the builtin provider definitions for this OS.
 func DefaultProviders() map[string]Provider {
+	return DefaultProvidersFor(CurrentPlatform())
+}
+
+// DefaultProvidersFor returns the builtin providers that apply on p.
+func DefaultProvidersFor(p Platform) map[string]Provider {
 	all := make(map[string]Provider)
 	for _, group := range []map[string]Provider{
-		goProviders(),
-		jsProviders(),
-		systemProviders(),
+		goProviders(p),
+		jsProviders(p),
+		systemProviders(p),
 		xcodeProviders(),
-		otherProviders(),
-		tempDirProviders(),
-		extraCacheProviders(),
+		otherProviders(p),
+		tempDirProviders(p),
+		extraCacheProviders(p),
 	} {
 		maps.Copy(all, group)
+	}
+	for name := range all {
+		if !AppliesOn(name, p.OS) {
+			delete(all, name)
+		}
 	}
 	return all
 }
 
-func goProviders() map[string]Provider {
+// perOS picks the path list for p's OS; Linux is the fallback for other Unixes.
+func perOS(p Platform, darwin, linux, windows []string) []string {
+	switch p.OS {
+	case OSDarwin:
+		return darwin
+	case OSWindows:
+		return windows
+	default:
+		return linux
+	}
+}
+
+func goProviders(p Platform) map[string]Provider {
 	return map[string]Provider{
 		"go-build": {
 			Enabled:  true,
-			Paths:    []string{"~/Library/Caches/go-build"},
+			Paths:    []string{p.cache("go-build")},
 			MaxSize:  "10G",
 			MaxAge:   "30d",
 			CleanCmd: "go clean -cache",
@@ -40,25 +62,34 @@ func goProviders() map[string]Provider {
 	}
 }
 
-func jsProviders() map[string]Provider {
+func jsProviders(p Platform) map[string]Provider {
 	return map[string]Provider{
 		"npm": {
-			Enabled:  true,
-			Paths:    []string{"~/.npm"},
+			Enabled: true,
+			Paths: perOS(p,
+				[]string{"~/.npm"},
+				[]string{"~/.npm"},
+				[]string{p.cache("npm-cache")}),
 			MaxSize:  "3G",
 			MaxAge:   "30d",
 			CleanCmd: "npm cache clean --force",
 		},
 		"yarn": {
-			Enabled:  true,
-			Paths:    []string{"~/Library/Caches/Yarn"},
+			Enabled: true,
+			Paths: perOS(p,
+				[]string{p.cache("Yarn")},
+				[]string{p.cache("yarn")},
+				[]string{p.cache("Yarn/Cache")}),
 			MaxSize:  "2G",
 			MaxAge:   "30d",
 			CleanCmd: "yarn cache clean",
 		},
 		"pnpm": {
-			Enabled:  true,
-			Paths:    []string{"~/.local/share/pnpm/store", "~/Library/pnpm/store"},
+			Enabled: true,
+			Paths: perOS(p,
+				[]string{p.data("pnpm/store"), "~/Library/pnpm/store"},
+				[]string{p.data("pnpm/store")},
+				[]string{p.cache("pnpm/store")}),
 			MaxSize:  "5G",
 			MaxAge:   "30d",
 			CleanCmd: "pnpm store prune",
@@ -66,32 +97,36 @@ func jsProviders() map[string]Provider {
 	}
 }
 
-func systemProviders() map[string]Provider {
+func systemProviders(p Platform) map[string]Provider {
+	dockerPaths := perOS(p,
+		[]string{"~/Library/Containers/com.docker.docker"},
+		[]string{"~/.docker/desktop"},
+		[]string{p.cache("Docker")})
 	return map[string]Provider{
 		"homebrew": {
 			Enabled:  true,
-			Paths:    []string{"~/Library/Caches/Homebrew"},
+			Paths:    []string{p.cache("Homebrew")},
 			MaxSize:  "5G",
 			MaxAge:   "30d",
 			CleanCmd: "brew cleanup -s",
 		},
 		"mise": {
 			Enabled:  true,
-			Paths:    []string{"~/.local/share/mise"},
+			Paths:    []string{p.data("mise")},
 			MaxSize:  "8G",
 			MaxAge:   "30d",
 			CleanCmd: "mise prune",
 		},
 		"docker": {
 			Enabled:  true,
-			Paths:    []string{"~/Library/Containers/com.docker.docker"},
+			Paths:    dockerPaths,
 			MaxSize:  "50G",
 			MaxAge:   "30d",
 			CleanCmd: "docker system prune -af",
 		},
 		"docker-volumes": {
 			Enabled:  false,
-			Paths:    []string{"~/Library/Containers/com.docker.docker"},
+			Paths:    dockerPaths,
 			MaxSize:  "50G",
 			CleanCmd: "docker volume prune -f",
 		},
@@ -125,18 +160,21 @@ func xcodeProviders() map[string]Provider {
 	}
 }
 
-func otherProviders() map[string]Provider {
+func otherProviders(p Platform) map[string]Provider {
 	return map[string]Provider{
 		"uv": {
-			Enabled:  true,
-			Paths:    []string{"~/.cache/uv"},
+			Enabled: true,
+			Paths: perOS(p,
+				[]string{"~/.cache/uv"},
+				[]string{p.cache("uv")},
+				[]string{p.cache("uv/cache")}),
 			MaxSize:  "4G",
 			MaxAge:   "30d",
 			CleanCmd: "",
 		},
 		"jetbrains": {
 			Enabled:  true,
-			Paths:    []string{"~/Library/Caches/JetBrains"},
+			Paths:    []string{p.cache("JetBrains")},
 			MaxSize:  "3G",
 			MaxAge:   "30d",
 			CleanCmd: "",
@@ -156,8 +194,11 @@ func otherProviders() map[string]Provider {
 			CleanCmd: "",
 		},
 		"pip": {
-			Enabled:  true,
-			Paths:    []string{"~/.cache/pip", "~/Library/Caches/pip"},
+			Enabled: true,
+			Paths: perOS(p,
+				[]string{"~/.cache/pip", p.cache("pip")},
+				[]string{p.cache("pip")},
+				[]string{p.cache("pip/Cache")}),
 			MaxSize:  "3G",
 			MaxAge:   "30d",
 			CleanCmd: "pip cache purge",
@@ -165,41 +206,66 @@ func otherProviders() map[string]Provider {
 	}
 }
 
+// xdgCache is ~/.cache/rel, or the XDG cache root on Linux. These tools keep
+// their cache there on macOS and Windows too.
+func xdgCache(p Platform, rel string) string {
+	if p.OS == OSLinux {
+		return p.cache(rel)
+	}
+	return p.home(".cache/" + rel)
+}
+
+func plainCache(maxSize string, paths ...string) Provider {
+	return Provider{
+		Enabled: true,
+		Paths:   paths,
+		MaxSize: maxSize,
+		MaxAge:  "30d",
+	}
+}
+
+// optInCache is disabled by default: entry mtime records download time, not
+// use, so a daily-use entry can be evicted before an idle one.
+func optInCache(maxSize string, paths ...string) Provider {
+	pr := plainCache(maxSize, paths...)
+	pr.Enabled = false
+	return pr
+}
+
 // extraCacheProviders covers browser, ML, tooling and toolchain caches.
-func extraCacheProviders() map[string]Provider {
-	cache := func(path, maxSize string) Provider {
-		return Provider{
-			Enabled: true,
-			Paths:   []string{path},
-			MaxSize: maxSize,
-			MaxAge:  "30d",
-		}
-	}
-	// Opt-in: entry mtime records download time, not use, so a daily-use
-	// entry can be evicted before an idle one.
-	optIn := func(path, maxSize string) Provider {
-		p := cache(path, maxSize)
-		p.Enabled = false
-		return p
-	}
+// huggingface covers hub only, because the cache root also holds the login
+// token. chrome-devtools-mcp skips chrome-profile-*, which holds browser
+// logins and cookies. rustup is opt-in because toolchains are not a cache.
+func extraCacheProviders(p Platform) map[string]Provider {
+	edge := perOS(p,
+		[]string{p.cache("Microsoft Edge")},
+		[]string{p.cache("microsoft-edge")},
+		[]string{
+			p.cache("Microsoft/Edge/User Data/Default/Cache"),
+			p.cache("Microsoft/Edge/User Data/Default/Code Cache"),
+		})
+	vivaldi := perOS(p,
+		[]string{p.cache("Vivaldi")},
+		[]string{p.cache("vivaldi")},
+		[]string{
+			p.cache("Vivaldi/User Data/Default/Cache"),
+			p.cache("Vivaldi/User Data/Default/Code Cache"),
+		})
 	return map[string]Provider{
-		"edge":    cache("~/Library/Caches/Microsoft Edge", "3G"),
-		"vivaldi": cache("~/Library/Caches/Vivaldi", "3G"),
-		// hub only: ~/.cache/huggingface also holds the login token.
-		"huggingface": optIn("~/.cache/huggingface/hub", "20G"),
-		"playwright":  optIn("~/Library/Caches/ms-playwright", "5G"),
-		"lima":        cache("~/Library/Caches/lima", "10G"),
-		"gh":          cache("~/.cache/gh", "1G"),
-		// chrome-profile-* holds browser logins and cookies.
+		"edge":        plainCache("3G", edge...),
+		"vivaldi":     plainCache("3G", vivaldi...),
+		"huggingface": optInCache("20G", xdgCache(p, "huggingface/hub")),
+		"playwright":  optInCache("5G", p.cache("ms-playwright")),
+		"lima":        plainCache("10G", p.cache("lima")),
+		"gh":          plainCache("1G", xdgCache(p, "gh")),
 		"chrome-devtools-mcp": {
 			Enabled:      false,
-			Paths:        []string{"~/.cache/chrome-devtools-mcp"},
+			Paths:        []string{xdgCache(p, "chrome-devtools-mcp")},
 			MaxSize:      "2G",
 			MaxAge:       "30d",
 			SkipPrefixes: []string{"chrome-profile-"},
 		},
-		"vscode-shipit": cache("~/Library/Caches/com.microsoft.VSCode.ShipIt", "1G"),
-		// Toolchains are not a plain cache, so this stays opt-in.
+		"vscode-shipit": plainCache("1G", p.cache("com.microsoft.VSCode.ShipIt")),
 		"rustup": {
 			Enabled:  false,
 			Paths:    []string{"~/.rustup/toolchains"},
@@ -209,24 +275,30 @@ func extraCacheProviders() map[string]Provider {
 	}
 }
 
-// DefaultConfig returns config with all default providers.
+// DefaultConfig returns config with all default providers for this OS.
 func DefaultConfig() *Config {
+	return DefaultConfigFor(CurrentPlatform())
+}
+
+// DefaultConfigFor returns config with the default providers that apply on p.
+func DefaultConfigFor(p Platform) *Config {
 	return &Config{
 		Version:   currentVersion,
-		Providers: DefaultProviders(),
+		Providers: DefaultProvidersFor(p),
 		Auto:      DefaultAuto(),
 		Protected: DefaultProtected(),
+		goos:      p.OS,
 	}
 }
 
 // tempDirProviders are opt-in: they delete whole directories, so they stay
 // disabled until the user enables them.
-func tempDirProviders() map[string]Provider {
+func tempDirProviders(p Platform) map[string]Provider {
 	return map[string]Provider{
 		"sail-dirs": {
 			Enabled: false,
 			Type:    TypeDirPattern,
-			Paths:   []string{"/private/tmp/sail*"},
+			Paths:   []string{p.tempGlob("sail*")},
 			MaxSize: "20G",
 			MinIdle: "2h",
 		},

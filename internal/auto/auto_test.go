@@ -122,9 +122,12 @@ type harness struct {
 
 func newHarness(t *testing.T) *harness {
 	t.Helper()
+	cfg := config.DefaultConfigFor(config.Platform{OS: config.OSDarwin})
+	cfg.Providers = map[string]config.Provider{}
+	cfg.Auto = autoCfg()
 	return &harness{
 		t:     t,
-		cfg:   &config.Config{Providers: map[string]config.Provider{}, Auto: autoCfg()},
+		cfg:   cfg,
 		fakes: map[string]*fakeProvider{},
 		home:  t.TempDir(),
 	}
@@ -820,7 +823,6 @@ func TestIsProtected_XcodeArchivesAndAncestors(t *testing.T) {
 }
 
 func TestIsProtected_FilesystemRootAndDataAlias(t *testing.T) {
-	skipOnWindows(t, "#206 per-OS paths and permissions")
 	home := "/Users/me"
 	for _, scan := range []bool{true, false} {
 		if !scan {
@@ -831,8 +833,8 @@ func TestIsProtected_FilesystemRootAndDataAlias(t *testing.T) {
 		assert.True(t, isProtected("/System/Volumes/Data", home, scan))
 	}
 	assert.True(t, isProtected("/", home, true))
-	assert.True(t, within("/Users/me", "/"))
-	assert.False(t, within("/Users/me2", "/Users/me"))
+	assert.True(t, within(filepath.FromSlash("/Users/me"), string(filepath.Separator)))
+	assert.False(t, within(filepath.FromSlash("/Users/me2"), filepath.FromSlash("/Users/me")))
 }
 
 func TestRun_SkipsUncleanXcodeArchivesPathOutsideHome(t *testing.T) {
@@ -851,7 +853,6 @@ func TestRun_SkipsUncleanXcodeArchivesPathOutsideHome(t *testing.T) {
 }
 
 func TestIsProtected_RootWithoutHome(t *testing.T) {
-	skipOnWindows(t, "#206 per-OS paths and permissions")
 	for _, scan := range []bool{true, false} {
 		assert.True(t, isProtected("/", "", scan))
 		assert.True(t, isProtected("/System/Volumes/Data", "", scan))
@@ -884,9 +885,8 @@ func TestAgentUninstall_UnrecognisedBootoutAndPrintFailureKeepsState(t *testing.
 }
 
 func TestWithoutDataAlias_CaseInsensitive(t *testing.T) {
-	skipOnWindows(t, "#206 per-OS paths and permissions")
 	got := withoutDataAlias([]string{"/system/volumes/data/Users/me", "/System/Volumes/DataX/y"})
-	assert.Contains(t, got, "/Users/me")
+	assert.Contains(t, got, filepath.FromSlash("/Users/me"))
 	assert.NotContains(t, got, "X/y")
 	assert.Len(t, got, 3)
 }

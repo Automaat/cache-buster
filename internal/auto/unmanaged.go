@@ -52,10 +52,14 @@ func UnmanagedRoots(home string) []string {
 	roots := []string{os.TempDir()}
 	if home != "" {
 		roots = append(roots, filepath.Join(home, ".local", "share"))
-		if runtime.GOOS == "darwin" {
+		switch runtime.GOOS {
+		case "darwin":
 			roots = append(roots, filepath.Join(home, "Library", "Caches"))
-		} else {
-			roots = append(roots, filepath.Join(home, ".cache"))
+		case "windows":
+			roots = append(roots, localAppData(home))
+		default:
+			roots = append(roots, envOr("XDG_CACHE_HOME", filepath.Join(home, ".cache")))
+			roots[1] = envOr("XDG_DATA_HOME", roots[1])
 		}
 	}
 	if runtime.GOOS == "darwin" {
@@ -71,7 +75,7 @@ func CoveredPaths(cfg *config.Config) []string {
 	var out []string
 	for name := range cfg.Providers {
 		pc := cfg.Providers[name]
-		if !pc.Enabled && pc.Type != config.TypeDirPattern {
+		if !cfg.Applies(name) || (!pc.Enabled && pc.Type != config.TypeDirPattern) {
 			continue
 		}
 		paths, err := config.ExpandPaths(pc.Paths)
@@ -251,4 +255,18 @@ func overlapsAny(dir string, covered []string) bool {
 		}
 	}
 	return false
+}
+
+func localAppData(home string) string {
+	if dir := os.Getenv("LOCALAPPDATA"); dir != "" {
+		return dir
+	}
+	return filepath.Join(home, "AppData", "Local")
+}
+
+func envOr(name, fallback string) string {
+	if dir := os.Getenv(name); filepath.IsAbs(dir) {
+		return dir
+	}
+	return fallback
 }

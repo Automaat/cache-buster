@@ -38,7 +38,7 @@ func NewDirPatternProvider(name string, cfg config.Provider) (*DirPatternProvide
 		if !strings.ContainsAny(path, "*?[") {
 			return nil, fmt.Errorf("path %q must contain a glob (*, ? or [)", path)
 		}
-		if !strings.HasPrefix(path, "/") && !strings.HasPrefix(path, "~/") {
+		if !config.IsAbsPortable(path) && !strings.HasPrefix(path, "~/") && !strings.HasPrefix(path, `~\`) {
 			return nil, fmt.Errorf("path %q must be absolute or start with ~/", path)
 		}
 	}
@@ -206,10 +206,8 @@ func resolveParent(dir string) string {
 // the home directory, one of its ancestors, or a direct child of root or home.
 func (p *DirPatternProvider) isProtected(dir string) bool {
 	clean := filepath.Clean(dir)
-	if !filepath.IsAbs(clean) || clean == string(filepath.Separator) {
-		return true
-	}
-	if filepath.Dir(clean) == string(filepath.Separator) {
+	parent := filepath.Dir(clean)
+	if !filepath.IsAbs(clean) || parent == clean || filepath.Dir(parent) == parent {
 		return true
 	}
 	for _, prot := range p.protected {

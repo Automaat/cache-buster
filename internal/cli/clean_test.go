@@ -197,12 +197,12 @@ func TestCleanCmd_HasFlags(t *testing.T) {
 }
 
 func TestResolveProviders_All(t *testing.T) {
-	skipOnWindows(t, "#206 per-OS paths and permissions")
+	dir := t.TempDir()
 	cfg := &config.Config{
 		Providers: map[string]config.Provider{
-			"prov1": {Enabled: true, Paths: []string{"/tmp"}, MaxSize: "1GB"},
-			"prov2": {Enabled: true, Paths: []string{"/tmp"}, MaxSize: "1GB"},
-			"prov3": {Enabled: false, Paths: []string{"/tmp"}, MaxSize: "1GB"},
+			"prov1": {Enabled: true, Paths: []string{dir}, MaxSize: "1GB"},
+			"prov2": {Enabled: true, Paths: []string{dir}, MaxSize: "1GB"},
+			"prov3": {Enabled: false, Paths: []string{dir}, MaxSize: "1GB"},
 		},
 	}
 
@@ -216,11 +216,11 @@ func TestResolveProviders_All(t *testing.T) {
 }
 
 func TestResolveProviders_Specific(t *testing.T) {
-	skipOnWindows(t, "#206 per-OS paths and permissions")
+	dir := t.TempDir()
 	cfg := &config.Config{
 		Providers: map[string]config.Provider{
-			"prov1": {Enabled: true, Paths: []string{"/tmp"}, MaxSize: "1GB"},
-			"prov2": {Enabled: true, Paths: []string{"/tmp"}, MaxSize: "1GB"},
+			"prov1": {Enabled: true, Paths: []string{dir}, MaxSize: "1GB"},
+			"prov2": {Enabled: true, Paths: []string{dir}, MaxSize: "1GB"},
 		},
 	}
 
@@ -386,11 +386,11 @@ providers:
 }
 
 func TestResolveProviders_AllSmartSkipsDockerVolumes(t *testing.T) {
-	skipOnWindows(t, "#206 docker fakes are POSIX shell scripts")
+	dir := t.TempDir()
 	cfg := &config.Config{
 		Providers: map[string]config.Provider{
-			"prov1":          {Enabled: true, Paths: []string{"/tmp"}, MaxSize: "1GB"},
-			"docker-volumes": {Enabled: true, Paths: []string{"/tmp"}, MaxSize: "1GB"},
+			"prov1":          {Enabled: true, Paths: []string{dir}, MaxSize: "1GB"},
+			"docker-volumes": {Enabled: true, Paths: []string{dir}, MaxSize: "1GB"},
 		},
 	}
 

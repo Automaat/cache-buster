@@ -66,7 +66,6 @@ func exists(path string) bool {
 }
 
 func TestDirPatternRemovesStaleDirectories(t *testing.T) {
-	skipOnWindows(t, "#206 per-OS paths and permissions")
 	root := t.TempDir()
 	stale := makeDir(t, root, "sail-a", 1000, 5*time.Hour)
 	other := makeDir(t, root, "sail-b", 500, 3*time.Hour)
@@ -85,7 +84,6 @@ func TestDirPatternRemovesStaleDirectories(t *testing.T) {
 }
 
 func TestDirPatternSkipRules(t *testing.T) {
-	skipOnWindows(t, "#206 per-OS paths and permissions")
 	tests := []struct {
 		name       string
 		setup      func(t *testing.T, root string) string
@@ -194,7 +192,6 @@ func TestDirPatternSkipRules(t *testing.T) {
 }
 
 func TestDirPatternGuardsCanBeDisabled(t *testing.T) {
-	skipOnWindows(t, "#206 per-OS paths and permissions")
 	root := t.TempDir()
 	dir := makeDir(t, root, "sail-git", 10, 10*time.Hour)
 	require.NoError(t, os.Mkdir(filepath.Join(dir, ".git"), 0o750))
@@ -213,7 +210,6 @@ func TestDirPatternGuardsCanBeDisabled(t *testing.T) {
 }
 
 func TestDirPatternSymlinkIsNeverFollowed(t *testing.T) {
-	skipOnWindows(t, "#206 per-OS paths and permissions")
 	root := t.TempDir()
 	outside := makeDir(t, t.TempDir(), "precious", 10, 10*time.Hour)
 	link := filepath.Join(root, "sail-link")
@@ -235,7 +231,6 @@ func TestDirPatternSymlinkIsNeverFollowed(t *testing.T) {
 }
 
 func TestDirPatternDryRunDeletesNothing(t *testing.T) {
-	skipOnWindows(t, "#206 per-OS paths and permissions")
 	root := t.TempDir()
 	stale := makeDir(t, root, "sail-stale", 2048, 5*time.Hour)
 	fresh := makeDir(t, root, "sail-fresh", 10, time.Minute)
@@ -255,7 +250,6 @@ func TestDirPatternDryRunDeletesNothing(t *testing.T) {
 }
 
 func TestDirPatternSmartModeRemovesWholeDirectories(t *testing.T) {
-	skipOnWindows(t, "#206 per-OS paths and permissions")
 	root := t.TempDir()
 	stale := makeDir(t, root, "sail-a", 100, 5*time.Hour)
 
@@ -267,9 +261,9 @@ func TestDirPatternSmartModeRemovesWholeDirectories(t *testing.T) {
 }
 
 func TestDirPatternProtectedPaths(t *testing.T) {
-	skipOnWindows(t, "#206 per-OS paths and permissions")
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	p, err := NewDirPatternProvider("x", config.Provider{
 		Type: config.TypeDirPattern, Paths: []string{filepath.Join(home, "sail*")}, MaxSize: "1G",
 	})
@@ -281,13 +275,13 @@ func TestDirPatternProtectedPaths(t *testing.T) {
 	assert.True(t, p.isProtected(filepath.Join(home, "Documents")))
 	assert.True(t, p.isProtected("/Applications"))
 	assert.False(t, p.isProtected(filepath.Join(home, "work", "sail-a")))
-	assert.False(t, p.isProtected("/private/tmp/sail-a"))
+	assert.False(t, p.isProtected(filepath.Join(os.TempDir(), "sail-a")))
 }
 
 func TestDirPatternProtectedMatchIsSkipped(t *testing.T) {
-	skipOnWindows(t, "#206 per-OS paths and permissions")
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	p, err := NewDirPatternProvider("x", config.Provider{
 		Type: config.TypeDirPattern, Paths: []string{filepath.Join(home, "sail*")}, MaxSize: "1G", MinIdle: "0s",
 	})
@@ -302,7 +296,7 @@ func TestDirPatternProtectedMatchIsSkipped(t *testing.T) {
 }
 
 func TestDirPatternUnreadableSubtreeIsSkipped(t *testing.T) {
-	skipOnWindows(t, "#206 per-OS paths and permissions")
+	skipWithoutModeBits(t)
 	if os.Geteuid() == 0 {
 		t.Skip("permission checks do not apply to root")
 	}
@@ -322,7 +316,6 @@ func TestDirPatternUnreadableSubtreeIsSkipped(t *testing.T) {
 }
 
 func TestDirPatternCancelledContext(t *testing.T) {
-	skipOnWindows(t, "#206 per-OS paths and permissions")
 	root := t.TempDir()
 	dir := makeDir(t, root, "sail-a", 10, 5*time.Hour)
 
@@ -365,13 +358,12 @@ func TestDefaultSailProviderIsOptIn(t *testing.T) {
 	require.True(t, ok)
 
 	assert.False(t, sail.Enabled, "destructive provider must be opt-in")
-	assert.Equal(t, []string{"/private/tmp/sail*"}, sail.Paths)
+	assert.Equal(t, []string{filepath.Join(os.TempDir(), "sail*")}, sail.Paths)
 	assert.Equal(t, config.TypeDirPattern, sail.Type)
 	assert.NotContains(t, cfg.AllEnabledProviders(), "sail-dirs")
 }
 
 func TestDirPatternActivityDuringChecksBlocksRemoval(t *testing.T) {
-	skipOnWindows(t, "#206 per-OS paths and permissions")
 	root := t.TempDir()
 	dir := makeDir(t, root, "sail-busy", 10, 10*time.Hour)
 
@@ -387,7 +379,6 @@ func TestDirPatternActivityDuringChecksBlocksRemoval(t *testing.T) {
 }
 
 func TestDirPatternGitAppearingDuringChecksBlocksRemoval(t *testing.T) {
-	skipOnWindows(t, "#206 per-OS paths and permissions")
 	root := t.TempDir()
 	dir := makeDir(t, root, "sail-late-git", 10, 10*time.Hour)
 
@@ -418,17 +409,16 @@ func TestNewDirPatternProviderRejectsRelativePaths(t *testing.T) {
 }
 
 func TestDirPatternRelativeMatchIsProtected(t *testing.T) {
-	skipOnWindows(t, "#206 per-OS paths and permissions")
 	p := newTestDirProvider(t, t.TempDir(), nil)
 	assert.True(t, p.isProtected("Documents"))
 }
 
 func TestDirPatternProtectsHomeReachedThroughSymlink(t *testing.T) {
-	skipOnWindows(t, "#206 per-OS paths and permissions")
 	sandbox := t.TempDir()
 	home := filepath.Join(sandbox, "home")
 	require.NoError(t, os.Mkdir(home, 0o750))
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	require.NoError(t, os.Symlink(home, filepath.Join(sandbox, "homelink")))
 	victim := makeDir(t, home, "sail-home", 10, 10*time.Hour)
 
@@ -445,7 +435,6 @@ func TestDirPatternProtectsHomeReachedThroughSymlink(t *testing.T) {
 }
 
 func TestDirPatternNeverRemovesGitDirectoryItself(t *testing.T) {
-	skipOnWindows(t, "#206 per-OS paths and permissions")
 	root := t.TempDir()
 	repo := makeDir(t, root, "repo", 10, 10*time.Hour)
 	gitDir := filepath.Join(repo, ".git")

@@ -22,7 +22,7 @@ func TestDefaultProviders_ExtraCaches(t *testing.T) {
 		{"vscode-shipit", "~/Library/Caches/com.microsoft.VSCode.ShipIt"},
 	}
 	optIn := map[string]bool{"huggingface": true, "playwright": true, "chrome-devtools-mcp": true}
-	defaults := DefaultProviders()
+	defaults := DefaultProvidersFor(macPlatform)
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			p, ok := defaults[tt.name]
@@ -44,7 +44,7 @@ func TestDefaultProviders_Rustup(t *testing.T) {
 }
 
 func TestDefaultProviders_HomebrewScrubsCache(t *testing.T) {
-	assert.Equal(t, "brew cleanup -s", DefaultProviders()["homebrew"].CleanCmd)
+	assert.Equal(t, "brew cleanup -s", DefaultProvidersFor(macPlatform)["homebrew"].CleanCmd)
 }
 
 func TestDefaultConfig_Validates(t *testing.T) {

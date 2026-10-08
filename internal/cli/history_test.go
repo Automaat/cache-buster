@@ -253,9 +253,9 @@ func TestAuto_FreeSpaceReadFailureIsStillRecorded(t *testing.T) {
 }
 
 func TestRunHistory_ReadsStateDirUnderHome(t *testing.T) {
-	skipOnWindows(t, "#206 per-OS paths and permissions")
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	t.Setenv("XDG_STATE_HOME", filepath.Join(home, "xdg"))
 	stateDir, err := auto.StateDir()
 	require.NoError(t, err)

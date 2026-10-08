@@ -14,11 +14,18 @@ type Loader struct {
 	v            *viper.Viper
 	configPath   string // override for testing, empty uses Path()
 	skipDefaults bool   // skip merging with defaults (for test isolation)
+	platform     Platform
+	pathsExist   func([]string) bool
 }
 
 // NewLoader creates a new config loader.
 func NewLoader() *Loader {
-	return &Loader{v: viper.New()}
+	return &Loader{v: viper.New(), platform: CurrentPlatform(), pathsExist: PathsExist}
+}
+
+// SetPlatform overrides the OS and environment the defaults are built for.
+func (l *Loader) SetPlatform(p Platform) {
+	l.platform = p
 }
 
 // SetConfigPath overrides config path (for testing).
@@ -42,9 +49,12 @@ func (l *Loader) path() (string, error) {
 func (l *Loader) Load() (*Config, error) {
 	var cfg *Config
 	if l.skipDefaults {
-		cfg = &Config{Version: "1", Providers: make(map[string]Provider), Auto: DefaultAuto(), Protected: DefaultProtected()}
+		cfg = &Config{
+			Version: "1", Providers: make(map[string]Provider), Auto: DefaultAuto(),
+			Protected: DefaultProtected(), goos: l.platform.OS,
+		}
 	} else {
-		cfg = DefaultConfig()
+		cfg = DefaultConfigFor(l.platform)
 	}
 
 	configPath, err := l.path()
@@ -80,6 +90,9 @@ func (l *Loader) Load() (*Config, error) {
 		defaultP, hasDefault := cfg.Providers[name]
 		if !hasDefault {
 			// New provider not in defaults: use as-is; do not auto-enable when `enabled` is omitted.
+			if len(userP.Paths) == 0 {
+				userP.Paths = l.otherOSDefaultPaths(name)
+			}
 			cfg.Providers[name] = userP
 			continue
 		}
@@ -96,7 +109,7 @@ func (l *Loader) Load() (*Config, error) {
 		if l.v.IsSet("providers." + name + ".clean_timeout") {
 			merged.CleanTimeout = userP.CleanTimeout
 		}
-		if l.v.IsSet("providers." + name + ".paths") {
+		if l.v.IsSet("providers."+name+".paths") && !l.isForeignDefault(name, userP.Paths) {
 			merged.Paths = userP.Paths
 		}
 		if l.v.IsSet("providers." + name + ".enabled") {
@@ -163,7 +176,7 @@ func (l *Loader) Save(cfg *Config) error {
 
 	for key, value := range map[string]any{
 		"version":   cfg.Version,
-		"providers": cfg.Providers,
+		"providers": l.portableProviders(cfg.Providers),
 	} {
 		l.v.Set(key, value)
 	}
@@ -194,7 +207,7 @@ func (l *Loader) InitDefault() (bool, error) {
 		return false, nil
 	}
 
-	if err := l.Save(DefaultConfig()); err != nil {
+	if err := l.Save(DefaultConfigFor(l.platform)); err != nil {
 		return false, err
 	}
 
@@ -216,4 +229,68 @@ func (l *Loader) Exists() (bool, error) {
 		return false, nil
 	}
 	return false, err
+}
+
+// legacySailPaths is the sail-dirs default that releases before the per-OS
+// defaults wrote into every saved config.
+var legacySailPaths = []string{"/private/tmp/sail*"}
+
+// isForeignDefault reports whether paths are the built-in paths of another
+// OS, as a config saved there and synced here holds. Paths that exist here
+// are kept: the user may have narrowed a provider on purpose. The current OS's own
+// defaults win then, so one config file works on every machine.
+func (l *Loader) isForeignDefault(name string, paths []string) bool {
+	if l.pathsExist(paths) {
+		return false
+	}
+	if name == "sail-dirs" && l.platform.OS != OSDarwin && slices.Equal(paths, legacySailPaths) {
+		return true
+	}
+	for _, goos := range []string{OSDarwin, OSLinux, OSWindows} {
+		if goos == l.platform.OS {
+			continue
+		}
+		bare := Platform{OS: goos, Home: l.platform.Home, TempDir: l.platform.TempDir}
+		withEnv := l.platform
+		withEnv.OS = goos
+		for _, p := range []Platform{bare, withEnv} {
+			if def, ok := DefaultProvidersFor(p)[name]; ok && slices.Equal(def.Paths, paths) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// portableProviders drops paths that equal this OS's built-in defaults, some
+// of which are machine specific (temp dir, XDG roots), so the saved file
+// resolves to the right defaults on whichever OS loads it.
+func (l *Loader) portableProviders(providers map[string]Provider) map[string]Provider {
+	defaults := DefaultProvidersFor(l.platform)
+	out := make(map[string]Provider, len(providers))
+	for name := range providers {
+		p := providers[name]
+		if def, ok := defaults[name]; ok && slices.Equal(p.Paths, def.Paths) {
+			p.Paths = nil
+		}
+		out[name] = p
+	}
+	return out
+}
+
+// otherOSDefaultPaths returns the built-in paths of a provider that exists
+// only on another OS. A config saved there omits them, so they are restored
+// to keep the entry valid here.
+func (l *Loader) otherOSDefaultPaths(name string) []string {
+	for _, goos := range []string{OSDarwin, OSLinux, OSWindows} {
+		if goos == l.platform.OS {
+			continue
+		}
+		p := l.platform
+		p.OS = goos
+		if def, ok := DefaultProvidersFor(p)[name]; ok {
+			return def.Paths
+		}
+	}
+	return nil
 }

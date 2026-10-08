@@ -5,6 +5,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -19,6 +20,7 @@ func sandboxHome(t *testing.T) string {
 	t.Helper()
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
 	t.Setenv("XDG_CACHE_HOME", filepath.Join(home, ".cache"))
 	t.Setenv("XDG_DATA_HOME", filepath.Join(home, ".local", "share"))
@@ -38,7 +40,6 @@ func writeAged(t *testing.T, path string) {
 // critical tier, the most aggressive one, and checks that nothing protected
 // is removed while an unprotected control is.
 func TestRun_NeverDeletesProtectedPaths(t *testing.T) {
-	skipOnWindows(t, "#206 per-OS paths and permissions")
 	home := sandboxHome(t)
 	cfg := &config.Config{
 		Providers: map[string]config.Provider{},
@@ -72,7 +73,7 @@ func TestRun_NeverDeletesProtectedPaths(t *testing.T) {
 	add("uv", true, config.Provider{Paths: []string{filepath.Join(home, "precious", "data")}})
 	add("cargo", true, config.Provider{Paths: []string{filepath.Join(home, "Downloads")}})
 	add("gradle", true, config.Provider{Paths: []string{filepath.Join(home, ".local", "share", "opencode")}})
-	add("gh", true, config.Provider{Paths: []string{filepath.Join(home, "repos", "feature")}})
+	add("playwright", true, config.Provider{Paths: []string{filepath.Join(home, "repos", "feature")}})
 	add("sweep", false, config.Provider{
 		Type:    config.TypeDirPattern,
 		Paths:   []string{filepath.Join(home, "precious", "sweep-*")},
@@ -114,19 +115,20 @@ func TestRun_NeverDeletesProtectedPaths(t *testing.T) {
 }
 
 func TestProtectedPaths_UnionOfDefaultsAndConfig(t *testing.T) {
-	skipOnWindows(t, "#206 per-OS paths and permissions")
-	home := "/Users/me"
-	got := ProtectedPaths(&config.Config{Protected: []string{"~/keep", "/data/keep", "~/Downloads"}}, home)
+	home := absPath("/Users/me")
+	got := ProtectedPaths(&config.Config{Protected: []string{"~/keep", absPath("/data/keep"), "~/Downloads"}}, home)
 
-	assert.Contains(t, got, "/Users/me/Downloads")
-	assert.Contains(t, got, "/Users/me/.local/share/opencode")
-	assert.Contains(t, got, "/var/lib/docker/volumes")
-	assert.Contains(t, got, "/Users/me/keep")
-	assert.Contains(t, got, "/data/keep")
-	assert.Len(t, got, 5)
+	assert.Contains(t, got, filepath.Join(home, "Downloads"))
+	assert.Contains(t, got, filepath.Join(home, ".local", "share", "opencode"))
+	if runtime.GOOS != "windows" {
+		assert.Contains(t, got, "/var/lib/docker/volumes")
+	}
+	assert.Contains(t, got, filepath.Join(home, "keep"))
+	assert.Contains(t, got, absPath("/data/keep"))
 
 	empty := ProtectedPaths(&config.Config{}, home)
-	assert.Contains(t, empty, "/Users/me/Downloads")
+	assert.Contains(t, empty, filepath.Join(home, "Downloads"))
+	assert.Len(t, got, len(empty)+2)
 }
 
 func TestIsProtectedWith_ConfiguredAndGitRoots(t *testing.T) {
@@ -173,11 +175,10 @@ func TestScanProtected_CancelledContextIsIncomplete(t *testing.T) {
 }
 
 func TestProtectedPaths_DropsRelativeEntries(t *testing.T) {
-	skipOnWindows(t, "#206 per-OS paths and permissions")
-	got := ProtectedPaths(&config.Config{Protected: []string{"Downloads2", "./x"}}, "/Users/me")
+	got := ProtectedPaths(&config.Config{Protected: []string{"Downloads2", "./x"}}, absPath("/Users/me"))
 
 	assert.NotContains(t, got, "Downloads2")
-	assert.Len(t, got, len(config.DefaultProtected()))
+	assert.Len(t, got, len(ProtectedPaths(&config.Config{}, absPath("/Users/me"))))
 }
 
 func TestInsideGitCheckout_StopsAtHome(t *testing.T) {
@@ -293,4 +294,19 @@ func TestInsideGitCheckout_DataAliasAndCaseOfHome(t *testing.T) {
 
 	assert.False(t, insideGitCheckout(filepath.Join(home, "plain"), strings.ToUpper(home)))
 	assert.False(t, insideGitCheckout("/System/Volumes/Data"+filepath.Join(home, "plain"), home))
+}
+
+func absPath(posix string) string {
+	if runtime.GOOS == "windows" {
+		return `C:` + filepath.FromSlash(posix)
+	}
+	return posix
+}
+
+func TestProtectedPaths_BackslashHomeEntryIsExpandedOnEveryOS(t *testing.T) {
+	home := absPath("/Users/me")
+
+	got := ProtectedPaths(&config.Config{Protected: []string{`~\Photos\raw`}}, home)
+
+	assert.Contains(t, got, filepath.Join(home, "Photos", "raw"))
 }

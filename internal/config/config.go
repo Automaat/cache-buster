@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"sort"
 	"strings"
@@ -20,6 +21,19 @@ type Config struct {
 	// Protected lists paths auto never deletes and status reports for a human.
 	// User entries are added to the built-in ones, never replace them.
 	Protected []string `mapstructure:"protected" yaml:"protected,omitempty"`
+
+	goos string
+}
+
+// Applies reports whether the named provider applies on the OS this config
+// was built for. Providers stay in the file so a config shared between OSes
+// keeps entries that only apply elsewhere.
+func (c *Config) Applies(name string) bool {
+	goos := c.goos
+	if goos == "" {
+		goos = runtime.GOOS
+	}
+	return AppliesOn(name, goos)
 }
 
 // DefaultProtected returns the built-in protected paths. The docker volumes
@@ -125,7 +139,7 @@ type Provider struct {
 	CleanCmd string `mapstructure:"clean_cmd" yaml:"clean_cmd,omitempty"`
 	// CleanTimeout bounds the clean command (default 2m); a hung command is cancelled.
 	CleanTimeout string   `mapstructure:"clean_timeout" yaml:"clean_timeout,omitempty"`
-	Paths        []string `mapstructure:"paths" yaml:"paths"`
+	Paths        []string `mapstructure:"paths" yaml:"paths,omitempty"`
 	Enabled      bool     `mapstructure:"enabled" yaml:"enabled"`
 
 	// Type selects a special provider implementation (see TypeDirPattern).
@@ -165,7 +179,7 @@ func (c *Config) Validate() error {
 					return fmt.Errorf("provider %q: %s paths must contain a glob (*, ? or [), got %q",
 						name, TypeDirPattern, path)
 				}
-				if !strings.HasPrefix(path, "/") && !strings.HasPrefix(path, "~/") {
+				if !IsAbsPortable(path) && !strings.HasPrefix(path, "~/") && !strings.HasPrefix(path, `~\`) {
 					return fmt.Errorf("provider %q: %s paths must be absolute or start with ~/, got %q",
 						name, TypeDirPattern, path)
 				}
@@ -207,7 +221,7 @@ func (c *Config) EnabledProviders() []string {
 	var enabled []string
 	for name := range c.Providers {
 		p := c.Providers[name]
-		if p.Enabled && PathsExist(p.Paths) {
+		if p.Enabled && c.Applies(name) && PathsExist(p.Paths) {
 			enabled = append(enabled, name)
 		}
 	}
@@ -219,7 +233,7 @@ func (c *Config) EnabledProviders() []string {
 func (c *Config) AllEnabledProviders() []string {
 	var enabled []string
 	for name := range c.Providers {
-		if c.Providers[name].Enabled {
+		if c.Providers[name].Enabled && c.Applies(name) {
 			enabled = append(enabled, name)
 		}
 	}
@@ -244,10 +258,17 @@ func validateProtectedEntry(path, home string) error {
 	if path != strings.TrimSpace(path) {
 		return fmt.Errorf("%q has leading or trailing whitespace", path)
 	}
-	rest, tilde := strings.CutPrefix(path, "~/")
+	norm := strings.ReplaceAll(path, `\`, "/")
+	rest, tilde := strings.CutPrefix(norm, "~/")
+	drive := ""
 	if !tilde {
 		var abs bool
-		rest, abs = strings.CutPrefix(path, "/")
+		switch {
+		case hasDrive(norm) && len(norm) > 2 && norm[2] == '/':
+			drive, rest, abs = norm[:2], norm[3:], true
+		default:
+			rest, abs = strings.CutPrefix(norm, "/")
+		}
 		if !abs {
 			return fmt.Errorf("paths must be absolute or start with ~/, got %q", path)
 		}
@@ -264,16 +285,23 @@ func validateProtectedEntry(path, home string) error {
 	if strings.ContainsAny(path, "*?[") {
 		return fmt.Errorf("%q contains glob characters, protected entries are literal paths", path)
 	}
-	if !tilde && !strings.Contains(strings.TrimPrefix(stripDataAlias(path), "/"), "/") {
+	topLevel := rest
+	if drive == "" {
+		topLevel = strings.TrimPrefix(stripDataAlias(norm), "/")
+	}
+	if !tilde && !strings.Contains(topLevel, "/") {
 		return fmt.Errorf("%q is a top-level system directory, name a deeper path", path)
 	}
 
 	expanded := "/" + rest
-	if tilde {
+	switch {
+	case tilde:
 		if home == "" {
 			return nil
 		}
 		expanded = filepath.Join(home, rest)
+	case drive != "":
+		expanded = drive + "/" + rest
 	}
 	homes := []string{filepath.Clean(home)}
 	if resolved, err := filepath.EvalSymlinks(home); err == nil {
@@ -290,10 +318,12 @@ func validateProtectedEntry(path, home string) error {
 		homes = append(homes, stripDataAlias(h))
 	}
 	for _, cand := range candidates {
+		cand = filepath.ToSlash(cand)
 		if cand == "/" {
 			return fmt.Errorf("%q is the filesystem root, name a specific directory", path)
 		}
 		for _, h := range homes {
+			h = filepath.ToSlash(h)
 			if h == "." || h == "" {
 				continue
 			}
@@ -309,12 +339,14 @@ func validateProtectedEntry(path, home string) error {
 // again under the user data volume.
 const dataVolumeAlias = "/System/Volumes/Data"
 
-// stripDataAlias returns p without the data volume firmlink prefix.
+// stripDataAlias returns p without the data volume firmlink prefix, using
+// slash separators when it strips.
 func stripDataAlias(p string) string {
-	if len(p) < len(dataVolumeAlias) || !strings.EqualFold(p[:len(dataVolumeAlias)], dataVolumeAlias) {
+	slashed := filepath.ToSlash(p)
+	if len(slashed) < len(dataVolumeAlias) || !strings.EqualFold(slashed[:len(dataVolumeAlias)], dataVolumeAlias) {
 		return p
 	}
-	rest := p[len(dataVolumeAlias):]
+	rest := slashed[len(dataVolumeAlias):]
 	if rest == "" {
 		return "/"
 	}

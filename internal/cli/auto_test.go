@@ -204,7 +204,6 @@ func TestAuto_NeverRunsDockerVolumesEvenWhenEnabled(t *testing.T) {
 }
 
 func TestAuto_CriticalSweepsDisabledDirPatternProvider(t *testing.T) {
-	skipOnWindows(t, "#206 per-OS paths and permissions")
 	stale := filepath.Join(t.TempDir(), "sailx-stale")
 	require.NoError(t, os.MkdirAll(stale, 0o750))
 	require.NoError(t, os.WriteFile(filepath.Join(stale, "f"), []byte("x"), 0o600))

@@ -1048,11 +1048,10 @@ func TestCommandProvider_QuotedArgs(t *testing.T) {
 }
 
 func TestCommandProvider_Available(t *testing.T) {
-	skipOnWindows(t, "#206 per-OS paths and permissions")
 	// Temporary PATH containing exactly one fake executable.
 	binDir := t.TempDir()
 	const binName = "fakecleantool"
-	if err := os.WriteFile(filepath.Join(binDir, binName), []byte("#!/bin/sh\n"), 0o755); err != nil {
+	if err := os.WriteFile(filepath.Join(binDir, binName+exeSuffix()), []byte("#!/bin/sh\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", binDir)
@@ -1137,7 +1136,7 @@ func TestDockerProvider_CleanSuccess(t *testing.T) {
 }
 
 func TestFileProvider_DeleteError(t *testing.T) {
-	skipOnWindows(t, "#206 per-OS paths and permissions")
+	skipWithoutModeBits(t)
 	tmpDir := t.TempDir()
 	subDir := filepath.Join(tmpDir, "subdir")
 	if err := os.Mkdir(subDir, 0o700); err != nil {
@@ -1322,7 +1321,7 @@ func TestFileProvider_SmartClean_DryRun(t *testing.T) {
 }
 
 func TestFileProvider_SmartClean_WithErrors(t *testing.T) {
-	skipOnWindows(t, "#206 per-OS paths and permissions")
+	skipWithoutModeBits(t)
 	if os.Getuid() == 0 {
 		t.Skip("skipping permission test as root")
 	}
@@ -1531,23 +1530,25 @@ func TestDockerProvider_SmartClean_DryRun(t *testing.T) {
 }
 
 func TestNewProvider_ExtraCacheDefaults(t *testing.T) {
-	for name, cfg := range config.DefaultProviders() {
-		t.Run(name, func(t *testing.T) {
-			p, err := provider.NewProvider(name, cfg)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if p.Name() != name {
-				t.Errorf("name = %q, want %q", p.Name(), name)
-			}
-		})
+	for _, goos := range []string{config.OSDarwin, config.OSLinux, config.OSWindows} {
+		for name, cfg := range config.DefaultProvidersFor(config.Platform{OS: goos}) {
+			t.Run(goos+"/"+name, func(t *testing.T) {
+				p, err := provider.NewProvider(name, cfg)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if p.Name() != name {
+					t.Errorf("name = %q, want %q", p.Name(), name)
+				}
+			})
+		}
 	}
 }
 
 func TestNewProvider_ExtraCacheIsFileBased(t *testing.T) {
 	for _, name := range []string{"edge", "vivaldi", "gh", "vscode-shipit"} {
 		t.Run(name, func(t *testing.T) {
-			p, err := provider.NewProvider(name, config.DefaultProviders()[name])
+			p, err := provider.NewProvider(name, macDefaults()[name])
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1559,7 +1560,7 @@ func TestNewProvider_ExtraCacheIsFileBased(t *testing.T) {
 }
 
 func TestNewProvider_Rustup(t *testing.T) {
-	p, err := provider.NewProvider("rustup", config.DefaultProviders()["rustup"])
+	p, err := provider.NewProvider("rustup", macDefaults()["rustup"])
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1569,15 +1570,16 @@ func TestNewProvider_Rustup(t *testing.T) {
 }
 
 func TestEnabledProviders_ExtraCachesNeedExistingPath(t *testing.T) {
-	skipOnWindows(t, "#206 per-OS paths and permissions")
-	t.Setenv("HOME", t.TempDir())
-	cfg := config.DefaultConfig()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	cfg := config.DefaultConfigFor(config.Platform{OS: config.OSLinux, Home: home})
 	for _, name := range cfg.EnabledProviders() {
 		if name == "edge" || name == "huggingface" || name == "gh" {
 			t.Errorf("%s listed without its path", name)
 		}
 	}
-	if err := os.MkdirAll(filepath.Join(os.Getenv("HOME"), ".cache", "gh"), 0o750); err != nil {
+	if err := os.MkdirAll(filepath.Join(home, ".cache", "gh"), 0o750); err != nil {
 		t.Fatal(err)
 	}
 	found := false
@@ -1592,7 +1594,7 @@ func TestEnabledProviders_ExtraCachesNeedExistingPath(t *testing.T) {
 func TestNewProvider_ExtraCacheIsEntryBased(t *testing.T) {
 	for _, name := range []string{"huggingface", "playwright", "lima", "chrome-devtools-mcp"} {
 		t.Run(name, func(t *testing.T) {
-			p, err := provider.NewProvider(name, config.DefaultProviders()[name])
+			p, err := provider.NewProvider(name, macDefaults()[name])
 			if err != nil {
 				t.Fatal(err)
 			}

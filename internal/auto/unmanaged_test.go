@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
@@ -119,11 +120,30 @@ func TestCoveredPaths_EnabledAndDirPatternSweepsOnly(t *testing.T) {
 
 func TestUnmanagedRoots_CoversSharedCachesAndTemp(t *testing.T) {
 	home := t.TempDir()
+	t.Setenv("XDG_DATA_HOME", "")
+	t.Setenv("XDG_CACHE_HOME", "")
 
 	roots := UnmanagedRoots(home)
 
 	assert.Contains(t, roots, filepath.Join(home, ".local", "share"))
 	assert.Contains(t, roots, os.TempDir())
+}
+
+func TestUnmanagedRoots_FollowXDGOverrides(t *testing.T) {
+	home := t.TempDir()
+	data, cache := t.TempDir(), t.TempDir()
+	t.Setenv("XDG_DATA_HOME", data)
+	t.Setenv("XDG_CACHE_HOME", cache)
+
+	roots := UnmanagedRoots(home)
+
+	if runtime.GOOS == "linux" {
+		assert.Contains(t, roots, data)
+		assert.Contains(t, roots, cache)
+	}
+	if runtime.GOOS == "darwin" {
+		assert.NotContains(t, roots, data, "launchd does not pass XDG variables")
+	}
 }
 
 func TestCoveredPaths_BadGlobFallsBackToLiteralPrefix(t *testing.T) {
