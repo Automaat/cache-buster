@@ -211,7 +211,7 @@ func measureDir(ctx context.Context, root string) (int64, bool) {
 			return nil
 		}
 		if info, infoErr := d.Info(); infoErr == nil {
-			if id, shared := osshim.SharedFileID(path, info); shared && !links.Add(id) {
+			if id, _, shared := osshim.SharedFileID(path, info); shared && !links.Add(id) {
 				return nil
 			}
 			total += diskUsage(info)

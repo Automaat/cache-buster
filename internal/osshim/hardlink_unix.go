@@ -17,12 +17,12 @@ func idBits[T statInt](v T) uint64 {
 }
 
 // SharedFileID returns the identity of a file that has more than one hard
-// link, using device and inode. ok is false for single-link files, so callers
+// link and its link count, using device and inode. ok is false for single-link files, so callers
 // count those directly.
-func SharedFileID(_ string, info fs.FileInfo) (id FileID, ok bool) {
+func SharedFileID(_ string, info fs.FileInfo) (id FileID, nlink uint64, ok bool) {
 	st, isStat := info.Sys().(*syscall.Stat_t)
 	if !isStat || idBits(st.Nlink) < 2 {
-		return FileID{}, false
+		return FileID{}, 0, false
 	}
-	return FileID{Volume: idBits(st.Dev), Index: idBits(st.Ino)}, true
+	return FileID{Volume: idBits(st.Dev), Index: idBits(st.Ino)}, idBits(st.Nlink), true
 }

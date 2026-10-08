@@ -520,3 +520,48 @@ func TestDirPatternCountsHardlinkAcrossDirectoriesOnce(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, int64(1300), res.BytesCleaned)
 }
+
+func TestDirPatternSkipsBytesOfInodeWithSurvivingLink(t *testing.T) {
+	root := t.TempDir()
+	dir := makeDir(t, root, "sail-a", 1000, 5*time.Hour)
+	outside := filepath.Join(t.TempDir(), "keep.bin")
+	require.NoError(t, os.WriteFile(outside, make([]byte, 700), 0o600))
+	linkOrSkip(t, outside, filepath.Join(dir, "olink.bin"))
+	ageTree(t, dir, 5*time.Hour)
+
+	p := newTestDirProvider(t, root, nil)
+	res, err := p.Clean(t.Context(), CleanOptions{})
+	require.NoError(t, err)
+
+	assert.Equal(t, int64(1000), res.BytesCleaned, "the inode kept by a link outside frees nothing")
+	assert.True(t, exists(outside))
+}
+
+func TestDirPatternSkippedSiblingKeepsSharedInode(t *testing.T) {
+	root := t.TempDir()
+	first := makeDir(t, root, "sail-a", 1000, 5*time.Hour)
+	fresh := makeDir(t, root, "sail-b", 10, time.Minute)
+	linkOrSkip(t, filepath.Join(first, "sub", "data.bin"), filepath.Join(fresh, "shared.bin"))
+	ageTree(t, first, 5*time.Hour)
+
+	p := newTestDirProvider(t, root, nil)
+	res, err := p.Clean(t.Context(), CleanOptions{DryRun: true})
+	require.NoError(t, err)
+
+	assert.Zero(t, res.BytesCleaned, "the surviving sibling still holds the inode")
+}
+
+func TestDirPatternDuplicatePatternsCountOnce(t *testing.T) {
+	root := t.TempDir()
+	makeDir(t, root, "sail-a", 1000, 5*time.Hour)
+	makeDir(t, root, "sail-b", 300, 5*time.Hour)
+
+	p := newTestDirProvider(t, root, func(c *config.Provider) {
+		c.Paths = []string{filepath.Join(root, "sail*"), filepath.Join(root, "sail*")}
+	})
+	res, err := p.Clean(t.Context(), CleanOptions{})
+	require.NoError(t, err)
+
+	assert.Equal(t, int64(1300), res.BytesCleaned)
+	assert.Len(t, res.Entries, 2)
+}

@@ -82,11 +82,18 @@ func NewDirPatternProvider(name string, cfg config.Provider) (*DirPatternProvide
 type dirScan struct {
 	newest  time.Time
 	gitPath string
-	// links maps each hard-linked file seen in the walk to its size, so
-	// Clean can drop inodes an earlier directory already counted.
-	links map[osshim.FileID]int64
+	// links holds the hard-linked files of the walk, kept out of size: an
+	// inode frees space only when every link to it is removed.
+	links map[osshim.FileID]linkInfo
 	size  int64
 	files int64
+}
+
+// linkInfo is one hard-linked inode: its size, its total link count on disk
+// and how many of those links the walk found.
+type linkInfo struct {
+	size        int64
+	nlink, seen uint64
 }
 
 // evaluated is one matched directory after the eligibility checks.
@@ -101,16 +108,14 @@ type evaluated struct {
 //
 // Every directory is evaluated before any is removed: removing one drops the
 // link count of files it shares with another, which would hide the shared
-// inode from the later scan and count it twice.
+// inode from the later scan.
 func (p *DirPatternProvider) Clean(ctx context.Context, opts CleanOptions) (CleanResult, error) {
 	var (
 		out    strings.Builder
 		result CleanResult
 		errs   []error
-		// counted holds the inodes already in the totals, so a file
-		// hard-linked across two matched directories is counted once.
-		counted = make(map[osshim.FileID]struct{})
-		evals   = make([]evaluated, 0, len(p.paths))
+		evals  = make([]evaluated, 0, len(p.paths))
+		seen   = make(map[string]bool, len(p.paths))
 	)
 
 	for _, dir := range p.paths {
@@ -118,10 +123,20 @@ func (p *DirPatternProvider) Clean(ctx context.Context, opts CleanOptions) (Clea
 			result.Output = out.String()
 			return result, err
 		}
+		if seen[dir] {
+			continue
+		}
+		seen[dir] = true
 		sc, reason := p.evaluate(ctx, dir)
 		evals = append(evals, evaluated{dir: dir, sc: sc, reason: reason})
 	}
-	eligible := len(evals) - countSkipped(evals)
+	freed := newFreedLinks(evals)
+	eligible := 0
+	for _, ev := range evals {
+		if ev.reason == "" {
+			eligible++
+		}
+	}
 
 	for _, ev := range evals {
 		if err := ctx.Err(); err != nil {
@@ -141,7 +156,7 @@ func (p *DirPatternProvider) Clean(ctx context.Context, opts CleanOptions) (Clea
 			continue
 		}
 
-		sc.size = uncounted(ev.sc, counted)
+		sc.size = ev.sc.size + freed.bytesFor(ev.sc)
 		idle := p.now().Sub(sc.newest).Round(time.Second)
 		if opts.DryRun {
 			fmt.Fprintf(&out, "would remove: %s (%s, idle %s)\n", dir, size.FormatSize(sc.size), idle)
@@ -167,28 +182,37 @@ func (p *DirPatternProvider) Clean(ctx context.Context, opts CleanOptions) (Clea
 	return result, errors.Join(errs...)
 }
 
-func countSkipped(evals []evaluated) int {
-	n := 0
-	for _, ev := range evals {
-		if ev.reason != "" {
-			n++
-		}
-	}
-	return n
+// freedLinks tracks hard-linked inodes across the directories about to be
+// removed. An inode counts as freed once, in the first directory holding it,
+// and only when every link to it lies inside those directories.
+type freedLinks struct {
+	total   map[osshim.FileID]uint64
+	claimed map[osshim.FileID]bool
 }
 
-// uncounted returns the scan's size minus inodes already in counted, and
-// records the scan's inodes there.
-func uncounted(sc dirScan, counted map[osshim.FileID]struct{}) int64 {
-	total := sc.size
-	for id, n := range sc.links {
-		if _, dup := counted[id]; dup {
-			total -= n
+func newFreedLinks(evals []evaluated) *freedLinks {
+	f := &freedLinks{total: make(map[osshim.FileID]uint64), claimed: make(map[osshim.FileID]bool)}
+	for _, ev := range evals {
+		if ev.reason != "" {
 			continue
 		}
-		counted[id] = struct{}{}
+		for id, li := range ev.sc.links {
+			f.total[id] += li.seen
+		}
 	}
-	return total
+	return f
+}
+
+func (f *freedLinks) bytesFor(sc dirScan) int64 {
+	var n int64
+	for id, li := range sc.links {
+		if f.claimed[id] || f.total[id] < li.nlink {
+			continue
+		}
+		f.claimed[id] = true
+		n += li.size
+	}
+	return n
 }
 
 // evaluate decides whether dir may be removed. A non-empty reason means skip.
@@ -337,14 +361,15 @@ func scanDir(ctx context.Context, dir string, rootMod time.Time) (sc dirScan, sk
 
 		if info.Mode().IsRegular() {
 			sc.files++
-			if id, shared := osshim.SharedFileID(path, info); shared {
-				if _, dup := sc.links[id]; dup {
-					return nil
-				}
+			if id, nlink, shared := osshim.SharedFileID(path, info); shared {
 				if sc.links == nil {
-					sc.links = make(map[osshim.FileID]int64)
+					sc.links = make(map[osshim.FileID]linkInfo)
 				}
-				sc.links[id] = info.Size()
+				li := sc.links[id]
+				li.size, li.nlink = info.Size(), nlink
+				li.seen++
+				sc.links[id] = li
+				return nil
 			}
 			sc.size += info.Size()
 		}

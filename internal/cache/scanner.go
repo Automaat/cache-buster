@@ -76,7 +76,7 @@ func CalculateSizeContext(ctx context.Context, paths []string) (ScanResult, erro
 					mu.Unlock()
 					return nil
 				}
-				if id, shared := osshim.SharedFileID(path, info); shared && !links.Add(id) {
+				if id, _, shared := osshim.SharedFileID(path, info); shared && !links.Add(id) {
 					return nil
 				}
 				total.Add(info.Size())

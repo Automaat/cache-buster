@@ -478,7 +478,7 @@ and `min_idle` must parse. A provider whose config does not load is not hidden:
 fails validation (a relative or glob-less path) and names the offending provider in that error.
 
 Sizes and freed bytes count each hard-linked file once, across all matched directories and in dry-run
-totals. On Linux and macOS a file is identified by device and inode. On Windows by volume serial and file
+totals; a `dir-pattern` sweep reports a shared file as freed only when every link to it lies inside the removed directories, and duplicate patterns list a directory once. On Linux and macOS a file is identified by device and inode. On Windows by volume serial and file
 index (one extra open per file); if the identity cannot be read, every link counts in full, so the
 figure can only be too high. The age-based file trim lists each link on its own and still counts it
 separately.

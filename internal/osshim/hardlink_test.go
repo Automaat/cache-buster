@@ -28,7 +28,7 @@ func TestSharedFileID(t *testing.T) {
 
 	infoA, err := os.Lstat(a)
 	require.NoError(t, err)
-	_, shared := SharedFileID(a, infoA)
+	_, _, shared := SharedFileID(a, infoA)
 	assert.False(t, shared, "a file with one link is counted directly")
 
 	linkOrSkip(t, a, b)
@@ -40,13 +40,14 @@ func TestSharedFileID(t *testing.T) {
 	infoS, err := os.Lstat(single)
 	require.NoError(t, err)
 
-	idA, okA := SharedFileID(a, infoA)
-	idB, okB := SharedFileID(b, infoB)
+	idA, nA, okA := SharedFileID(a, infoA)
+	idB, _, okB := SharedFileID(b, infoB)
 	require.True(t, okA)
 	require.True(t, okB)
 	assert.Equal(t, idA, idB, "both links name the same file")
+	assert.Equal(t, uint64(2), nA)
 
-	_, okS := SharedFileID(single, infoS)
+	_, _, okS := SharedFileID(single, infoS)
 	assert.False(t, okS)
 }
 
