@@ -71,7 +71,9 @@ func insideGitCheckout(path, home string) bool {
 		}
 	}
 	isHome := func(dir string) bool {
-		return slices.ContainsFunc(homes, func(h string) bool { return strings.EqualFold(h, dir) })
+		return slices.ContainsFunc(withoutDataAlias([]string{dir}), func(d string) bool {
+			return slices.ContainsFunc(homes, func(h string) bool { return strings.EqualFold(h, d) })
+		})
 	}
 	for _, start := range withoutDataAlias([]string{filepath.Clean(path)}) {
 		for dir := start; ; dir = filepath.Dir(dir) {
