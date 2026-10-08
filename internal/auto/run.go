@@ -302,7 +302,7 @@ func skipped(res Result, reason string) Result {
 // the scan was cancelled.
 func protectedReason(ctx context.Context, p provider.Provider, sweep bool, home string, protected []string) (string, error) {
 	for _, path := range p.Paths() {
-		if sweep && hasProtectedName(path) {
+		if sweep && (hasProtectedName(path) || hasResolvedProtectedName(path)) {
 			return "protected path " + path, nil
 		}
 		v := checkProtected(ctx, path, home, protected, true)
@@ -318,6 +318,11 @@ func protectedReason(ctx context.Context, p provider.Provider, sweep bool, home 
 		}
 	}
 	return "", nil
+}
+
+func hasResolvedProtectedName(path string) bool {
+	resolved, err := filepath.EvalSymlinks(path)
+	return err == nil && hasProtectedName(resolved)
 }
 
 func printResult(out io.Writer, res Result) {

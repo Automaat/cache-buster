@@ -168,6 +168,9 @@ func checkProtected(ctx context.Context, path, home string, extra []string, scan
 	if resolveErr == nil {
 		target = resolved
 	}
+	if info, err := os.Stat(target); err == nil && !info.IsDir() {
+		return verdict{}
+	}
 	res := findGitMarker(ctx, target, markerLimits)
 	switch res.outcome {
 	case markerNone:

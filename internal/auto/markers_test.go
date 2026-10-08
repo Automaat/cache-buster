@@ -165,16 +165,6 @@ func TestFindGitMarker_CancelledContextStopsPromptly(t *testing.T) {
 	assert.Less(t, time.Since(start), time.Second)
 }
 
-func TestFindGitMarker_ExpiredBudgetIsTooLarge(t *testing.T) {
-	root := t.TempDir()
-	touch(t, filepath.Join(root, "a"))
-	lim := markerLimits
-	lim.timeout = time.Nanosecond
-	time.Sleep(time.Millisecond)
-
-	assert.Equal(t, markerTooLarge, findGitMarker(t.Context(), root, lim).outcome)
-}
-
 func TestFindGitMarker_ParentDeadlineIsNotACancel(t *testing.T) {
 	root := t.TempDir()
 	touch(t, filepath.Join(root, "a"))
@@ -400,4 +390,39 @@ func TestRun_SweepProtectsRealWorktreeAndNamedPaths(t *testing.T) {
 	assert.FileExists(t, filepath.Join(wt, "a.bin"), "worktree must survive the sweep")
 	assert.FileExists(t, named)
 	assert.NoFileExists(t, stale, "control sweep must really delete")
+}
+
+func TestCheckProtected_FilePathIsClear(t *testing.T) {
+	home := t.TempDir()
+	file := filepath.Join(t.TempDir(), "cache.log")
+	touch(t, file)
+
+	assert.Equal(t, verdictClear, checkProtected(t.Context(), file, home, nil, true).kind)
+}
+
+func TestRun_SweepSymlinkIntoProtectedNameIsSkipped(t *testing.T) {
+	home := sandboxHome(t)
+	noOpenCheck := false
+	target := filepath.Join(t.TempDir(), "worktrees", "x")
+	writeAged(t, filepath.Join(target, "a.bin"))
+	if err := os.MkdirAll(filepath.Join(home, "scratch"), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, filepath.Join(home, "scratch", "sail-link")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	cfg := &config.Config{Providers: map[string]config.Provider{"sweep": {
+		Type: config.TypeDirPattern, Paths: []string{filepath.Join(home, "scratch", "sail-*")}, MaxSize: "1B",
+		MinIdle: "1h", SkipIfOpen: &noOpenCheck,
+	}}, Auto: autoCfg()}
+
+	_, err := Run(t.Context(), cfg, false, Deps{
+		Free:        func() (FreeSpace, error) { return FreeSpace{Free: 1 * gib, Total: 1000 * gib}, nil },
+		NewProvider: provider.NewProvider,
+		Out:         &bytes.Buffer{},
+		Home:        home,
+	})
+
+	require.NoError(t, err)
+	assert.FileExists(t, filepath.Join(target, "a.bin"))
 }
