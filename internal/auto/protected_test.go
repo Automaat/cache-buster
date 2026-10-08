@@ -296,6 +296,22 @@ func TestInsideGitCheckout_DataAliasAndCaseOfHome(t *testing.T) {
 	assert.False(t, insideGitCheckout("/System/Volumes/Data"+filepath.Join(home, "plain"), home))
 }
 
+func TestInsideGitCheckout_AliasSpellingStopsAtDottedHome(t *testing.T) {
+	resolved, err := filepath.EvalSymlinks(t.TempDir())
+	require.NoError(t, err)
+	home := filepath.Join(resolved, "marcin.skalski")
+	mkdirFile(t, filepath.Join(home, ".git", "HEAD"), 1)
+	mkdirFile(t, filepath.Join(home, "plain", "a.bin"), 1)
+	mkdirFile(t, filepath.Join(home, "repo", ".git", "HEAD"), 1)
+	aliased := dataVolumeAlias + home
+	if _, err := os.Lstat(aliased); err != nil {
+		t.Skip("data volume firmlink is not available on this OS")
+	}
+
+	assert.False(t, insideGitCheckout(aliased+"/plain", home))
+	assert.True(t, insideGitCheckout(aliased+"/repo", home))
+}
+
 func absPath(posix string) string {
 	if runtime.GOOS == "windows" {
 		return `C:` + filepath.FromSlash(posix)
