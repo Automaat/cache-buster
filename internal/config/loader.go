@@ -129,12 +129,24 @@ func (l *Loader) Load() (*Config, error) {
 		}
 		// Union, never replace: an empty user list must not strip protections.
 		if l.v.IsSet("providers." + name + ".skip_prefixes") {
-			merged.SkipPrefixes = append(slices.Clone(defaultP.SkipPrefixes), userP.SkipPrefixes...)
+			merged.SkipPrefixes = unionStrings(defaultP.SkipPrefixes, userP.SkipPrefixes)
 		}
 		cfg.Providers[name] = merged
 	}
 
 	return cfg, nil
+}
+
+// unionStrings appends the items of extra that base lacks, so a list saved
+// from a merged config does not grow on every round trip.
+func unionStrings(base, extra []string) []string {
+	out := slices.Clone(base)
+	for _, s := range extra {
+		if !slices.Contains(out, s) {
+			out = append(out, s)
+		}
+	}
+	return out
 }
 
 // mergeAuto applies the user's auto settings over the defaults, field by field.
@@ -238,22 +250,40 @@ var legacySailPaths = []string{"/private/tmp/sail*"}
 // isForeignDefault reports whether paths are the built-in paths of another
 // OS, as a config saved there and synced here holds. Paths that exist here
 // are kept: the user may have narrowed a provider on purpose. The current OS's own
-// defaults win then, so one config file works on every machine.
+// defaults win then, so one config file works on every machine. The exact
+// legacy sail-dirs list is always the default, as older releases wrote it
+// into every saved config; pin it by adding a second path.
 func (l *Loader) isForeignDefault(name string, paths []string) bool {
+	if name == "sail-dirs" {
+		if slices.Equal(paths, legacySailPaths) {
+			return true
+		}
+		// Every other single entry is a deliberate pin, never a default.
+		if len(paths) == 1 {
+			return false
+		}
+	}
 	if l.pathsExist(paths) {
 		return false
-	}
-	if name == "sail-dirs" && l.platform.OS != OSDarwin && slices.Equal(paths, legacySailPaths) {
-		return true
 	}
 	for _, goos := range []string{OSDarwin, OSLinux, OSWindows} {
 		if goos == l.platform.OS {
 			continue
 		}
-		bare := Platform{OS: goos, Home: l.platform.Home, TempDir: l.platform.TempDir}
+		bare := Platform{
+			OS: goos, Home: l.platform.Home, TempDir: l.platform.TempDir,
+			SystemTempDir: SystemTempDirFor(goos),
+		}
 		withEnv := l.platform
 		withEnv.OS = goos
-		for _, p := range []Platform{bare, withEnv} {
+		withEnv.SystemTempDir = SystemTempDirFor(goos)
+		candidates := []Platform{bare, withEnv}
+		if sys := SystemTempDirFor(goos); sys != "" {
+			sysOnly := bare
+			sysOnly.TempDir = sys
+			candidates = append(candidates, sysOnly)
+		}
+		for _, p := range candidates {
 			if def, ok := DefaultProvidersFor(p)[name]; ok && slices.Equal(def.Paths, paths) {
 				return true
 			}

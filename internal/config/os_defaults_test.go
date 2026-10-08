@@ -108,15 +108,103 @@ func TestDefaultProvidersFor_WindowsOmitsUnixOnlyTools(t *testing.T) {
 	assert.Contains(t, defaults, "docker")
 }
 
-func TestDefaultProvidersFor_SailDirsUsesOSTempDir(t *testing.T) {
-	tests := map[string]Platform{"mac": macPlatform, "linux": linPlatform, "windows": winPlatform}
-	for name, p := range tests {
+func TestDefaultProvidersFor_SailDirsCoversOSAndSystemTempDirs(t *testing.T) {
+	mac := macPlatform
+	mac.TempDir = "/var/folders/ab/cd/T"
+	mac.SystemTempDir = "/private/tmp"
+	lin := linPlatform
+	lin.TempDir = "/run/user/1000/tmp"
+	lin.SystemTempDir = "/tmp"
+	win := winPlatform
+	tests := map[string]struct {
+		p    Platform
+		want []string
+	}{
+		"mac":     {mac, sailGlobs("/var/folders/ab/cd/T", "/private/tmp")},
+		"linux":   {lin, sailGlobs("/run/user/1000/tmp", "/tmp")},
+		"windows": {win, []string{filepath.Join(win.TempDir, "sail*")}},
+		"same dir once": {
+			Platform{OS: OSLinux, TempDir: "/tmp", SystemTempDir: "/tmp"}, sailGlobs("/tmp"),
+		},
+	}
+	for name, tt := range tests {
 		t.Run(name, func(t *testing.T) {
-			sail := DefaultProvidersFor(p)["sail-dirs"]
-			assert.Equal(t, []string{filepath.Join(p.TempDir, "sail*")}, sail.Paths)
+			sail := DefaultProvidersFor(tt.p)["sail-dirs"]
+			assert.Equal(t, tt.want, sail.Paths)
 			assert.False(t, sail.Enabled)
 		})
 	}
+}
+
+func TestSystemTempDirFor(t *testing.T) {
+	assert.Equal(t, "/private/tmp", SystemTempDirFor(OSDarwin))
+	assert.Equal(t, "/tmp", SystemTempDirFor(OSLinux))
+	assert.Empty(t, SystemTempDirFor(OSWindows))
+}
+
+func TestTempGlobs_DedupesDirsThatResolveToTheSameDirectory(t *testing.T) {
+	root := t.TempDir()
+	target := filepath.Join(root, "real")
+	require.NoError(t, os.MkdirAll(target, 0o750))
+	link := filepath.Join(root, "link")
+	require.NoError(t, os.Symlink(target, link))
+
+	one := Platform{OS: OSLinux, TempDir: link, SystemTempDir: target}.tempGlobs("sail*")
+	assert.Equal(t, []string{filepath.Join(link, "sail*")}, one, "symlink and target are one sweep root")
+
+	other := filepath.Join(root, "other")
+	require.NoError(t, os.MkdirAll(other, 0o750))
+	two := Platform{OS: OSLinux, TempDir: link, SystemTempDir: other}.tempGlobs("sail*")
+	assert.Equal(t, []string{filepath.Join(link, "sail*"), filepath.Join(other, "sail*")}, two)
+}
+
+func TestLoader_SavedConfigDoesNotFreezeTempDirs(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	mac := Platform{OS: OSDarwin, Home: "/Users/u", TempDir: "/var/folders/ab/cd/T", SystemTempDir: "/private/tmp"}
+	saver := NewLoader()
+	saver.SetConfigPath(path)
+	saver.SetPlatform(mac)
+	cfg := DefaultConfigFor(mac)
+	sail := cfg.Providers["sail-dirs"]
+	sail.Enabled = true
+	cfg.Providers["sail-dirs"] = sail
+	require.NoError(t, saver.Save(cfg))
+
+	raw, err := os.ReadFile(path)
+	require.NoError(t, err)
+	assert.NotContains(t, string(raw), "/var/folders")
+	assert.NotContains(t, string(raw), "/private/tmp")
+
+	loader := NewLoader()
+	loader.SetConfigPath(path)
+	loader.SetPlatform(Platform{OS: OSLinux, Home: "/home/u", TempDir: "/run/t", SystemTempDir: "/tmp"})
+	loader.pathsExist = func([]string) bool { return false }
+	loaded, err := loader.Load()
+	require.NoError(t, err)
+	assert.Equal(t, sailGlobs("/run/t", "/tmp"), loaded.Providers["sail-dirs"].Paths)
+	assert.True(t, loaded.Providers["sail-dirs"].Enabled)
+}
+
+func TestValidate_RejectsBlankPaths(t *testing.T) {
+	for _, blank := range []string{"", "  "} {
+		cfg := &Config{Providers: map[string]Provider{"x": {Paths: []string{"~/a", blank}, MaxSize: "1G"}}}
+		require.ErrorContains(t, cfg.Validate(), "blank", "%q", blank)
+	}
+}
+
+func TestLoader_SkipPrefixesStayStableAcrossRoundTrips(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	loader := NewLoader()
+	loader.SetConfigPath(path)
+	loader.SetPlatform(linPlatform)
+	var last []string
+	for range 3 {
+		cfg, err := loader.Load()
+		require.NoError(t, err)
+		require.NoError(t, loader.Save(cfg))
+		last = cfg.Providers["chrome-devtools-mcp"].SkipPrefixes
+	}
+	assert.Equal(t, []string{"chrome-profile-"}, last)
 }
 
 func TestDefaultConfigFor_ValidOnEveryOS(t *testing.T) {
@@ -358,7 +446,7 @@ func TestTempGlob_EscapesMetacharactersInTempDir(t *testing.T) {
 	require.NoError(t, os.MkdirAll(filepath.Join(odd, "sail-1"), 0o750))
 	require.NoError(t, os.MkdirAll(filepath.Join(dir, "a P b", "sail-2"), 0o750))
 
-	matches, err := filepath.Glob(Platform{TempDir: odd}.tempGlob("sail*"))
+	matches, err := filepath.Glob(Platform{TempDir: odd}.tempGlobs("sail*")[0])
 
 	require.NoError(t, err)
 	assert.Equal(t, []string{filepath.Join(odd, "sail-1")}, matches)
@@ -394,9 +482,6 @@ providers:
 	}{
 		"linux":   {linPlatform, filepath.Join("/tmp", "sail*")},
 		"windows": {winPlatform, filepath.Join(`C:\Temp`, "sail*")},
-		"macOS keeps the explicit path": {
-			Platform{OS: OSDarwin, Home: "/Users/u", TempDir: "/var/folders/ab/cd/T"}, "/private/tmp/sail*",
-		},
 	}
 	for name, tt := range tests {
 		t.Run(name, func(t *testing.T) {
@@ -412,6 +497,77 @@ providers:
 			assert.True(t, cfg.Providers["sail-dirs"].Enabled)
 		})
 	}
+}
+
+func TestLoader_LegacySailDefaultIsReplacedEvenWhenItMatches(t *testing.T) {
+	path := savedConfig(t, `version: "1"
+providers:
+  sail-dirs:
+    paths: [/private/tmp/sail*]
+`)
+	mac := Platform{OS: OSDarwin, Home: "/Users/u", TempDir: "/var/folders/ab/cd/T", SystemTempDir: "/private/tmp"}
+	loader := NewLoader()
+	loader.SetConfigPath(path)
+	loader.SetPlatform(mac)
+	loader.pathsExist = func([]string) bool { return true }
+
+	cfg, err := loader.Load()
+	require.NoError(t, err)
+
+	assert.Equal(t, sailGlobs("/var/folders/ab/cd/T", "/private/tmp"), cfg.Providers["sail-dirs"].Paths)
+}
+
+func TestLoader_NarrowedSystemTempPathIsKeptOnLinux(t *testing.T) {
+	path := savedConfig(t, `version: "1"
+providers:
+  sail-dirs:
+    paths: [/tmp/sail*]
+`)
+	loader := NewLoader()
+	loader.SetConfigPath(path)
+	loader.SetPlatform(Platform{OS: OSLinux, Home: "/home/u", TempDir: "/run/user/1000", SystemTempDir: "/tmp"})
+	loader.pathsExist = func([]string) bool { return false }
+
+	cfg, err := loader.Load()
+	require.NoError(t, err)
+
+	assert.Equal(t, []string{"/tmp/sail*"}, cfg.Providers["sail-dirs"].Paths)
+}
+
+func TestLoader_SingleSailPathIsAPinNotAForeignDefault(t *testing.T) {
+	mac := Platform{OS: OSDarwin, Home: "/Users/u", TempDir: "/var/folders/ab/cd/T", SystemTempDir: "/private/tmp"}
+	for _, pin := range []string{"/tmp/sail*", "/var/folders/ab/cd/T/sail*", "/opt/x/sail*"} {
+		path := savedConfig(t, "version: \"1\"\nproviders:\n  sail-dirs:\n    paths: ["+pin+"]\n")
+		loader := NewLoader()
+		loader.SetConfigPath(path)
+		loader.SetPlatform(mac)
+		loader.pathsExist = func([]string) bool { return false }
+
+		cfg, err := loader.Load()
+		require.NoError(t, err)
+
+		assert.Equal(t, []string{pin}, cfg.Providers["sail-dirs"].Paths, pin)
+	}
+}
+
+func TestLoader_LegacySailDefaultOnMacOSGainsTheOSTempDir(t *testing.T) {
+	path := savedConfig(t, `version: "1"
+providers:
+  sail-dirs:
+    paths:
+      - /private/tmp/sail*
+`)
+	loader := NewLoader()
+	loader.SetConfigPath(path)
+	loader.SetPlatform(Platform{
+		OS: OSDarwin, Home: "/Users/u", TempDir: "/var/folders/ab/cd/T", SystemTempDir: "/private/tmp",
+	})
+	loader.pathsExist = func([]string) bool { return false }
+
+	cfg, err := loader.Load()
+	require.NoError(t, err)
+
+	assert.Equal(t, sailGlobs("/var/folders/ab/cd/T", "/private/tmp"), cfg.Providers["sail-dirs"].Paths)
 }
 
 func TestLoader_ExistingPathEqualToForeignDefaultIsKept(t *testing.T) {
@@ -452,4 +608,13 @@ func TestDefaultProvidersFor_MacOSIgnoresXDGDataHome(t *testing.T) {
 	p.XDGDataHome = "/Users/u/xdg-data"
 
 	assert.Equal(t, []string{"~/.local/share/mise"}, DefaultProvidersFor(p)["mise"].Paths)
+}
+
+// sailGlobs spells the expected sail* globs below dirs with the host separator.
+func sailGlobs(dirs ...string) []string {
+	out := make([]string, 0, len(dirs))
+	for _, d := range dirs {
+		out = append(out, filepath.Join(d, "sail*"))
+	}
+	return out
 }

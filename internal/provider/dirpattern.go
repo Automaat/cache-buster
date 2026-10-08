@@ -30,6 +30,9 @@ type DirPatternProvider struct {
 	now       func() time.Time
 	openCheck func(ctx context.Context, dir string) (bool, error)
 	protected []string
+	// keep holds directories a match must neither equal nor contain, so a
+	// sweep never removes the temp dir the process itself runs in.
+	keep []string
 }
 
 // NewDirPatternProvider creates a provider that removes stale directories matching cfg.Paths.
@@ -63,6 +66,11 @@ func NewDirPatternProvider(name string, cfg config.Provider) (*DirPatternProvide
 		skipIfGitWorktree: cfg.SkipIfGitWorktree == nil || *cfg.SkipIfGitWorktree,
 		now:               time.Now,
 		openCheck:         osshim.HasOpenFiles,
+	}
+
+	p.keep = []string{os.TempDir()}
+	if resolved, evalErr := filepath.EvalSymlinks(os.TempDir()); evalErr == nil {
+		p.keep = append(p.keep, resolved)
 	}
 
 	if home, homeErr := os.UserHomeDir(); homeErr == nil {
@@ -132,6 +140,10 @@ func (p *DirPatternProvider) Clean(ctx context.Context, opts CleanOptions) (Clea
 func (p *DirPatternProvider) evaluate(ctx context.Context, dir string) (sc dirScan, skipReason string) {
 	if p.isProtected(dir) || p.isProtected(resolveParent(dir)) {
 		return sc, "protected path"
+	}
+
+	if p.containsKept(dir) || p.containsKept(resolveParent(dir)) {
+		return sc, "contains the temp dir in use"
 	}
 
 	info, err := os.Lstat(dir)
@@ -213,6 +225,18 @@ func (p *DirPatternProvider) isProtected(dir string) bool {
 	for _, prot := range p.protected {
 		prot = filepath.Clean(prot)
 		if clean == prot || filepath.Dir(clean) == prot || strings.HasPrefix(prot, clean+string(filepath.Separator)) {
+			return true
+		}
+	}
+	return false
+}
+
+// containsKept reports whether dir is, or is an ancestor of, a kept directory.
+func (p *DirPatternProvider) containsKept(dir string) bool {
+	clean := filepath.Clean(dir)
+	for _, k := range p.keep {
+		k = filepath.Clean(k)
+		if clean == k || strings.HasPrefix(k, clean+string(filepath.Separator)) {
 			return true
 		}
 	}

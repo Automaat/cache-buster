@@ -25,6 +25,22 @@ type Platform struct {
 	XDGDataHome  string
 	LocalAppData string
 	TempDir      string
+	// SystemTempDir is the fixed system-wide temp dir, which differs from
+	// TempDir when TMPDIR is unset or per-user. Empty where there is none.
+	SystemTempDir string
+}
+
+// SystemTempDirFor is the fixed system temp dir of goos: /private/tmp on
+// macOS, /tmp on other Unixes and none on Windows.
+func SystemTempDirFor(goos string) string {
+	switch goos {
+	case OSDarwin:
+		return "/private/tmp"
+	case OSWindows:
+		return ""
+	default:
+		return "/tmp"
+	}
 }
 
 // CurrentPlatform describes the running OS and environment.
@@ -37,6 +53,8 @@ func CurrentPlatform() Platform {
 		XDGDataHome:  os.Getenv("XDG_DATA_HOME"),
 		LocalAppData: os.Getenv("LOCALAPPDATA"),
 		TempDir:      os.TempDir(),
+
+		SystemTempDir: SystemTempDirFor(runtime.GOOS),
 	}
 }
 
@@ -103,12 +121,34 @@ func cutDir(path, dir string, fold bool) (string, bool) {
 	return "", false
 }
 
-func (p Platform) tempGlob(pattern string) string {
+// tempGlobs spells pattern below the OS temp dir and the fixed system temp
+// dir, once per distinct directory after symlinks are resolved.
+func (p Platform) tempGlobs(pattern string) []string {
 	dir := p.TempDir
 	if !IsAbsPortable(dir) {
 		dir = "/tmp"
 	}
-	return filepath.Join(escapeGlob(dir), pattern)
+	globs, seen := make([]string, 0, 2), make([]string, 0, 2)
+	for _, d := range []string{dir, p.SystemTempDir} {
+		if d == "" {
+			continue
+		}
+		resolved := resolvedDir(d)
+		if slices.Contains(seen, resolved) {
+			continue
+		}
+		seen = append(seen, resolved)
+		globs = append(globs, filepath.Join(escapeGlob(d), pattern))
+	}
+	return globs
+}
+
+// resolvedDir follows symlinks when dir exists here, else only cleans it.
+func resolvedDir(dir string) string {
+	if resolved, err := filepath.EvalSymlinks(dir); err == nil {
+		return resolved
+	}
+	return filepath.Clean(dir)
 }
 
 // escapeGlob wraps glob metacharacters in a bracket class, the one escape
