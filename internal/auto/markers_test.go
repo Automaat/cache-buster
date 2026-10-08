@@ -165,13 +165,13 @@ func TestFindGitMarker_CancelledContextStopsPromptly(t *testing.T) {
 	assert.Less(t, time.Since(start), time.Second)
 }
 
-func TestFindGitMarker_ParentDeadlineIsNotACancel(t *testing.T) {
+func TestFindGitMarker_ParentDeadlineIsACancelNotTooLarge(t *testing.T) {
 	root := t.TempDir()
 	touch(t, filepath.Join(root, "a"))
 	ctx, cancel := context.WithDeadline(t.Context(), time.Now().Add(-time.Second))
 	defer cancel()
 
-	assert.Equal(t, markerTooLarge, findGitMarker(ctx, root, markerLimits).outcome)
+	assert.Equal(t, markerCancelled, findGitMarker(ctx, root, markerLimits).outcome)
 }
 
 type fakeEntry struct {

@@ -58,6 +58,7 @@ type markerResult struct {
 // closed when the limits, a read error or ctx stop it before the tree is
 // verified.
 func findGitMarker(ctx context.Context, root string, lim scanLimits) markerResult {
+	parent := ctx
 	if lim.timeout > 0 {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, lim.timeout)
@@ -73,7 +74,7 @@ func findGitMarker(ctx context.Context, root string, lim scanLimits) markerResul
 			if dirs > lim.dirs {
 				return markerResult{outcome: markerTooLarge}
 			}
-			listing := listDir(ctx, dir, lim.entries-entries, depth < lim.depth)
+			listing := listDir(ctx, parent, dir, lim.entries-entries, depth < lim.depth)
 			if listing.outcome != markerNone {
 				return listing.markerResult
 			}
@@ -98,7 +99,7 @@ type dirListing struct {
 // listDir reads one directory in batches, so a directory with hundreds of
 // thousands of files is never held in memory whole, and returns at the first
 // .git entry. budget is the number of names still allowed.
-func listDir(ctx context.Context, dir string, budget int, wantSubdirs bool) dirListing {
+func listDir(ctx, parent context.Context, dir string, budget int, wantSubdirs bool) dirListing {
 	f, err := openDir(dir)
 	if errors.Is(err, fs.ErrNotExist) {
 		return dirListing{}
@@ -111,7 +112,7 @@ func listDir(ctx context.Context, dir string, budget int, wantSubdirs bool) dirL
 	var out dirListing
 	for {
 		if ctx.Err() != nil {
-			out.outcome = ctxOutcome(ctx)
+			out.outcome = ctxOutcome(parent)
 			return out
 		}
 		batch, readErr := f.ReadDir(listBatch)
@@ -139,10 +140,10 @@ func listDir(ctx context.Context, dir string, budget int, wantSubdirs bool) dirL
 }
 
 // ctxOutcome tells the scan's own timeout, a budget overrun, from a caller
-// that cancelled.
-func ctxOutcome(ctx context.Context) markerOutcome {
-	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-		return markerTooLarge
+// that cancelled or ran out of time.
+func ctxOutcome(parent context.Context) markerOutcome {
+	if parent.Err() != nil {
+		return markerCancelled
 	}
-	return markerCancelled
+	return markerTooLarge
 }
