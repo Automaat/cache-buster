@@ -167,7 +167,7 @@ func TestAuto_ExplicitDryRunKeepsMarker(t *testing.T) {
 }
 
 func TestAuto_NoMarkerCleansOnLowSpace(t *testing.T) {
-	f := newAutoFixture(t, 100*autoGiB, "")
+	f := newAutoFixture(t, 40*autoGiB, "")
 
 	require.NoError(t, runAutoWithLoader(t.Context(), f.loader, f.env, false))
 
@@ -224,7 +224,7 @@ func TestAuto_CriticalSweepsDisabledDirPatternProvider(t *testing.T) {
 	require.NoError(t, runAutoWithLoader(t.Context(), f.loader, f.env, false))
 
 	assert.NoDirExists(t, stale)
-	assert.Contains(t, f.out.String(), "tier critical")
+	assert.Contains(t, f.out.String(), "tier emergency")
 }
 
 func TestAuto_ConcurrentRunExits(t *testing.T) {
@@ -263,14 +263,14 @@ func TestAuto_ConfigOverridesChangeTier(t *testing.T) {
 }
 
 func TestInstallAgent_WritesPlistWithoutRealLaunchctl(t *testing.T) {
-	f := newAutoFixture(t, 100*autoGiB, "auto:\n  interval: 60m\n")
+	f := newAutoFixture(t, 100*autoGiB, "auto:\n  interval: 60m\n  tick_interval: 5m\n")
 
 	require.NoError(t, runInstallAgentWithLoader(t.Context(), f.loader, f.env))
 
 	plist := filepath.Join(f.home, "Library", "LaunchAgents", auto.AgentLabel+".plist")
 	data, err := os.ReadFile(plist)
 	require.NoError(t, err)
-	assert.Contains(t, string(data), "<integer>3600</integer>")
+	assert.Contains(t, string(data), "<integer>300</integer>")
 	assert.True(t, auto.FirstRunPending(f.env.stateDir))
 	require.Len(t, f.launchd, 3)
 	assert.Equal(t, []string{"launchctl", "bootout", "gui/501/dev.mskalski.cache-buster"}, f.launchd[0])

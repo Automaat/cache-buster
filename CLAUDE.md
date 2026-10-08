@@ -9,8 +9,8 @@ cmd/bilgie/     - CLI entrypoint
 internal/
   appname/            - Single source of the project name (Name) and its pre-rename value (Legacy)
   cache/              - Cache size scanning
-  auto/               - Free-space tiers, auto run, per-OS scheduler (launchd, systemd/cron, schtasks), notifiers, first-run marker
-  cli/                - Cobra command implementations (status, clean, config, auto, history, doctor, install-agent)
+  auto/               - Free-space tiers, tick decision (cooldowns, hysteresis, forecast), auto run, per-OS scheduler (launchd, systemd/cron, schtasks), notifiers, first-run marker
+  cli/                - Cobra command implementations (status, clean, config, tick, auto, history, doctor, install-agent)
   report/             - Concise per-provider summaries (text and JSON summary objects) for clean and auto
   doctor/             - Pure health checks behind `bilgie doctor` (agent, last run, free-space trend, config, notifier)
   config/             - Config loading, defaults, validation

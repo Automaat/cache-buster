@@ -77,6 +77,10 @@ func doctorFixture(t *testing.T, d doctorOS, free int64, runs ...auto.RunRecord)
 	for _, r := range runs {
 		require.NoError(t, auto.AppendRun(f.env.stateDir, r))
 	}
+	require.NoError(t, auto.WriteTickState(f.env.stateDir, auto.TickState{
+		Time: doctorNow.Add(-time.Minute), Tier: "ok", Reason: "healthy",
+	}))
+	require.NoError(t, auto.WritePassState(f.env.stateDir, auto.PassState{Time: doctorNow.Add(-15 * time.Minute), Tier: "ok"}))
 	return f
 }
 
@@ -101,6 +105,9 @@ func TestDoctor_HealthyOnEveryOS(t *testing.T) {
 			assert.Contains(t, out, "[ok  ] agent: installed and loaded")
 			assert.Contains(t, out, "last run: 15m ago (tier ok, freed 1.0 GiB")
 			assert.Contains(t, out, "free space: 100 GiB free of 1000 GiB (10%), tier ok")
+			assert.Contains(t, out, "[ok  ] cadence: tick every 2m0s, full pass every 30m0s")
+			assert.Contains(t, out, "[ok  ] last tick: 1m ago (tier ok, healthy)")
+			assert.Contains(t, out, "[ok  ] next full pass: in 15m while space is healthy")
 			assert.Contains(t, out, "[ok  ] notifier: "+d.notifier+" is available")
 			assert.Contains(t, out, "all good")
 		})
@@ -202,4 +209,40 @@ providers:
 	require.Error(t, err)
 	assert.Contains(t, f.out.String(), "[FAIL] config: config could not be loaded")
 	assert.True(t, strings.Contains(f.out.String(), "agent: installed and loaded"), "other checks still run")
+}
+
+func TestDoctor_FlagsAnAgentThatNeverTicked(t *testing.T) {
+	d := scheduled("darwin")
+	f := doctorFixture(t, d, 100*autoGiB, recentRun())
+	require.NoError(t, os.Remove(filepath.Join(f.env.stateDir, "tick.json")))
+
+	err := runDoctorWithLoader(t.Context(), f.loader, f.env)
+
+	require.Error(t, err)
+	assert.Contains(t, f.out.String(), "[warn] last tick: no tick recorded")
+	assert.Contains(t, f.out.String(), "run: bilgie install-agent")
+}
+
+func TestDoctor_FailsWhenTicksStopped(t *testing.T) {
+	d := scheduled("linux")
+	f := doctorFixture(t, d, 100*autoGiB, recentRun())
+	require.NoError(t, auto.WriteTickState(f.env.stateDir, auto.TickState{
+		Time: doctorNow.Add(-10 * time.Minute), Tier: "ok", Reason: "healthy",
+	}))
+
+	err := runDoctorWithLoader(t.Context(), f.loader, f.env)
+
+	require.Error(t, err)
+	assert.Contains(t, f.out.String(), "[FAIL] last tick: 10m ago")
+	assert.Contains(t, f.out.String(), "the agent is not ticking")
+}
+
+func TestDoctor_NextFullPassIsDueWhenOverdue(t *testing.T) {
+	d := scheduled("windows")
+	f := doctorFixture(t, d, 100*autoGiB, recentRun())
+	require.NoError(t, auto.WritePassState(f.env.stateDir, auto.PassState{Time: doctorNow.Add(-2 * time.Hour), Tier: "ok"}))
+
+	_ = runDoctorWithLoader(t.Context(), f.loader, f.env)
+
+	assert.Contains(t, f.out.String(), "next full pass: due at the next tick")
 }

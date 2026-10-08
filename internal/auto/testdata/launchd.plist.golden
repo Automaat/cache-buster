@@ -7,7 +7,7 @@
 	<key>ProgramArguments</key>
 	<array>
 		<string>/opt/homebrew/bin/bilgie</string>
-		<string>auto</string>
+		<string>tick</string>
 	</array>
 	<key>StartInterval</key>
 	<integer>2700</integer>
