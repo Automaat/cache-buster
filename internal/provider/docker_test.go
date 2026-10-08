@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/Automaat/cache-buster/internal/config"
+	"github.com/kballard/go-shellquote"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -270,10 +271,36 @@ func TestStripVolumesFlag(t *testing.T) {
 		"docker system prune --volumes=true -af":     "docker system prune -af",
 		`sh -c "docker system prune -af --volumes"`:  "sh -c 'docker system prune -af'",
 		"sh -c 'docker system prune -af\t--volumes'": "sh -c 'docker system prune -af'",
+		"docker system prune -af --volumes false":    "docker system prune -af",
 		"docker system prune -af":                    "docker system prune -af",
 		"docker volume prune -f":                     "docker volume prune -f",
 	}
 	for in, want := range tests {
 		assert.Equal(t, want, stripVolumesFlag(in), in)
+	}
+}
+
+func TestStripVolumesFlag_Wrapped(t *testing.T) {
+	tests := map[string]string{
+		`sh -c "docker system prune -af '--volumes'"`:          "docker system prune -af",
+		`sh -c "docker system prune -af \"--volumes\""`:        "docker system prune -af",
+		`sh -c "docker system prune --volumes=true;echo ok"`:   "docker system prune;echo ok",
+		`sh -c "docker system prune --volumes false"`:          "docker system prune",
+		`sh -c "docker system prune --volumes falsey"`:         "docker system prune falsey",
+		`sh -c "docker system prune --volumes=x&&echo ok"`:     "docker system prune&&echo ok",
+		`sh -c "docker system prune --volumes=true)"`:          "docker system prune)",
+		`sh -c "docker system prune --volumes=true>/dev/null"`: "docker system prune>/dev/null",
+		`sh -c "docker system prune -af --volumes=\"true\""`:   "docker system prune -af",
+		`sh -c "docker system prune -af --volumes='a b' -f"`:   "docker system prune -af -f",
+		`sh -c "docker system prune '--volumes=true' -f"`:      "docker system prune -f",
+		`sh -c "docker system prune --volumes-from x"`:         "docker system prune --volumes-from x",
+		`sh -c "docker system prune --volumes --volumes"`:      "docker system prune",
+		`sh -c "docker system prune --volumes"`:                "docker system prune",
+	}
+	for in, want := range tests {
+		parts, err := shellquote.Split(stripVolumesFlag(in))
+		require.NoError(t, err, in)
+		require.Len(t, parts, 3, in)
+		assert.Equal(t, want, parts[2], in)
 	}
 }

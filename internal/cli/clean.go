@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"slices"
 	"strings"
 	"syscall"
 
@@ -50,7 +51,7 @@ func runCleanWithLoader(loader *config.Loader, args []string, allFlag, dryRun, f
 		return fmt.Errorf("load config: %w", err)
 	}
 
-	providerNames, err := resolveProviders(cfg, args, allFlag)
+	providerNames, err := resolveProviders(cfg, args, allFlag, smart)
 	if err != nil {
 		return err
 	}
@@ -84,14 +85,22 @@ func runCleanWithLoader(loader *config.Loader, args []string, allFlag, dryRun, f
 	return executeClean(ctx, providers, dryRun, quiet, mode)
 }
 
-func resolveProviders(cfg *config.Config, args []string, allFlag bool) ([]string, error) {
+// volumesProvider is skipped by --all --smart: smart mode cannot bound a
+// volume prune, so it must be requested by name.
+const volumesProvider = "docker-volumes"
+
+func resolveProviders(cfg *config.Config, args []string, allFlag, smart bool) ([]string, error) {
 	if len(args) == 0 && !allFlag {
 		available := cfg.EnabledProviders()
 		return nil, fmt.Errorf("specify providers or use --all\nAvailable: %s", strings.Join(available, ", "))
 	}
 
 	if allFlag {
-		return cfg.EnabledProviders(), nil
+		names := cfg.EnabledProviders()
+		if !smart {
+			return names, nil
+		}
+		return slices.DeleteFunc(names, func(n string) bool { return n == volumesProvider }), nil
 	}
 
 	enabled := make(map[string]bool)
