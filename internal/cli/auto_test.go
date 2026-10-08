@@ -80,7 +80,7 @@ func (f *autoFixture) cleaned() bool {
 }
 
 func TestAuto_FirstRunAfterInstallDeletesNothingThenCleans(t *testing.T) {
-	f := newAutoFixture(t, 100*autoGiB, "")
+	f := newAutoFixture(t, 1*autoGiB, "")
 	require.NoError(t, auto.MarkFirstRunPending(f.env.stateDir))
 
 	require.NoError(t, runAutoWithLoader(t.Context(), f.loader, f.env, false))
@@ -94,7 +94,7 @@ func TestAuto_FirstRunAfterInstallDeletesNothingThenCleans(t *testing.T) {
 }
 
 func TestAuto_FirstRunMarkerSurvivesRestartUntilDryRunCompletes(t *testing.T) {
-	f := newAutoFixture(t, 100*autoGiB, "")
+	f := newAutoFixture(t, 1*autoGiB, "")
 	require.NoError(t, auto.MarkFirstRunPending(f.env.stateDir))
 	failing := f.env
 	failing.free = func() (auto.FreeSpace, error) { return auto.FreeSpace{}, os.ErrInvalid }
@@ -104,6 +104,53 @@ func TestAuto_FirstRunMarkerSurvivesRestartUntilDryRunCompletes(t *testing.T) {
 
 	require.NoError(t, runAutoWithLoader(t.Context(), f.loader, f.env, false))
 	assert.False(t, f.cleaned())
+}
+
+func TestAuto_FirstRunAtOKTierLeavesMarkerArmed(t *testing.T) {
+	f := newAutoFixture(t, 100*autoGiB, "auto:\n  min_free: 10G\n  min_free_pct: 5\n")
+	require.NoError(t, auto.MarkFirstRunPending(f.env.stateDir))
+
+	require.NoError(t, runAutoWithLoader(t.Context(), f.loader, f.env, false))
+
+	assert.Contains(t, f.out.String(), "tier ok")
+	assert.False(t, f.cleaned())
+	assert.True(t, auto.FirstRunPending(f.env.stateDir), "nothing was previewed, so the next run is still a dry-run")
+}
+
+func TestAuto_FirstRunWithEveryProviderFailingLeavesMarkerArmed(t *testing.T) {
+	f := newAutoFixture(t, 1*autoGiB, "")
+	require.NoError(t, auto.MarkFirstRunPending(f.env.stateDir))
+	f.env.newProvider = func(string, config.Provider) (provider.Provider, error) {
+		return nil, os.ErrInvalid
+	}
+
+	require.Error(t, runAutoWithLoader(t.Context(), f.loader, f.env, false))
+
+	assert.True(t, auto.FirstRunPending(f.env.stateDir))
+}
+
+func TestAuto_FirstRunWithOneFailingProviderKeepsMarkerAndExitsNonZero(t *testing.T) {
+	f := newAutoFixture(t, 1*autoGiB, "")
+	require.NoError(t, auto.MarkFirstRunPending(f.env.stateDir))
+	base := f.env.newProvider
+	f.env.newProvider = func(name string, cfg config.Provider) (provider.Provider, error) {
+		if name == "tool" {
+			return base(name, cfg)
+		}
+		return nil, os.ErrInvalid
+	}
+	bad := filepath.Join(f.home, "bad")
+	require.NoError(t, os.MkdirAll(bad, 0o750))
+	cfgPath := filepath.Join(f.home, "config2.yaml")
+	cfg := "version: \"1\"\nproviders:\n  tool:\n    enabled: true\n    paths: [" + filepath.Join(f.home, "cache") +
+		"]\n    max_size: 1G\n    max_age: 1d\n    clean_cmd: \"true\"\n  broken:\n    enabled: true\n    paths: [" + bad + "]\n    max_size: 1G\n    max_age: 1d\n    clean_cmd: \"true\"\n"
+	require.NoError(t, os.WriteFile(cfgPath, []byte(cfg), 0o600))
+	f.loader.SetConfigPath(cfgPath)
+
+	require.Error(t, runAutoWithLoader(t.Context(), f.loader, f.env, false))
+
+	assert.False(t, f.cleaned(), "first run is a dry-run")
+	assert.True(t, auto.FirstRunPending(f.env.stateDir), "a run with a provider error must not consume the marker")
 }
 
 func TestAuto_ExplicitDryRunKeepsMarker(t *testing.T) {
