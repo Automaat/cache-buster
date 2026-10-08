@@ -359,3 +359,12 @@ func TestAddSample_KeepsEnoughReadingsForSlowTickIntervals(t *testing.T) {
 	}
 	assert.Len(t, samples, 6)
 }
+
+func TestDecide_RoutinePassStillRunsInsideTheHysteresisBand(t *testing.T) {
+	d := decide(t, 51*gib, func(in *TickInput) {
+		in.Tick = TickState{Time: t0.Add(-time.Minute), Tier: "low"}
+		in.Pass = PassState{Time: t0.Add(-31 * time.Minute), Tier: "low"}
+	})
+	assert.True(t, d.Run, d.Reason)
+	assert.Equal(t, "routine pass is due", d.Reason)
+}

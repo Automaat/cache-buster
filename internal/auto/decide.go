@@ -70,9 +70,7 @@ func Decide(in TickInput) Decision {
 	}
 
 	switch {
-	case tier >= TierLow && th.Raw(in.Free.Free) == TierOK:
-		d.Reason = fmt.Sprintf("%s easing: free space is above the threshold but inside the hysteresis band", tier)
-	case tier >= TierLow:
+	case tier >= TierLow && th.Raw(in.Free.Free) != TierOK:
 		cooldown := in.Limits.LowCooldown
 		if tier >= TierCritical {
 			cooldown = in.Limits.CriticalCooldown
@@ -93,6 +91,8 @@ func Decide(in TickInput) Decision {
 	case sinceLast >= in.Limits.Interval:
 		d.Run = true
 		d.Reason = "routine pass is due"
+	case tier >= TierLow:
+		d.Reason = fmt.Sprintf("%s easing: free space is above the threshold but inside the hysteresis band", tier)
 	default:
 		d.Reason = "healthy"
 	}

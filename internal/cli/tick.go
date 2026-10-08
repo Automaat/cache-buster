@@ -120,8 +120,22 @@ func runTickWithLoader(ctx context.Context, loader *config.Loader, env autoEnv, 
 	}
 	defer lock.Release()
 
+	if pass, err = auto.ReadPassState(env.stateDir); err != nil {
+		return err
+	}
+	d = auto.Decide(auto.TickInput{Now: now, Free: fs, Limits: limits, Tick: tick, Pass: pass})
+	if !d.Run {
+		env.explainf("tick: %s", d.Reason)
+		return nil
+	}
+
 	env.explainf("tick: free %s of %s, %s", size.FormatSize(fs.Free), size.FormatSize(fs.Total), d.Reason)
-	return env.pass(ctx, cfg, dryRun, passOptions{minTier: d.Tier, predicted: d.Predicted, preview: dryRun})
+	err = env.pass(ctx, cfg, dryRun, passOptions{minTier: d.Tier, predicted: d.Predicted, preview: dryRun})
+	if !dryRun {
+		state.Time = env.clock().UTC()
+		env.saveTick(state)
+	}
+	return err
 }
 
 func (e autoEnv) saveTick(state auto.TickState) {

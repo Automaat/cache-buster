@@ -325,3 +325,31 @@ func TestTick_PreviewRunsLeaveTheRealStateAlone(t *testing.T) {
 	assert.NoFileExists(t, filepath.Join(r.env.stateDir, "pass.json"))
 	assert.Len(t, readRecords(t, r.autoFixture), 2)
 }
+
+func TestTick_RechecksTheCooldownAfterTakingTheLock(t *testing.T) {
+	r := newTickRig(t, "")
+	r.seedPass(-time.Hour, "ok")
+	r.env.free = func() (auto.FreeSpace, error) {
+		require.NoError(t, auto.WritePassState(r.env.stateDir, auto.PassState{Time: r.now, Tier: "low"}))
+		return auto.FreeSpace{Free: 40 * autoGiB, Total: 1000 * autoGiB}, nil
+	}
+
+	require.NoError(t, runTickWithLoader(t.Context(), r.loader, r.env, false))
+
+	assert.Zero(t, r.passes(), "another pass finished first, so this tick is inside its cooldown")
+}
+
+func TestTick_RefreshesTheTickTimeAfterALongPass(t *testing.T) {
+	r := newTickRig(t, "")
+	r.seedPass(-time.Hour, "ok")
+	r.env.newProvider = func(name string, cfg config.Provider) (provider.Provider, error) {
+		r.now = r.now.Add(20 * time.Minute)
+		return provider.NewProvider(name, cfg)
+	}
+
+	r.tick(40*autoGiB, 0)
+
+	state, err := auto.ReadTickState(r.env.stateDir)
+	require.NoError(t, err)
+	assert.False(t, state.Time.Before(tickStart.Add(20*time.Minute)))
+}
