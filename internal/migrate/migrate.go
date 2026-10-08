@@ -69,10 +69,20 @@ func Dir(oldDir, newDir string) (bool, error) {
 	if err := os.MkdirAll(filepath.Dir(newDir), 0o750); err != nil {
 		return false, err
 	}
-	if err := os.Rename(oldDir, newDir); err != nil {
+	if err := rename(oldDir, newDir); err != nil {
+		if errors.Is(err, os.ErrNotExist) && !pathExists(oldDir) && pathExists(newDir) {
+			return false, nil
+		}
 		return false, err
 	}
 	return true, nil
+}
+
+var rename = os.Rename
+
+func pathExists(path string) bool {
+	_, err := os.Lstat(path)
+	return err == nil
 }
 
 // checkReadable lists the dir and opens its files, so a dir with unreadable

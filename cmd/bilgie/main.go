@@ -20,7 +20,7 @@ var rootCmd = &cobra.Command{
 configured level, pumps caches out below it and sweeps hard at the critical level.
 It manages developer caches on macOS, Linux and Windows with configurable size limits.`,
 	Args:              cobra.NoArgs,
-	PersistentPreRunE: func(*cobra.Command, []string) error { cli.MigrateLegacy(os.Stderr); return nil },
+	PersistentPreRunE: func(cmd *cobra.Command, _ []string) error { cli.MigrateLegacy(cmd.ErrOrStderr()); return nil },
 	RunE:              runRoot,
 }
 

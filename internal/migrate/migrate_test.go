@@ -143,6 +143,37 @@ func TestLegacy_WarnsAndContinuesPastASkippedDir(t *testing.T) {
 	assert.FileExists(t, filepath.Join(dirs[1][1], "runs.jsonl"))
 }
 
+func TestDir_LosingTheRenameRaceIsNotAWarning(t *testing.T) {
+	root := t.TempDir()
+	oldDir := filepath.Join(root, "old")
+	newDir := filepath.Join(root, "new")
+	writeFile(t, filepath.Join(oldDir, "f"), "1")
+	t.Cleanup(func() { rename = os.Rename })
+	rename = func(from, to string) error {
+		require.NoError(t, os.Rename(from, to))
+		return &os.LinkError{Op: "rename", Old: from, New: to, Err: os.ErrNotExist}
+	}
+
+	moved, err := Dir(oldDir, newDir)
+
+	require.NoError(t, err)
+	assert.False(t, moved)
+	assert.Equal(t, "1", readFile(t, filepath.Join(newDir, "f")))
+}
+
+func TestDir_RenameFailureWithTheOldDirStillThereIsReported(t *testing.T) {
+	root := t.TempDir()
+	oldDir := filepath.Join(root, "old")
+	writeFile(t, filepath.Join(oldDir, "f"), "1")
+	t.Cleanup(func() { rename = os.Rename })
+	rename = func(string, string) error { return os.ErrNotExist }
+
+	moved, err := Dir(oldDir, filepath.Join(root, "new"))
+
+	require.Error(t, err)
+	assert.False(t, moved)
+}
+
 func TestDir_CreatesMissingParentOfTheNewDir(t *testing.T) {
 	root := t.TempDir()
 	oldDir := filepath.Join(root, "old")
