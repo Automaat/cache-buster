@@ -5,11 +5,11 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"syscall"
 	"testing"
 	"time"
 
 	"github.com/Automaat/cache-buster/internal/config"
+	"github.com/Automaat/cache-buster/internal/osshim"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -21,10 +21,9 @@ func busyUVLoader(t *testing.T, extra string) (loader *config.Loader, lockPath s
 
 	uvDir := t.TempDir()
 	lockPath = filepath.Join(uvDir, ".lock")
-	lock, err := os.Create(lockPath)
+	release, err := osshim.HoldLock(lockPath)
 	require.NoError(t, err)
-	t.Cleanup(func() { _ = lock.Close() })
-	require.NoError(t, syscall.Flock(int(lock.Fd()), syscall.LOCK_EX))
+	t.Cleanup(release)
 
 	cfgPath := filepath.Join(t.TempDir(), "config.yaml")
 	cfg := `version: "1"

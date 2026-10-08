@@ -6,12 +6,12 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/Automaat/cache-buster/internal/config"
+	"github.com/Automaat/cache-buster/internal/osshim"
 	"github.com/Automaat/cache-buster/pkg/size"
 )
 
@@ -62,7 +62,7 @@ func NewDirPatternProvider(name string, cfg config.Provider) (*DirPatternProvide
 		skipIfOpen:        cfg.SkipIfOpen == nil || *cfg.SkipIfOpen,
 		skipIfGitWorktree: cfg.SkipIfGitWorktree == nil || *cfg.SkipIfGitWorktree,
 		now:               time.Now,
-		openCheck:         lsofHasOpenFiles,
+		openCheck:         osshim.HasOpenFiles,
 	}
 
 	if home, homeErr := os.UserHomeDir(); homeErr == nil {
@@ -271,29 +271,4 @@ func scanDir(ctx context.Context, dir string, rootMod time.Time) (sc dirScan, sk
 	}
 
 	return sc, ""
-}
-
-// lsofHasOpenFiles reports whether any process has a file open under dir.
-// lsof exits 1 with no output when nothing is open.
-func lsofHasOpenFiles(ctx context.Context, dir string) (bool, error) {
-	path, err := exec.LookPath("lsof")
-	if err != nil {
-		return false, errors.New("lsof not found")
-	}
-
-	out, err := exec.CommandContext(ctx, path, "-t", "+D", dir).Output()
-	if len(strings.TrimSpace(string(out))) > 0 {
-		return true, nil
-	}
-	if err != nil {
-		var exitErr *exec.ExitError
-		if errors.As(err, &exitErr) && exitErr.ExitCode() == 1 {
-			if msg := strings.TrimSpace(string(exitErr.Stderr)); msg != "" {
-				return false, fmt.Errorf("lsof could not inspect every file: %s", msg)
-			}
-			return false, nil
-		}
-		return false, err
-	}
-	return false, nil
 }

@@ -11,6 +11,7 @@ internal/
   auto/               - Free-space tiers, auto run, launchd agent, first-run marker
   cli/                - Cobra command implementations (status, clean, config, auto, install-agent)
   config/             - Config loading, defaults, validation
+  osshim/             - Per-OS shims (lock, process list, kill tree, open files, free space)
   provider/           - Provider interface + implementations (command, file, docker)
 pkg/size/             - Human-readable size parsing/formatting
 ```

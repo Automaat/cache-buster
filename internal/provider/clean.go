@@ -8,8 +8,9 @@ import (
 	"os"
 	"os/exec"
 	"strings"
-	"syscall"
 	"time"
+
+	"github.com/Automaat/cache-buster/internal/osshim"
 )
 
 const cleanWaitDelay = 5 * time.Second
@@ -17,7 +18,7 @@ const cleanWaitDelay = 5 * time.Second
 // runMeasuredCleanTimeout runs args as a command, measuring cache size before
 // and after via sizeFn to report freed bytes; name is used for warnings. The
 // command alone is bounded by timeout (zero means unbounded); the size scans
-// stay outside the budget. A timeout kills the command's whole process group.
+// stay outside the budget. A timeout kills the command's whole process tree.
 func runMeasuredCleanTimeout(
 	ctx context.Context,
 	name string,
@@ -40,12 +41,9 @@ func runMeasuredCleanTimeout(
 
 	cmd := exec.CommandContext(cmdCtx, args[0], args[1:]...)
 	if timeout > 0 {
-		// A group lets the timeout kill descendants. It is skipped for
+		// A group or tree lets the timeout kill descendants. It is skipped for
 		// unbounded commands so they keep the terminal's foreground group.
-		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-		cmd.Cancel = func() error {
-			return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
-		}
+		osshim.KillTreeOnCancel(cmd)
 	}
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
