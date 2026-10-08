@@ -54,6 +54,7 @@ func TestNewRunRecord_EmptyResultsEncodeAsArray(t *testing.T) {
 }
 
 func TestAppendRun_WritesExactlyOneValidLinePerRun(t *testing.T) {
+	skipOnWindows(t, "#206 per-OS paths and permissions")
 	dir := t.TempDir()
 	rec := NewRunRecord(sampleReport(), time.Now(), nil, false)
 

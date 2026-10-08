@@ -38,6 +38,7 @@ func writeAged(t *testing.T, path string) {
 // critical tier, the most aggressive one, and checks that nothing protected
 // is removed while an unprotected control is.
 func TestRun_NeverDeletesProtectedPaths(t *testing.T) {
+	skipOnWindows(t, "#206 per-OS paths and permissions")
 	home := sandboxHome(t)
 	cfg := &config.Config{
 		Providers: map[string]config.Provider{},
@@ -113,6 +114,7 @@ func TestRun_NeverDeletesProtectedPaths(t *testing.T) {
 }
 
 func TestProtectedPaths_UnionOfDefaultsAndConfig(t *testing.T) {
+	skipOnWindows(t, "#206 per-OS paths and permissions")
 	home := "/Users/me"
 	got := ProtectedPaths(&config.Config{Protected: []string{"~/keep", "/data/keep", "~/Downloads"}}, home)
 
@@ -171,6 +173,7 @@ func TestScanProtected_CancelledContextIsIncomplete(t *testing.T) {
 }
 
 func TestProtectedPaths_DropsRelativeEntries(t *testing.T) {
+	skipOnWindows(t, "#206 per-OS paths and permissions")
 	got := ProtectedPaths(&config.Config{Protected: []string{"Downloads2", "./x"}}, "/Users/me")
 
 	assert.NotContains(t, got, "Downloads2")

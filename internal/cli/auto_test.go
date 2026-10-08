@@ -204,6 +204,7 @@ func TestAuto_NeverRunsDockerVolumesEvenWhenEnabled(t *testing.T) {
 }
 
 func TestAuto_CriticalSweepsDisabledDirPatternProvider(t *testing.T) {
+	skipOnWindows(t, "#206 per-OS paths and permissions")
 	stale := filepath.Join(t.TempDir(), "sailx-stale")
 	require.NoError(t, os.MkdirAll(stale, 0o750))
 	require.NoError(t, os.WriteFile(filepath.Join(stale, "f"), []byte("x"), 0o600))
@@ -261,6 +262,7 @@ func TestAuto_ConfigOverridesChangeTier(t *testing.T) {
 }
 
 func TestInstallAgent_WritesPlistWithoutRealLaunchctl(t *testing.T) {
+	skipOnWindows(t, "#207 launchd scheduler tests")
 	f := newAutoFixture(t, 100*autoGiB, "auto:\n  interval: 60m\n")
 
 	require.NoError(t, runInstallAgentWithLoader(t.Context(), f.loader, f.env))
@@ -284,6 +286,7 @@ func TestInstallAgent_RejectsTooShortInterval(t *testing.T) {
 }
 
 func TestUninstallAgent_RemovesPlist(t *testing.T) {
+	skipOnWindows(t, "#207 launchd scheduler tests")
 	f := newAutoFixture(t, 100*autoGiB, "")
 	require.NoError(t, runInstallAgentWithLoader(t.Context(), f.loader, f.env))
 	f.launchd = nil

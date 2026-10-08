@@ -259,6 +259,7 @@ func TestListFilesSkipsSymlinks(t *testing.T) {
 }
 
 func TestCalculateSize_PermissionDenied(t *testing.T) {
+	skipOnWindows(t, "#206 per-OS paths and permissions")
 	if os.Getuid() == 0 {
 		t.Skip("skipping permission test as root")
 	}
@@ -306,6 +307,7 @@ func TestCalculateSize_PermissionDenied(t *testing.T) {
 }
 
 func TestListFiles_PermissionDenied(t *testing.T) {
+	skipOnWindows(t, "#206 per-OS paths and permissions")
 	if os.Getuid() == 0 {
 		t.Skip("skipping permission test as root")
 	}

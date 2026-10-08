@@ -184,6 +184,7 @@ func TestTrim_MultiplePaths(t *testing.T) {
 }
 
 func TestTrim_DeleteError(t *testing.T) {
+	skipOnWindows(t, "#206 per-OS paths and permissions")
 	if os.Getuid() == 0 {
 		t.Skip("skipping permission test as root")
 	}
@@ -212,6 +213,7 @@ func TestTrim_DeleteError(t *testing.T) {
 }
 
 func TestTrim_CarriesForwardScanWarnings(t *testing.T) {
+	skipOnWindows(t, "#206 per-OS paths and permissions")
 	if os.Getuid() == 0 {
 		t.Skip("skipping permission test as root")
 	}

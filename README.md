@@ -21,7 +21,15 @@ go install github.com/Automaat/cache-buster/cmd/cache-buster@latest
 
 ### Binary Download
 
-Download from [releases](https://github.com/Automaat/cache-buster/releases).
+Download the archive for your platform from [releases](https://github.com/Automaat/cache-buster/releases):
+
+| OS | Architectures | Archive |
+|----|---------------|---------|
+| macOS | amd64, arm64 | `.tar.gz` |
+| Linux | amd64, arm64 | `.tar.gz` |
+| Windows | amd64, arm64 | `.zip` |
+
+Extract it and put `cache-buster` (`cache-buster.exe` on Windows) on your `PATH`.
 
 ## Quick Start
 
