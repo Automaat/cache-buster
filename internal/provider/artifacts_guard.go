@@ -106,7 +106,7 @@ func (p *ProjectArtifactsProvider) measureActivity(ctx context.Context, proj *pr
 	}
 	proj.measured = true
 
-	newest, _, err := sampleNewest(ctx, proj.Dir, sampleLimit)
+	newest, truncated, err := sampleNewest(ctx, proj.Dir, sampleLimit)
 	if err != nil {
 		if ctx.Err() == nil {
 			proj.problem = "cannot read project: " + err.Error()
@@ -124,6 +124,9 @@ func (p *ProjectArtifactsProvider) measureActivity(ctx context.Context, proj *pr
 	}
 	proj.repoRoot = repoRoot
 	if gitDir == "" {
+		if truncated {
+			proj.problem = "too many files to judge idleness without git"
+		}
 		return
 	}
 	gitTime, err := gitActivity(gitDir)
@@ -238,8 +241,7 @@ func lastReflogTime(path string) (time.Time, bool) {
 // busyReason skips an artifact whose project has a running build tool of the
 // artifact's kind: one whose command line names the project, or whose
 // working directory is inside it (or in the enclosing repository, above it).
-// A process whose directory cannot be read counts as busy when the lookup
-// failed outright.
+// A matched process whose directory cannot be read counts as busy.
 func (ps *pass) busyReason(c *candidate) string {
 	if ps.procsErr != nil {
 		return "cannot list processes: " + ps.procsErr.Error()
@@ -260,6 +262,7 @@ func (ps *pass) busyReason(c *candidate) string {
 		case proc.CwdUnknown:
 			return tool + " is running and its directory cannot be read"
 		case proc.Cwd == "":
+			return tool + " is running and its directory cannot be read"
 		case pathWithin(proc.Cwd, proj.Dir):
 			return tool + " is running in the project"
 		case proj.repoRoot != "" && pathWithin(proc.Cwd, proj.repoRoot) && pathWithin(proj.Dir, proc.Cwd):

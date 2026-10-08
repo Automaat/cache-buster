@@ -471,9 +471,9 @@ func TestProjectArtifacts_RunningToolSkipsMatchingKindOnly(t *testing.T) {
 		{"cargo elsewhere", func(string) []toolProcess {
 			return []toolProcess{{Tool: "cargo", CommandLine: "cargo build", Cwd: "/somewhere/else"}}
 		}, nil, false, false, ""},
-		{"cargo with unreadable cwd of another user", func(string) []toolProcess {
+		{"cargo with unreadable cwd", func(string) []toolProcess {
 			return []toolProcess{{Tool: "cargo", CommandLine: "cargo build"}}
-		}, nil, false, false, ""},
+		}, nil, true, false, "cannot be read"},
 		{"cwd lookup failed", func(string) []toolProcess {
 			return []toolProcess{{Tool: "cargo", CommandLine: "cargo build", CwdUnknown: true}}
 		}, nil, true, false, "cannot be read"},
@@ -1190,4 +1190,37 @@ func TestLookupToolProcesses_ReadsTheProcessTable(t *testing.T) {
 		assert.NotEmpty(t, proc.Tool)
 		assert.NotEmpty(t, proc.CommandLine)
 	}
+}
+
+func TestProjectArtifacts_OversizedNonGitProjectFailsClosed(t *testing.T) {
+	h := newArtifactHarness(t, nil)
+	nodeProject(t, h.path("web"), 10, 90*day)
+	for i := range sampleLimit + 5 {
+		writeFile(t, h.path("web", "dist", fmt.Sprintf("f%05d.js", i)), "x")
+	}
+	ageTree(t, h.path("web"), 90*day)
+
+	res := h.clean(CleanOptions{Mode: CleanModeFull})
+
+	assert.DirExists(t, h.path("web", "node_modules"))
+	assert.Contains(t, res.Output, "too many files")
+}
+
+func TestProjectArtifacts_ToolStartedDuringChecksBlocksRemoval(t *testing.T) {
+	h := newArtifactHarness(t, nil)
+	nodeProject(t, h.path("web"), 10, 90*day)
+	project := evalDir(t, h.path("web"))
+	calls := 0
+	h.p.processes = func(context.Context) ([]toolProcess, error) {
+		calls++
+		if calls == 1 {
+			return nil, nil
+		}
+		return []toolProcess{{Tool: "node", CommandLine: "node dev.js", Cwd: project}}, nil
+	}
+
+	res := h.clean(CleanOptions{Mode: CleanModeFull})
+
+	assert.DirExists(t, h.path("web", "node_modules"))
+	assert.Contains(t, res.Output, "node is running")
 }

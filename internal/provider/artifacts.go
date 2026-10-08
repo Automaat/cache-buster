@@ -209,6 +209,10 @@ func (p *ProjectArtifactsProvider) Clean(ctx context.Context, opts CleanOptions)
 		if reason == "" {
 			reason = p.finalReason(ctx, c)
 		}
+		if reason == "" {
+			pass.procs, pass.procsErr = p.processes(ctx)
+			reason = pass.busyReason(c)
+		}
 		if err := ctx.Err(); err != nil {
 			return finish(err)
 		}
@@ -228,6 +232,7 @@ func (p *ProjectArtifactsProvider) Clean(ctx context.Context, opts CleanOptions)
 			case rmErr != nil:
 				errs = append(errs, fmt.Errorf("remove %s: %w", c.art.Path, rmErr))
 				fmt.Fprintf(&out, "error: %s (%v)\n", c.art.Path, rmErr)
+				continue
 			}
 		}
 		verb := "removed"
