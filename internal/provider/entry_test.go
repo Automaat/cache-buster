@@ -122,6 +122,7 @@ func TestEntryProvider_RemovalFailureIsAnError(t *testing.T) {
 }
 
 func TestEntryProvider_IgnoresBookkeepingEntries(t *testing.T) {
+	skipOnWindows(t, "#206 per-OS paths and permissions")
 	root := t.TempDir()
 	old := makeEntry(t, root, "old", 2048, 48*time.Hour)
 	newest := makeEntry(t, root, "model", 10, time.Hour)
