@@ -105,8 +105,9 @@ func TestBusyGuard_BusyReason(t *testing.T) {
 
 func lockFile(t *testing.T, path string) {
 	t.Helper()
-	release, err := osshim.HoldLock(path)
+	release, acquired, err := osshim.TryLock(path)
 	require.NoError(t, err)
+	require.True(t, acquired)
 	t.Cleanup(release)
 }
 

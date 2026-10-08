@@ -8,13 +8,14 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestFreeSpace(t *testing.T) {
-	free, err := FreeSpace(t.TempDir())
+func TestQueryDiskSpace(t *testing.T) {
+	space, err := QueryDiskSpace(t.TempDir())
 	require.NoError(t, err)
-	assert.Positive(t, free)
+	assert.Positive(t, space.Free)
+	assert.GreaterOrEqual(t, space.Total, space.Free)
 }
 
-func TestFreeSpaceMissingPathFails(t *testing.T) {
-	_, err := FreeSpace(filepath.Join(t.TempDir(), "missing", "deeper"))
+func TestQueryDiskSpaceMissingPathFails(t *testing.T) {
+	_, err := QueryDiskSpace(filepath.Join(t.TempDir(), "missing", "deeper"))
 	assert.Error(t, err)
 }

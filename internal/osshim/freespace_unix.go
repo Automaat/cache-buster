@@ -8,14 +8,22 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// FreeSpace returns the bytes available to an unprivileged user on the
-// filesystem holding path.
-func FreeSpace(path string) (uint64, error) {
+// QueryDiskSpace returns the free and total bytes of the filesystem holding
+// path.
+func QueryDiskSpace(path string) (DiskSpace, error) {
 	var st unix.Statfs_t
 	if err := unix.Statfs(path, &st); err != nil {
-		return 0, err
+		return DiskSpace{}, err
 	}
-	return blocksToBytes(st.Bavail, st.Bsize)
+	free, err := blocksToBytes(st.Bavail, st.Bsize)
+	if err != nil {
+		return DiskSpace{}, err
+	}
+	total, err := blocksToBytes(st.Blocks, st.Bsize)
+	if err != nil {
+		return DiskSpace{}, err
+	}
+	return DiskSpace{Free: free, Total: total}, nil
 }
 
 type integer interface {

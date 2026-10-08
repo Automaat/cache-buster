@@ -31,8 +31,9 @@ func TestLockHeld(t *testing.T) {
 
 	t.Run("lock held by another descriptor", func(t *testing.T) {
 		path := filepath.Join(t.TempDir(), ".lock")
-		release, err := HoldLock(path)
+		release, acquired, err := TryLock(path)
 		require.NoError(t, err)
+		require.True(t, acquired)
 
 		held, err := LockHeld(path)
 		require.NoError(t, err)
@@ -43,4 +44,22 @@ func TestLockHeld(t *testing.T) {
 		require.NoError(t, err)
 		assert.False(t, held, "released lock is free again")
 	})
+}
+
+func TestTryLock(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "run.lock")
+
+	release, acquired, err := TryLock(path)
+	require.NoError(t, err)
+	require.True(t, acquired)
+
+	_, second, err := TryLock(path)
+	require.NoError(t, err)
+	assert.False(t, second, "second holder must be refused")
+
+	release()
+	release, again, err := TryLock(path)
+	require.NoError(t, err)
+	assert.True(t, again, "lock is free after release")
+	release()
 }

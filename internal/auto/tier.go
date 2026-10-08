@@ -5,9 +5,10 @@ import (
 	"fmt"
 	"math"
 	"os"
-	"syscall"
+	"runtime"
 
 	"github.com/Automaat/cache-buster/internal/config"
+	"github.com/Automaat/cache-buster/internal/osshim"
 )
 
 // CriticalFree is the free-space level under which the stale-directory
@@ -51,39 +52,38 @@ type FreeFunc func() (FreeSpace, error)
 const dataVolume = "/System/Volumes/Data"
 
 // DataVolumePath returns the path whose statfs reflects the user data volume.
-// Non-macOS hosts fall back to the root.
+// Other hosts fall back to the root, or the system drive on Windows.
 func DataVolumePath() string {
+	if runtime.GOOS == "windows" {
+		return systemDrive()
+	}
 	if info, err := os.Stat(dataVolume); err == nil && info.IsDir() {
 		return dataVolume
 	}
 	return "/"
 }
 
-// StatfsFree returns a FreeFunc reading statfs of path. Free counts the space
-// available to unprivileged users.
+func systemDrive() string {
+	if drive := os.Getenv("SystemDrive"); drive != "" {
+		return drive + `\`
+	}
+	return `C:\`
+}
+
+// StatfsFree returns a FreeFunc reading the filesystem space of path. Free
+// counts the space available to unprivileged users.
 func StatfsFree(path string) FreeFunc {
 	return func() (FreeSpace, error) {
-		var st syscall.Statfs_t
-		if err := syscall.Statfs(path, &st); err != nil {
+		space, err := osshim.QueryDiskSpace(path)
+		if err != nil {
 			return FreeSpace{}, fmt.Errorf("statfs %s: %w", path, err)
 		}
-		bsize := clampInt64(st.Bsize)
-		return FreeSpace{
-			Free:  clampInt64(st.Bavail) * bsize,
-			Total: clampInt64(st.Blocks) * bsize,
-		}, nil
+		return FreeSpace{Free: clampInt64(space.Free), Total: clampInt64(space.Total)}, nil
 	}
 }
 
-type statfsInt interface {
-	~int32 | ~int64 | ~uint32 | ~uint64
-}
-
-func clampInt64[T statfsInt](v T) int64 {
-	if v <= 0 {
-		return 0
-	}
-	if uint64(v) > math.MaxInt64 {
+func clampInt64(v uint64) int64 {
+	if v > math.MaxInt64 {
 		return math.MaxInt64
 	}
 	return int64(v)

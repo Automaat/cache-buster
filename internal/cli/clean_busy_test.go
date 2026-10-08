@@ -21,8 +21,9 @@ func busyUVLoader(t *testing.T, extra string) (loader *config.Loader, lockPath s
 
 	uvDir := t.TempDir()
 	lockPath = filepath.Join(uvDir, ".lock")
-	release, err := osshim.HoldLock(lockPath)
+	release, acquired, err := osshim.TryLock(lockPath)
 	require.NoError(t, err)
+	require.True(t, acquired)
 	t.Cleanup(release)
 
 	cfgPath := filepath.Join(t.TempDir(), "config.yaml")
