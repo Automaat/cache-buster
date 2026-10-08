@@ -82,6 +82,9 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
+    defaults:
+      run:
+        shell: bash
     steps:
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -162,7 +165,10 @@ jobs:
           go-version: "1.27.1"
 
       - name: Build binary
-        run: go build -v -o cache-buster ./cmd/cache-buster
+        run: |
+          BIN=./cache-buster
+          if [ "${{ runner.os }}" = "Windows" ]; then BIN=./cache-buster.exe; fi
+          go build -v -o "$BIN" ./cmd/cache-buster
 
       - name: Verify binary
         run: |

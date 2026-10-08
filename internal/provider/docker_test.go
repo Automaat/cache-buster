@@ -33,6 +33,7 @@ func fakeDockerBin(t *testing.T, script string) string {
 }
 
 func TestDockerDataSize_SumsRows(t *testing.T) {
+	skipOnWindows(t, "#206 docker fakes are POSIX shell scripts")
 	fakeDockerBin(t, `echo '{"Size":"1.5GB"}'
 echo '{"Size":"500MB"}'
 `)
@@ -45,6 +46,7 @@ echo '{"Size":"500MB"}'
 }
 
 func TestDockerDataSize_IncludesVolumesAndBuildCacheRows(t *testing.T) {
+	skipOnWindows(t, "#206 docker fakes are POSIX shell scripts")
 	fakeDockerBin(t, `echo '{"Type":"Local Volumes","TotalCount":"2","Size":"2GB"}'
 echo '{"Type":"Build Cache","TotalCount":"8","Size":"750MB"}'
 `)
@@ -56,6 +58,7 @@ echo '{"Type":"Build Cache","TotalCount":"8","Size":"750MB"}'
 }
 
 func TestDockerDataSize_SkipsInvalidLines(t *testing.T) {
+	skipOnWindows(t, "#206 docker fakes are POSIX shell scripts")
 	fakeDockerBin(t, `echo 'not json'
 echo '{"Size":"1GB"}'
 `)
@@ -68,6 +71,7 @@ echo '{"Size":"1GB"}'
 }
 
 func TestDockerDataSize_AllInvalidLines_ReturnsError(t *testing.T) {
+	skipOnWindows(t, "#206 docker fakes are POSIX shell scripts")
 	fakeDockerBin(t, `echo 'not json'
 echo 'also not json'
 `)
@@ -78,6 +82,7 @@ echo 'also not json'
 }
 
 func TestDockerDataSize_EmptyOutput_ReturnsError(t *testing.T) {
+	skipOnWindows(t, "#206 docker fakes are POSIX shell scripts")
 	fakeDockerBin(t, `exit 0`)
 
 	p := newTestDockerProvider(t, []string{t.TempDir()})
@@ -87,6 +92,7 @@ func TestDockerDataSize_EmptyOutput_ReturnsError(t *testing.T) {
 }
 
 func TestDockerDataSize_CommandFails_IncludesStderr(t *testing.T) {
+	skipOnWindows(t, "#206 docker fakes are POSIX shell scripts")
 	fakeDockerBin(t, `echo "daemon not running" >&2; exit 1`)
 
 	p := newTestDockerProvider(t, []string{t.TempDir()})
@@ -96,6 +102,7 @@ func TestDockerDataSize_CommandFails_IncludesStderr(t *testing.T) {
 }
 
 func TestDockerCurrentSize_FallsBackToPathBased(t *testing.T) {
+	skipOnWindows(t, "#206 docker fakes are POSIX shell scripts")
 	// fake docker that exits non-zero
 	fakeDockerBin(t, `exit 1`)
 
@@ -121,6 +128,7 @@ func TestDockerSmartCleanDryRun_NeverIncludesVolumes(t *testing.T) {
 }
 
 func TestDockerSmartClean_DaemonUnavailable(t *testing.T) {
+	skipOnWindows(t, "#206 docker fakes are POSIX shell scripts")
 	// docker ps fails => daemon down => Clean returns without pruning.
 	fakeDockerBin(t, `case "$1 $2" in
 "ps --quiet") exit 1 ;;
@@ -149,6 +157,7 @@ esac`)
 }
 
 func TestDockerSmartClean_FreesSpace(t *testing.T) {
+	skipOnWindows(t, "#206 docker fakes are POSIX shell scripts")
 	// docker system df reports 5GB before the prune and 1GB after it,
 	// keyed off a marker file the fake prune drops.
 	marker := filepath.Join(t.TempDir(), "pruned")
@@ -171,6 +180,7 @@ esac`)
 }
 
 func TestDockerSmartClean_PruneFails(t *testing.T) {
+	skipOnWindows(t, "#206 docker fakes are POSIX shell scripts")
 	fakeDockerBin(t, `case "$1 $2" in
 "ps --quiet") exit 0 ;;
 "system df") echo '{"Size":"2GB"}'; exit 0 ;;
@@ -217,6 +227,7 @@ func TestDockerVolumesDefault_DisabledAndPrunesVolumes(t *testing.T) {
 }
 
 func TestDockerVolumesSize_OnlyCountsVolumesRow(t *testing.T) {
+	skipOnWindows(t, "#206 docker fakes are POSIX shell scripts")
 	fakeDockerBin(t, `echo '{"Type":"Images","Size":"9GB"}'
 echo '{"Type":"Local Volumes","Size":"2GB"}'
 echo '{"Type":"Build Cache","Size":"750MB"}'
@@ -250,6 +261,7 @@ func TestDockerLegacyConfigVolumesFlagStripped(t *testing.T) {
 }
 
 func TestDockerVolumesSize_NoVolumesRow_NoPathFallback(t *testing.T) {
+	skipOnWindows(t, "#206 docker fakes are POSIX shell scripts")
 	fakeDockerBin(t, `echo '{"Type":"Images","Size":"9GB"}'
 `)
 	dir := t.TempDir()
@@ -315,6 +327,7 @@ esac
 `
 
 func TestDockerClean_TimeoutBoundsHungPrune(t *testing.T) {
+	skipOnWindows(t, "#206 docker fakes are POSIX shell scripts")
 	fakeDockerBin(t, hangingPruneDocker)
 	p, err := NewDockerProvider("docker", config.Provider{
 		Paths:    []string{t.TempDir()},

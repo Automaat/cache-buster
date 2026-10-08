@@ -208,6 +208,7 @@ func TestRustupProvider_UninstallFailure(t *testing.T) {
 }
 
 func TestRustupProvider_Available(t *testing.T) {
+	skipOnWindows(t, "#206 per-OS paths and permissions")
 	binDir := t.TempDir()
 	t.Setenv("PATH", binDir)
 	p := newFakeRustupProvider(t, &fakeRustup{})

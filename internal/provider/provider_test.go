@@ -1048,6 +1048,7 @@ func TestCommandProvider_QuotedArgs(t *testing.T) {
 }
 
 func TestCommandProvider_Available(t *testing.T) {
+	skipOnWindows(t, "#206 per-OS paths and permissions")
 	// Temporary PATH containing exactly one fake executable.
 	binDir := t.TempDir()
 	const binName = "fakecleantool"
@@ -1136,6 +1137,7 @@ func TestDockerProvider_CleanSuccess(t *testing.T) {
 }
 
 func TestFileProvider_DeleteError(t *testing.T) {
+	skipOnWindows(t, "#206 per-OS paths and permissions")
 	tmpDir := t.TempDir()
 	subDir := filepath.Join(tmpDir, "subdir")
 	if err := os.Mkdir(subDir, 0o700); err != nil {
@@ -1320,6 +1322,7 @@ func TestFileProvider_SmartClean_DryRun(t *testing.T) {
 }
 
 func TestFileProvider_SmartClean_WithErrors(t *testing.T) {
+	skipOnWindows(t, "#206 per-OS paths and permissions")
 	if os.Getuid() == 0 {
 		t.Skip("skipping permission test as root")
 	}
@@ -1566,6 +1569,7 @@ func TestNewProvider_Rustup(t *testing.T) {
 }
 
 func TestEnabledProviders_ExtraCachesNeedExistingPath(t *testing.T) {
+	skipOnWindows(t, "#206 per-OS paths and permissions")
 	t.Setenv("HOME", t.TempDir())
 	cfg := config.DefaultConfig()
 	for _, name := range cfg.EnabledProviders() {
