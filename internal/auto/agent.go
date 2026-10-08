@@ -54,11 +54,20 @@ func (a Agent) domainTarget() string {
 }
 
 // unload asks launchd to drop the job. A job that was never loaded is the
-// state the caller wants, so only other failures are reported.
+// state the caller wants. When bootout fails in a form not recognised as
+// "not loaded", a failing `launchctl print` confirms the job is absent.
 func (a Agent) unload(ctx context.Context) error {
-	out, err := a.Exec(ctx, "launchctl", "bootout", a.domainTarget()+"/"+AgentLabel)
-	if err != nil && !jobNotLoaded(string(out)) {
-		return fmt.Errorf("launchctl bootout: %w: %s", err, strings.TrimSpace(string(out)))
+	target := a.domainTarget() + "/" + AgentLabel
+	out, err := a.Exec(ctx, "launchctl", "bootout", target)
+	if err == nil || jobNotLoaded(string(out)) {
+		return nil
+	}
+	bootoutErr := fmt.Errorf("launchctl bootout: %w: %s", err, strings.TrimSpace(string(out)))
+	if ctx.Err() != nil {
+		return bootoutErr
+	}
+	if _, printErr := a.Exec(ctx, "launchctl", "print", target); printErr == nil {
+		return bootoutErr
 	}
 	return nil
 }

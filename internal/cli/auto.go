@@ -28,7 +28,7 @@ var AutoCmd = &cobra.Command{
             stopping once free space recovers
   critical  under 5 GiB free: also sweep stale directories (dir-pattern providers, even when disabled)
 
-The docker-volumes provider never runs. Providers pointing at Downloads, opencode
+The docker-volumes and xcode-archives providers never run. Providers pointing at Downloads, opencode
 or worktrees are skipped. The first run after install-agent is a dry-run.`,
 	Args:         cobra.NoArgs,
 	SilenceUsage: true,
@@ -172,7 +172,7 @@ func runAutoWithLoader(ctx context.Context, loader *config.Loader, env autoEnv, 
 		return err
 	}
 
-	if forced {
+	if forced && report.Previewed() {
 		if clearErr := auto.ClearFirstRun(env.stateDir); clearErr != nil {
 			return clearErr
 		}

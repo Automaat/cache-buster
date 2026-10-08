@@ -759,13 +759,102 @@ func TestRun_SkipsAncestorOfDeeplyNestedWorktrees(t *testing.T) {
 	assert.Empty(t, h.calls)
 }
 
-func TestHasDefaultPaths(t *testing.T) {
+func TestIsBuiltin(t *testing.T) {
 	def := config.DefaultProviders()["npm"]
-
-	assert.True(t, hasDefaultPaths("npm", def))
+	assert.True(t, isBuiltin("npm", def))
 	def.Paths = []string{"/elsewhere"}
-	assert.False(t, hasDefaultPaths("npm", def))
-	assert.False(t, hasDefaultPaths("custom", config.Provider{Paths: []string{"~/x"}}))
+	assert.False(t, isBuiltin("npm", def))
+	assert.False(t, isBuiltin("custom", config.Provider{Paths: []string{"~/x"}}))
+
+	off := false
+	for name, weaken := range map[string]func(*config.Provider){
+		"worktree guard": func(p *config.Provider) { p.SkipIfGitWorktree = &off },
+		"open guard":     func(p *config.Provider) { p.SkipIfOpen = &off },
+		"idle":           func(p *config.Provider) { p.MinIdle = "0s" },
+		"clean cmd":      func(p *config.Provider) { p.CleanCmd = "rm -rf /" },
+	} {
+		sail := config.DefaultProviders()["sail-dirs"]
+		assert.True(t, isBuiltin("sail-dirs", sail))
+		weaken(&sail)
+		assert.False(t, isBuiltin("sail-dirs", sail), name)
+	}
+}
+
+func TestRun_NeverRunsXcodeArchives(t *testing.T) {
+	for _, free := range []int64{1 * gib, 8 * gib, 100 * gib} {
+		h := newHarness(t)
+		h.add("xcode-archives", true, true)
+		h.add("my-archives", true, true, func(f *fakeProvider, pc *config.Provider) {
+			p := filepath.Join(h.home, "Library", "Developer", "Xcode", "archives")
+			pc.Paths = []string{p}
+			f.paths = []string{p}
+		})
+		h.add("npm", true, true)
+
+		_, err := h.run(false, free)
+
+		require.NoError(t, err)
+		assert.Equal(t, []string{"npm"}, h.calls, "free=%d", free)
+	}
+}
+
+func TestIsXcodeArchives(t *testing.T) {
+	assert.True(t, isXcodeArchives("~/Library/Developer/Xcode/Archives"))
+	assert.True(t, isXcodeArchives("/Users/me/Library/Developer/Xcode/Archives/2026-01-01"))
+	assert.False(t, isXcodeArchives("/Users/me/Library/Developer/Xcode/DerivedData"))
+	assert.False(t, isXcodeArchives("/Users/me/Archives"))
+}
+
+func TestIsProtected_XcodeArchivesAndAncestors(t *testing.T) {
+	home := "/Users/me"
+	assert.True(t, isProtected("/Users/me/Library/Developer/Xcode/Archives", home, false))
+	assert.True(t, isProtected("/Users/me/Library/Developer/Xcode/Archives/x", home, false))
+	assert.True(t, isProtected("/Users/me/Library/Developer", home, false))
+	assert.False(t, isProtected("/Users/me/Library/Developer/Xcode/DerivedData", home, false))
+}
+
+func TestIsProtected_FilesystemRootAndDataAlias(t *testing.T) {
+	home := "/Users/me"
+	for _, scan := range []bool{true, false} {
+		if !scan {
+			assert.True(t, isProtected("/", home, scan), "root, scan=%v", scan)
+		}
+		assert.True(t, isProtected("/System/Volumes/Data/Users/me/.cache/opencode", home, scan))
+		assert.True(t, isProtected("/System/Volumes/Data/Users/me/Library/Developer/Xcode/Archives", home, scan))
+		assert.True(t, isProtected("/System/Volumes/Data", home, scan))
+	}
+	assert.True(t, isProtected("/", home, true))
+	assert.True(t, within("/Users/me", "/"))
+	assert.False(t, within("/Users/me2", "/Users/me"))
+}
+
+func TestReport_Previewed(t *testing.T) {
+	ran := []Result{{Status: StatusDryRun}}
+	assert.False(t, Report{Tier: TierOK, Results: ran}.Previewed(), "ok tier previews nothing")
+	assert.False(t, Report{Tier: TierLow, Results: []Result{{Status: StatusError}, {Status: StatusSkipped}}}.Previewed())
+	assert.False(t, Report{Tier: TierLow}.Previewed())
+	assert.True(t, Report{Tier: TierLow, Results: []Result{{Status: StatusError}, {Status: StatusDryRun}}}.Previewed())
+	assert.True(t, Report{Tier: TierCritical, Results: ran}.Previewed())
+}
+
+func TestAgentUninstall_UnrecognisedBootoutWithFailingPrintStillRemoves(t *testing.T) {
+	rec := &recorder{}
+	a := newAgent(t, rec)
+	require.NoError(t, a.Install(t.Context()))
+	rec.calls = nil
+	rec.fail = map[string]error{
+		"bootout": errors.New("exit status 5"),
+		"print":   errors.New("Could not find service"),
+	}
+
+	require.NoError(t, a.Uninstall(t.Context()))
+
+	assert.NoFileExists(t, a.PlistPath())
+	assert.False(t, FirstRunPending(a.StateDir))
+	assert.Equal(t, [][]string{
+		{"launchctl", "bootout", "gui/501/" + AgentLabel},
+		{"launchctl", "print", "gui/501/" + AgentLabel},
+	}, rec.calls)
 }
 
 func TestRun_DockerProviderWithVolumesFlagStillRuns(t *testing.T) {

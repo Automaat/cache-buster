@@ -3,6 +3,7 @@ package auto
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 )
 
@@ -18,6 +19,7 @@ func protectedRoots(home string) []string {
 		filepath.Join(home, ".opencode"),
 		filepath.Join(home, ".cache", "opencode"),
 		filepath.Join(home, "Library", "Caches", "opencode"),
+		filepath.Join(home, "Library", "Developer", "Xcode", "Archives"),
 	}
 }
 
@@ -33,6 +35,16 @@ func isProtected(path, home string, scanTree bool) bool {
 	if resolved, err := filepath.EvalSymlinks(path); err == nil {
 		candidates = append(candidates, resolved)
 	}
+	candidates = withoutDataAlias(candidates)
+
+	var roots []string
+	for _, root := range protectedRoots(home) {
+		roots = append(roots, root)
+		if resolved, err := filepath.EvalSymlinks(root); err == nil {
+			roots = append(roots, resolved)
+		}
+	}
+	roots = withoutDataAlias(roots)
 
 	for _, p := range candidates {
 		for part := range strings.SplitSeq(p, string(filepath.Separator)) {
@@ -43,7 +55,7 @@ func isProtected(path, home string, scanTree bool) bool {
 		if scanTree && containsProtectedDir(p) {
 			return true
 		}
-		for _, root := range protectedRoots(home) {
+		for _, root := range roots {
 			if within(strings.ToLower(p), strings.ToLower(root)) || within(strings.ToLower(root), strings.ToLower(p)) {
 				return true
 			}
@@ -52,9 +64,29 @@ func isProtected(path, home string, scanTree bool) bool {
 	return false
 }
 
-// within reports whether path equals root or lies under it.
+// dataVolumeAlias is the firmlink that exposes the user data volume under
+// the same paths as the root filesystem.
+const dataVolumeAlias = "/System/Volumes/Data"
+
+// withoutDataAlias adds the alias-free spelling of every path under the
+// data volume firmlink, so both spellings of home compare equal.
+func withoutDataAlias(paths []string) []string {
+	out := slices.Clone(paths)
+	for _, p := range paths {
+		if p == dataVolumeAlias {
+			out = append(out, string(filepath.Separator))
+		} else if rest, ok := strings.CutPrefix(p, dataVolumeAlias+string(filepath.Separator)); ok {
+			out = append(out, string(filepath.Separator)+rest)
+		}
+	}
+	return out
+}
+
+// within reports whether path equals root or lies under it. The filesystem
+// root contains every path.
 func within(path, root string) bool {
-	return path == root || strings.HasPrefix(path, root+string(filepath.Separator))
+	root = strings.TrimRight(root, string(filepath.Separator))
+	return root == "" || path == root || strings.HasPrefix(path, root+string(filepath.Separator))
 }
 
 const descendantScanEntries = 500000

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"path/filepath"
 	"slices"
 	"strings"
 	"time"
@@ -17,6 +18,10 @@ import (
 // VolumesProvider is never run by auto: a volume prune cannot be bounded and
 // can destroy data that exists nowhere else.
 const VolumesProvider = "docker-volumes"
+
+// ArchivesProvider is never run by auto: Xcode archives hold App Store dSYMs
+// and signed builds that cannot be rebuilt.
+const ArchivesProvider = "xcode-archives"
 
 // DockerCleanTimeout bounds Docker prune commands during an unattended run.
 const DockerCleanTimeout = 10 * time.Minute
@@ -55,6 +60,17 @@ type Report struct {
 	Tier      Tier
 	DryRun    bool
 	Recovered bool
+}
+
+// Previewed reports whether the run reached a pressure tier and at least one
+// provider ran without error, so a first-run dry-run showed something real.
+func (r Report) Previewed() bool {
+	if r.Tier == TierOK {
+		return false
+	}
+	return slices.ContainsFunc(r.Results, func(res Result) bool {
+		return res.Status == StatusDryRun || res.Status == StatusCleaned
+	})
 }
 
 // Err summarizes provider failures, or returns nil when there were none.
@@ -160,15 +176,15 @@ func candidates(cfg *config.Config, tier Tier) []candidate {
 
 	for name := range cfg.Providers {
 		pc := cfg.Providers[name]
-		if name == VolumesProvider || (name != "docker" && pruneVolumes(pc.CleanCmd)) || !config.PathsExist(pc.Paths) {
+		if neverRun(name, pc) || (name != "docker" && pruneVolumes(pc.CleanCmd)) || !config.PathsExist(pc.Paths) {
 			continue
 		}
 		switch {
 		case pc.Enabled:
-			byName[name] = candidate{name: name, cfg: pc, builtin: hasDefaultPaths(name, pc)}
+			byName[name] = candidate{name: name, cfg: pc, builtin: isBuiltin(name, pc)}
 			regular = append(regular, name)
 		case pc.Type == config.TypeDirPattern && tier == TierCritical:
-			byName[name] = candidate{name: name, cfg: pc, sweep: true, builtin: hasDefaultPaths(name, pc)}
+			byName[name] = candidate{name: name, cfg: pc, sweep: true, builtin: isBuiltin(name, pc)}
 			sweeps = append(sweeps, name)
 		}
 	}
@@ -183,13 +199,44 @@ func candidates(cfg *config.Config, tier Tier) []candidate {
 	return out
 }
 
-// hasDefaultPaths reports whether a provider still points at its built-in
-// paths. Those well-known cache locations skip the costly tree scan for
-// protected directories; any user-defined or retargeted provider gets it.
-func hasDefaultPaths(name string, pc config.Provider) bool {
-	def, ok := config.DefaultProviders()[name]
-	return ok && slices.Equal(def.Paths, pc.Paths)
+// neverRun lists the providers auto must not touch, whatever they are named.
+func neverRun(name string, pc config.Provider) bool {
+	if name == VolumesProvider || name == ArchivesProvider {
+		return true
+	}
+	return slices.ContainsFunc(pc.Paths, isXcodeArchives)
 }
+
+// isXcodeArchives matches an Xcode/Archives pair of path elements, so a
+// renamed provider on the archives folder is still excluded.
+func isXcodeArchives(path string) bool {
+	parts := strings.Split(filepath.ToSlash(path), "/")
+	for i := 0; i+1 < len(parts); i++ {
+		if strings.EqualFold(parts[i], "Xcode") && strings.EqualFold(parts[i+1], "Archives") {
+			return true
+		}
+	}
+	return false
+}
+
+// isBuiltin reports whether a provider still matches its built-in
+// definition in everything that affects deletion safety. Those well-known
+// cache locations skip the costly tree scan for protected directories; any
+// user-defined or weakened provider gets it. Limits and enablement may differ.
+func isBuiltin(name string, pc config.Provider) bool {
+	def, ok := config.DefaultProviders()[name]
+	return ok &&
+		slices.Equal(def.Paths, pc.Paths) &&
+		def.Type == pc.Type &&
+		def.CleanCmd == pc.CleanCmd &&
+		def.CleanTimeout == pc.CleanTimeout &&
+		def.MinIdle == pc.MinIdle &&
+		slices.Equal(def.SkipPrefixes, pc.SkipPrefixes) &&
+		boolOrTrue(def.SkipIfOpen) == boolOrTrue(pc.SkipIfOpen) &&
+		boolOrTrue(def.SkipIfGitWorktree) == boolOrTrue(pc.SkipIfGitWorktree)
+}
+
+func boolOrTrue(b *bool) bool { return b == nil || *b }
 
 // pruneVolumes catches renamed or custom providers whose command prunes Docker volumes.
 func pruneVolumes(cmd string) bool {
