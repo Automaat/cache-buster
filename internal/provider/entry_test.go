@@ -57,7 +57,8 @@ func TestEntryProvider_UnderLimitKeepsAll(t *testing.T) {
 
 func TestEntryProvider_DryRunKeepsFiles(t *testing.T) {
 	root := t.TempDir()
-	e := makeEntry(t, root, "a", 2048, time.Hour)
+	e := makeEntry(t, root, "a", 2048, 2*time.Hour)
+	makeEntry(t, root, "b", 10, time.Hour)
 
 	res, err := newEntryProvider(t, root, "1K", "").Clean(context.Background(), CleanOptions{DryRun: true})
 	require.NoError(t, err)
@@ -93,4 +94,13 @@ func TestEntryProvider_MissingPath(t *testing.T) {
 	res, err := newEntryProvider(t, filepath.Join(t.TempDir(), "nope"), "1K", "").Clean(context.Background(), CleanOptions{})
 	require.NoError(t, err)
 	assert.Equal(t, int64(0), res.BytesCleaned)
+}
+
+func TestEntryProvider_KeepsNewestEntryOverLimit(t *testing.T) {
+	root := t.TempDir()
+	only := makeEntry(t, root, "big", 4096, time.Hour)
+
+	_, err := newEntryProvider(t, root, "1K", "").Clean(context.Background(), CleanOptions{})
+	require.NoError(t, err)
+	assert.DirExists(t, only)
 }

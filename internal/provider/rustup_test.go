@@ -244,3 +244,25 @@ func TestNewRustupProvider_CleanTimeout(t *testing.T) {
 	_, err = NewRustupProvider("rustup", cfg)
 	require.Error(t, err)
 }
+
+func TestRustupProvider_PartialFailureReportsRemoved(t *testing.T) {
+	f := &fakeRustup{list: rustupListing, fail: "nightly-2024-01-01-aarch64-apple-darwin"}
+	p := newFakeRustupProvider(t, f)
+
+	res, err := p.Clean(context.Background(), CleanOptions{})
+	require.Error(t, err)
+	assert.Contains(t, res.Output, "1.75.0-aarch64-apple-darwin")
+}
+
+func TestRustupProvider_UnmeasurableSizeRemovesNothing(t *testing.T) {
+	f := &fakeRustup{list: rustupListing}
+	p := newFakeRustupProvider(t, f)
+	require.NoError(t, os.Chmod(p.paths[0], 0o000))
+	t.Cleanup(func() { _ = os.Chmod(p.paths[0], 0o700) })
+
+	_, err := p.Clean(context.Background(), CleanOptions{})
+	if err == nil {
+		t.Skip("size scan tolerated unreadable dir on this platform")
+	}
+	assert.Empty(t, f.calls)
+}

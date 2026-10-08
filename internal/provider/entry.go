@@ -16,7 +16,8 @@ import (
 
 // EntryProvider cleans caches whose top-level entries are only usable whole
 // (model snapshots, browser installs, VM images). It removes whole entries,
-// oldest first, never individual files inside one.
+// oldest first, never individual files inside one. The newest entry is
+// always kept.
 type EntryProvider struct {
 	*BaseProvider
 }
@@ -52,8 +53,9 @@ func (p *EntryProvider) Clean(ctx context.Context, opts CleanOptions) (CleanResu
 		removed int64
 		output  strings.Builder
 	)
-	for _, e := range entries {
-		if total-freed <= p.maxSize {
+	for i, e := range entries {
+		// The newest entry is likely in use; keep it even if over the limit.
+		if total-freed <= p.maxSize || i == len(entries)-1 {
 			continue
 		}
 		if err := ctx.Err(); err != nil {

@@ -82,7 +82,10 @@ func (p *RustupProvider) Clean(ctx context.Context, opts CleanOptions) (CleanRes
 	}
 
 	current, sizeErr := p.CurrentSize(ctx)
-	if sizeErr == nil && current <= p.maxSize {
+	if sizeErr != nil {
+		return CleanResult{}, fmt.Errorf("measure toolchains: %w", sizeErr)
+	}
+	if current <= p.maxSize {
 		return CleanResult{Output: "already under limit"}, nil
 	}
 
@@ -108,26 +111,32 @@ func (p *RustupProvider) Clean(ctx context.Context, opts CleanOptions) (CleanRes
 		return CleanResult{Output: "would uninstall: " + strings.Join(removable, ", ")}, nil
 	}
 
-	sizeBefore, beforeErr := current, sizeErr
 	var removed []string
 	for _, tc := range removable {
 		if ctx.Err() != nil {
 			return CleanResult{Output: "interrupted"}, ctx.Err()
 		}
 		if out, err := p.runBounded(ctx, "toolchain", "uninstall", tc); err != nil {
-			return CleanResult{Output: out}, fmt.Errorf("uninstall %s: %w", tc, err)
+			res := p.rustupResult(ctx, current, removed)
+			res.Output += "\n" + out
+			return res, fmt.Errorf("uninstall %s: %w", tc, err)
 		}
 		removed = append(removed, tc)
 	}
 
+	return p.rustupResult(ctx, current, removed), nil
+}
+
+// rustupResult reports what was uninstalled so far and the bytes freed.
+func (p *RustupProvider) rustupResult(ctx context.Context, before int64, removed []string) CleanResult {
 	var freed int64
-	if sizeAfter, afterErr := p.CurrentSize(ctx); beforeErr == nil && afterErr == nil && sizeBefore > sizeAfter {
-		freed = sizeBefore - sizeAfter
+	if after, err := p.CurrentSize(ctx); err == nil && before > after {
+		freed = before - after
 	}
 	return CleanResult{
 		BytesCleaned: freed,
 		Output:       "uninstalled: " + strings.Join(removed, ", "),
-	}, nil
+	}
 }
 
 // removableToolchains parses `rustup toolchain list` and returns toolchains

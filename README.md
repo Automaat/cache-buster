@@ -109,7 +109,7 @@ Providers are auto-detected — only tools installed on your system appear in th
 | edge | 3G | file-based |
 | vivaldi | 3G | file-based |
 | **ML and test tooling** | | |
-| huggingface (`~/.cache/huggingface/hub` only) | 20G | whole-entry |
+| huggingface (`~/.cache/huggingface/hub` only) | 20G | whole-entry (newest kept) |
 | playwright | 5G | whole-entry |
 | **Other caches** | | |
 | lima | 10G | whole-entry |
@@ -117,7 +117,7 @@ Providers are auto-detected — only tools installed on your system appear in th
 | chrome-devtools-mcp | 2G | whole-entry |
 | vscode-shipit | 1G | file-based |
 | **Toolchains** | | |
-| rustup (disabled by default; keeps `stable` and the default toolchain) | 10G | `rustup toolchain uninstall` |
+| rustup (disabled by default; once over the limit uninstalls every toolchain except `stable`, default, active and pinned ones) | 10G | `rustup toolchain uninstall` |
 
 ## Commands
 
