@@ -100,7 +100,7 @@ func cutDir(path, dir string, fold bool) (string, bool) {
 
 func (p Platform) tempGlob(pattern string) string {
 	dir := p.TempDir
-	if dir == "" {
+	if !IsAbsPortable(dir) {
 		dir = "/tmp"
 	}
 	return filepath.Join(escapeGlob(dir), pattern)

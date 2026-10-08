@@ -15,11 +15,12 @@ type Loader struct {
 	configPath   string // override for testing, empty uses Path()
 	skipDefaults bool   // skip merging with defaults (for test isolation)
 	platform     Platform
+	pathsExist   func([]string) bool
 }
 
 // NewLoader creates a new config loader.
 func NewLoader() *Loader {
-	return &Loader{v: viper.New(), platform: CurrentPlatform()}
+	return &Loader{v: viper.New(), platform: CurrentPlatform(), pathsExist: PathsExist}
 }
 
 // SetPlatform overrides the OS and environment the defaults are built for.
@@ -235,9 +236,13 @@ func (l *Loader) Exists() (bool, error) {
 var legacySailPaths = []string{"/private/tmp/sail*"}
 
 // isForeignDefault reports whether paths are the built-in paths of another
-// OS, as a config saved there and synced here holds. The current OS's own
+// OS, as a config saved there and synced here holds. Paths that exist here
+// are kept: the user may have narrowed a provider on purpose. The current OS's own
 // defaults win then, so one config file works on every machine.
 func (l *Loader) isForeignDefault(name string, paths []string) bool {
+	if l.pathsExist(paths) {
+		return false
+	}
 	if name == "sail-dirs" && l.platform.OS != OSDarwin && slices.Equal(paths, legacySailPaths) {
 		return true
 	}

@@ -172,6 +172,7 @@ providers:
 			loader := NewLoader()
 			loader.SetConfigPath(path)
 			loader.SetPlatform(p)
+			loader.pathsExist = func([]string) bool { return false }
 
 			cfg, err := loader.Load()
 			require.NoError(t, err)
@@ -198,6 +199,7 @@ providers:
 		loader := NewLoader()
 		loader.SetConfigPath(path)
 		loader.SetPlatform(p)
+		loader.pathsExist = func([]string) bool { return false }
 
 		cfg, err := loader.Load()
 		require.NoError(t, err)
@@ -210,6 +212,7 @@ func TestLoader_DefaultsFollowInjectedPlatform(t *testing.T) {
 	loader := NewLoader()
 	loader.SetConfigPath(filepath.Join(t.TempDir(), "config.yaml"))
 	loader.SetPlatform(linPlatform)
+	loader.pathsExist = func([]string) bool { return false }
 
 	cfg, err := loader.Load()
 	require.NoError(t, err)
@@ -255,6 +258,7 @@ func TestLoader_SavedConfigResolvesDefaultsOnTheLoadingOS(t *testing.T) {
 	loader := NewLoader()
 	loader.SetConfigPath(path)
 	loader.SetPlatform(linPlatform)
+	loader.pathsExist = func([]string) bool { return false }
 	loaded, err := loader.Load()
 	require.NoError(t, err)
 
@@ -337,6 +341,7 @@ func TestLoader_MacOnlyEntriesSavedWithoutPathsStayValidElsewhere(t *testing.T) 
 		loader := NewLoader()
 		loader.SetConfigPath(path)
 		loader.SetPlatform(p)
+		loader.pathsExist = func([]string) bool { return false }
 
 		cfg, err := loader.Load()
 		require.NoError(t, err, p.OS)
@@ -396,6 +401,7 @@ providers:
 			loader := NewLoader()
 			loader.SetConfigPath(path)
 			loader.SetPlatform(tt.platform)
+			loader.pathsExist = func([]string) bool { return false }
 
 			cfg, err := loader.Load()
 			require.NoError(t, err)
@@ -404,4 +410,37 @@ providers:
 			assert.True(t, cfg.Providers["sail-dirs"].Enabled)
 		})
 	}
+}
+
+func TestLoader_ExistingPathEqualToForeignDefaultIsKept(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	require.NoError(t, os.MkdirAll(filepath.Join(home, ".cache", "pip"), 0o750))
+	path := savedConfig(t, `version: "1"
+providers:
+  pip:
+    paths: [~/.cache/pip]
+  lima:
+    paths: [~/.cache/lima]
+`)
+	loader := NewLoader()
+	loader.SetConfigPath(path)
+	loader.SetPlatform(Platform{OS: OSDarwin, Home: home})
+
+	cfg, err := loader.Load()
+	require.NoError(t, err)
+
+	assert.Equal(t, []string{"~/.cache/pip"}, cfg.Providers["pip"].Paths, "narrowed on purpose and present here")
+	assert.Equal(t, []string{"~/Library/Caches/lima"}, cfg.Providers["lima"].Paths, "absent here, so another OS's default")
+}
+
+func TestDefaultProvidersFor_RelativeTempDirFallsBackToTmp(t *testing.T) {
+	p := linPlatform
+	p.TempDir = "tmp"
+
+	cfg := DefaultConfigFor(p)
+
+	require.NoError(t, cfg.Validate())
+	assert.Equal(t, []string{filepath.Join("/tmp", "sail*")}, cfg.Providers["sail-dirs"].Paths)
 }
