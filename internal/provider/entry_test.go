@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -18,7 +19,10 @@ func makeEntry(t *testing.T, root, name string, bytes int, age time.Duration) st
 	require.NoError(t, os.MkdirAll(filepath.Join(dir, "sub"), 0o750))
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "sub", "f"), make([]byte, bytes), 0o600))
 	when := time.Now().Add(-age)
-	require.NoError(t, os.Chtimes(dir, when, when))
+	// Entry age is the newest file mtime, so age every node, not just dir.
+	for _, p := range []string{filepath.Join(dir, "sub", "f"), filepath.Join(dir, "sub"), dir} {
+		require.NoError(t, os.Chtimes(p, when, when))
+	}
 	return dir
 }
 
@@ -179,6 +183,10 @@ func TestEntryProvider_PartialRemovalIsCredited(t *testing.T) {
 	old := makeEntry(t, root, "old", 2048, 48*time.Hour)
 	require.NoError(t, os.MkdirAll(filepath.Join(old, "locked"), 0o750))
 	require.NoError(t, os.WriteFile(filepath.Join(old, "locked", "keep"), make([]byte, 1024), 0o600))
+	past := time.Now().Add(-48 * time.Hour)
+	require.NoError(t, os.Chtimes(filepath.Join(old, "locked", "keep"), past, past))
+	require.NoError(t, os.Chtimes(filepath.Join(old, "locked"), past, past))
+	require.NoError(t, os.Chtimes(old, past, past))
 	require.NoError(t, os.Chmod(filepath.Join(old, "locked"), 0o500))
 	t.Cleanup(func() { _ = os.Chmod(filepath.Join(old, "locked"), 0o700) })
 	makeEntry(t, root, "new", 10, time.Hour)
@@ -188,4 +196,20 @@ func TestEntryProvider_PartialRemovalIsCredited(t *testing.T) {
 		t.Skip("removal succeeded despite read-only dir (running as root?)")
 	}
 	assert.Equal(t, int64(2048), res.BytesCleaned)
+}
+
+func TestSortEntries_EqualMtimeOrdersByPath(t *testing.T) {
+	when := time.Now()
+	var entries []cacheEntry
+	for i := 40; i > 0; i-- {
+		entries = append(entries, cacheEntry{path: fmt.Sprintf("/c/e%02d", i), modTime: when})
+	}
+	entries = append(entries, cacheEntry{path: "/c/zz-older", modTime: when.Add(-time.Hour)})
+
+	sortEntries(entries)
+
+	assert.Equal(t, "/c/zz-older", entries[0].path)
+	for i := 2; i < len(entries); i++ {
+		assert.Less(t, entries[i-1].path, entries[i].path)
+	}
 }
