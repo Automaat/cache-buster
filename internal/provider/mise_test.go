@@ -412,7 +412,7 @@ func TestMise_TrimsDownloadsAndCacheByAgeNotInstalls(t *testing.T) {
 }
 
 func TestMise_CleanCmdValidation(t *testing.T) {
-	for _, cmd := range []string{"mise ls", "mise", "mise run prune", "mise exec node -- npm prune", "mise prune --dry-run", "mise prune --yes", "mise prune -ny", "mise prune -yn", "mise prune --dry-run=true"} {
+	for _, cmd := range []string{"mise ls", "mise", "mise run prune", "mise exec node -- npm prune", "mise prune --dry-run", "mise prune --yes", "mise prune -ny", "mise prune -yn", "mise prune --dry-run=true", "mise prune -- node", "mise prune -Cstaging"} {
 		_, err := NewMiseProvider("mise", config.Provider{Paths: []string{t.TempDir()}, MaxSize: "1G", CleanCmd: cmd})
 		require.Error(t, err, cmd)
 	}

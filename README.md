@@ -572,7 +572,7 @@ Dot entries are ignored. In full mode providers with a `clean_cmd` run it.
 references. A version used only by an untracked project directory, by `MISE_<TOOL>_VERSION` or by
 `mise exec` may be removed; mise reinstalls it on demand. The real `mise prune --yes` removes what is
 unused at that moment, which can differ from the earlier listing if a config changed in between. `clean_cmd` defaults to `mise prune` and
-must be a `mise prune` command without `--dry-run` or `--yes`; `clean_timeout` bounds each call.
+must be `<mise executable> prune` optionally followed by tool names, with no flags (bilgie adds `--dry-run` and `--yes` itself); `clean_timeout` bounds each call.
 
 ### Busy tools
 

@@ -59,9 +59,9 @@ func NewMiseProvider(name string, cfg config.Provider) (*MiseProvider, error) {
 	if len(args) < 2 || args[1] != "prune" {
 		return nil, fmt.Errorf("clean_cmd must be a mise prune command, got %q", cfg.CleanCmd)
 	}
-	for _, a := range args {
-		if carriesDryRunOrYes(a) {
-			return nil, fmt.Errorf("clean_cmd must not carry %s: bilgie adds it", a)
+	for _, a := range args[2:] {
+		if strings.HasPrefix(a, "-") {
+			return nil, fmt.Errorf("clean_cmd takes only tool names after prune, got %q", a)
 		}
 	}
 	timeout, err := parseCleanTimeout(cfg.CleanTimeout)
@@ -80,15 +80,6 @@ func NewMiseProvider(name string, cfg config.Provider) (*MiseProvider, error) {
 	p.protected = expandProtected(config.DefaultProtected(), home)
 	p.protected = append(p.protected, config.BuiltinProtectedRoots(home)...)
 	return p, nil
-}
-
-// carriesDryRunOrYes spots the flags bilgie adds itself, long or inside a
-// combined short cluster such as -ny.
-func carriesDryRunOrYes(arg string) bool {
-	if strings.HasPrefix(arg, "--") {
-		return strings.HasPrefix(arg, "--dry-run") || strings.HasPrefix(arg, "--yes")
-	}
-	return strings.HasPrefix(arg, "-") && strings.ContainsAny(arg, "ny")
 }
 
 // SetProtected implements ProtectionAware. The paths add to the built-in ones.
