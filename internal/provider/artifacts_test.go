@@ -498,7 +498,10 @@ func TestProjectArtifacts_RunningToolSkipsMatchingKindOnly(t *testing.T) {
 
 func dirExists(path string) bool {
 	info, err := os.Stat(path)
-	return err == nil && info.IsDir()
+	if err != nil {
+		return false
+	}
+	return info.IsDir()
 }
 
 func TestProjectArtifacts_ToolInEnclosingRepoDirectoryBlocksNestedProject(t *testing.T) {
@@ -569,7 +572,8 @@ func TestProjectArtifacts_DepthIsBounded(t *testing.T) {
 func TestProjectArtifacts_TimeBudgetStopsDiscovery(t *testing.T) {
 	h := newArtifactHarness(t, nil)
 	nodeProject(t, h.path("web"), 10, 90*day)
-	h.p.budget = time.Nanosecond
+	h.p.budget = time.Second
+	h.p.now = func() time.Time { return time.Now().Add(-time.Hour) }
 
 	res := h.clean(CleanOptions{Mode: CleanModeFull})
 
@@ -582,8 +586,10 @@ func TestProjectArtifacts_BudgetAppliesPerPass(t *testing.T) {
 	h := newArtifactHarness(t, nil)
 	nodeProject(t, h.path("web"), 10, 90*day)
 
-	h.p.budget = time.Nanosecond
+	h.p.budget = time.Second
+	h.p.now = func() time.Time { return time.Now().Add(-time.Hour) }
 	h.clean(CleanOptions{DryRun: true, Mode: CleanModeFull})
+	h.p.now = time.Now
 	h.p.budget = 10 * time.Second
 	res := h.clean(CleanOptions{Mode: CleanModeFull})
 
@@ -756,6 +762,7 @@ func TestProjectArtifacts_PressureStopsWhenRecovered(t *testing.T) {
 	assert.DirExists(t, h.path("b-middle", "target"))
 	assert.DirExists(t, h.path("c-newest", "target"))
 	assert.Len(t, res.Entries, 1)
+	require.NotEmpty(t, seen)
 	assert.Equal(t, int64(0), seen[0])
 }
 
@@ -1052,13 +1059,14 @@ func TestNewProvider_SelectsProjectArtifacts(t *testing.T) {
 }
 
 func TestLoadProviders_HandsConfiguredProtectedPathsToArtifactsProvider(t *testing.T) {
+	precious := filepath.Join(t.TempDir(), "precious")
 	cfg := &config.Config{
 		Providers: map[string]config.Provider{
 			"project-artifacts": {
 				Type: config.TypeProjectArtifacts, Paths: []string{t.TempDir()}, MaxSize: "1G", Enabled: true,
 			},
 		},
-		Protected: []string{"/srv/precious/stuff"},
+		Protected: []string{precious},
 	}
 
 	p, err := LoadProvider("project-artifacts", cfg)
@@ -1066,7 +1074,7 @@ func TestLoadProviders_HandsConfiguredProtectedPathsToArtifactsProvider(t *testi
 
 	art, ok := p.(*ProjectArtifactsProvider)
 	require.True(t, ok)
-	assert.Contains(t, art.protected, filepath.Clean("/srv/precious/stuff"))
+	assert.Contains(t, art.protected, filepath.Clean(precious))
 }
 
 func TestLastReflogTime(t *testing.T) {

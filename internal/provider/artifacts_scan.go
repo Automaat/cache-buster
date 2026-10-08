@@ -87,7 +87,7 @@ func trashName(base string) string {
 // time budget bounds the search; sizing is bounded by ctx alone.
 func (p *ProjectArtifactsProvider) discover(ctx context.Context) (*artifactScan, error) {
 	scan := &artifactScan{}
-	searchCtx, cancel := context.WithTimeout(ctx, p.budget)
+	searchCtx, cancel := context.WithDeadline(ctx, p.now().Add(p.budget))
 	defer cancel()
 
 	seen := map[string]bool{}
@@ -236,12 +236,18 @@ func markersValid(art *artifactDir) bool {
 
 func isRealDir(path string) bool {
 	info, err := os.Lstat(path)
-	return err == nil && info.IsDir()
+	if err != nil {
+		return false
+	}
+	return info.IsDir()
 }
 
 func isRegular(path string) bool {
 	info, err := os.Lstat(path)
-	return err == nil && info.Mode().IsRegular()
+	if err != nil {
+		return false
+	}
+	return info.Mode().IsRegular()
 }
 
 func hasPythonProjectFile(project string) bool {

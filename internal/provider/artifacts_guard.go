@@ -42,7 +42,7 @@ func runGit(ctx context.Context, dir string, args ...string) (string, error) {
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()
 	if err != nil {
-		return "", fmt.Errorf("git %s: %w: %s", args[0], err, strings.TrimSpace(stderr.String()))
+		return "", fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(stderr.String()))
 	}
 	return string(out), nil
 }
@@ -51,6 +51,7 @@ func runGit(ctx context.Context, dir string, args ...string) (string, error) {
 // read; CwdUnknown says the lookup failed for every process.
 type toolProcess struct {
 	Tool        string
+	pid         int
 	CommandLine string
 	Cwd         string
 	CwdUnknown  bool
@@ -77,7 +78,7 @@ func lookupToolProcesses(ctx context.Context) ([]toolProcess, error) {
 			continue
 		}
 		if tool := matchProcess(table[i].CommandLine, all); tool != "" {
-			procs = append(procs, toolProcess{Tool: tool, CommandLine: table[i].CommandLine})
+			procs = append(procs, toolProcess{Tool: tool, pid: table[i].PID, CommandLine: table[i].CommandLine})
 			pids = append(pids, table[i].PID)
 		}
 	}
@@ -90,7 +91,7 @@ func lookupToolProcesses(ctx context.Context) ([]toolProcess, error) {
 		case err != nil:
 			procs[i].CwdUnknown = true
 		default:
-			procs[i].Cwd = cwds[pids[i]]
+			procs[i].Cwd = cwds[procs[i].pid]
 		}
 	}
 	return procs, nil
