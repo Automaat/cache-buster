@@ -1,6 +1,6 @@
 # cache-buster
 
-Developer cache manager for macOS. Interactive TUI, 18 built-in providers, auto-discovery, smart LRU cleaning.
+Developer cache manager for macOS. Interactive TUI, 27 built-in providers, auto-discovery, smart LRU cleaning.
 
 ![demo](./doc/demo.gif)
 <!-- Generate with: brew install vhs && vhs doc/demo.tape -->
@@ -100,11 +100,24 @@ Providers are auto-detected — only tools installed on your system appear in th
 | xcode-archives | 10G | file-based |
 | ios-simulator | 10G | `xcrun simctl delete unavailable` |
 | **Tools** | | |
-| homebrew | 5G | `brew cleanup` |
+| homebrew | 5G | `brew cleanup -s` |
 | mise | 8G | `mise prune` |
 | docker | 50G | `docker system prune -af` |
 | docker-volumes (disabled by default; ignores max_age) | 50G | `docker volume prune -f` |
 | jetbrains | 3G | file-based |
+| **Browsers** | | |
+| edge | 3G | file-based |
+| vivaldi | 3G | file-based |
+| **ML and test tooling** | | |
+| huggingface (`~/.cache/huggingface/hub` only) | 20G | whole-entry (newest kept) |
+| playwright | 5G | whole-entry |
+| **Other caches** | | |
+| lima | 10G | whole-entry |
+| gh | 1G | file-based |
+| chrome-devtools-mcp | 2G | whole-entry |
+| vscode-shipit | 1G | file-based |
+| **Toolchains** | | |
+| rustup (disabled by default; once over the limit uninstalls every toolchain except `stable`, default, active and pinned ones) | 10G | `rustup toolchain uninstall` |
 
 ## Commands
 

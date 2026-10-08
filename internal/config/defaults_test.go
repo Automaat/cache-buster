@@ -1,0 +1,51 @@
+package config
+
+import (
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+func TestDefaultProviders_ExtraCaches(t *testing.T) {
+	tests := []struct {
+		name string
+		path string
+	}{
+		{"edge", "~/Library/Caches/Microsoft Edge"},
+		{"vivaldi", "~/Library/Caches/Vivaldi"},
+		{"huggingface", "~/.cache/huggingface/hub"},
+		{"playwright", "~/Library/Caches/ms-playwright"},
+		{"lima", "~/Library/Caches/lima"},
+		{"gh", "~/.cache/gh"},
+		{"chrome-devtools-mcp", "~/.cache/chrome-devtools-mcp"},
+		{"vscode-shipit", "~/Library/Caches/com.microsoft.VSCode.ShipIt"},
+	}
+	defaults := DefaultProviders()
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p, ok := defaults[tt.name]
+			require.True(t, ok)
+			assert.True(t, p.Enabled)
+			assert.Equal(t, []string{tt.path}, p.Paths)
+			assert.Empty(t, p.CleanCmd)
+			assert.NotEmpty(t, p.MaxSize)
+		})
+	}
+}
+
+func TestDefaultProviders_Rustup(t *testing.T) {
+	p, ok := DefaultProviders()["rustup"]
+	require.True(t, ok)
+	assert.False(t, p.Enabled, "toolchains are not a plain cache")
+	assert.Equal(t, "rustup toolchain uninstall", p.CleanCmd)
+	assert.Equal(t, []string{"~/.rustup/toolchains"}, p.Paths)
+}
+
+func TestDefaultProviders_HomebrewScrubsCache(t *testing.T) {
+	assert.Equal(t, "brew cleanup -s", DefaultProviders()["homebrew"].CleanCmd)
+}
+
+func TestDefaultConfig_Validates(t *testing.T) {
+	require.NoError(t, DefaultConfig().Validate())
+}

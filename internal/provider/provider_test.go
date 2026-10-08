@@ -1526,3 +1526,75 @@ func TestDockerProvider_SmartClean_DryRun(t *testing.T) {
 		t.Errorf("output should contain 'until=', got %q", result.Output)
 	}
 }
+
+func TestNewProvider_ExtraCacheDefaults(t *testing.T) {
+	for name, cfg := range config.DefaultProviders() {
+		t.Run(name, func(t *testing.T) {
+			p, err := provider.NewProvider(name, cfg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if p.Name() != name {
+				t.Errorf("name = %q, want %q", p.Name(), name)
+			}
+		})
+	}
+}
+
+func TestNewProvider_ExtraCacheIsFileBased(t *testing.T) {
+	for _, name := range []string{"edge", "vivaldi", "gh", "vscode-shipit"} {
+		t.Run(name, func(t *testing.T) {
+			p, err := provider.NewProvider(name, config.DefaultProviders()[name])
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, ok := p.(*provider.FileProvider); !ok {
+				t.Errorf("%s provider type = %T, want *FileProvider", name, p)
+			}
+		})
+	}
+}
+
+func TestNewProvider_Rustup(t *testing.T) {
+	p, err := provider.NewProvider("rustup", config.DefaultProviders()["rustup"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := p.(*provider.RustupProvider); !ok {
+		t.Errorf("rustup provider type = %T, want *RustupProvider", p)
+	}
+}
+
+func TestEnabledProviders_ExtraCachesNeedExistingPath(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	cfg := config.DefaultConfig()
+	for _, name := range cfg.EnabledProviders() {
+		if name == "edge" || name == "huggingface" || name == "gh" {
+			t.Errorf("%s listed without its path", name)
+		}
+	}
+	if err := os.MkdirAll(filepath.Join(os.Getenv("HOME"), ".cache", "gh"), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, name := range cfg.EnabledProviders() {
+		found = found || name == "gh"
+	}
+	if !found {
+		t.Error("gh not listed although its path exists")
+	}
+}
+
+func TestNewProvider_ExtraCacheIsEntryBased(t *testing.T) {
+	for _, name := range []string{"huggingface", "playwright", "lima", "chrome-devtools-mcp"} {
+		t.Run(name, func(t *testing.T) {
+			p, err := provider.NewProvider(name, config.DefaultProviders()[name])
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, ok := p.(*provider.EntryProvider); !ok {
+				t.Errorf("%s provider type = %T, want *EntryProvider", name, p)
+			}
+		})
+	}
+}

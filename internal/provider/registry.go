@@ -13,6 +13,20 @@ var fileBasedProviders = map[string]bool{
 	"xcode-archives":    true,
 	"cargo":             true,
 	"gradle":            true,
+
+	"edge":          true,
+	"vivaldi":       true,
+	"gh":            true,
+	"vscode-shipit": true,
+}
+
+// entryBasedProviders lists providers that must delete whole top-level
+// entries, because partial deletion corrupts them.
+var entryBasedProviders = map[string]bool{
+	"huggingface":         true,
+	"playwright":          true,
+	"lima":                true,
+	"chrome-devtools-mcp": true,
 }
 
 // NewProvider creates a provider from config.
@@ -27,6 +41,14 @@ func NewProvider(name string, cfg config.Provider) (Provider, error) {
 
 	if name == "docker-volumes" {
 		return NewDockerVolumesProvider(name, cfg)
+	}
+
+	if entryBasedProviders[name] {
+		return NewEntryProvider(name, cfg)
+	}
+
+	if name == "rustup" {
+		return NewRustupProvider(name, cfg)
 	}
 
 	if name == "jetbrains" {
