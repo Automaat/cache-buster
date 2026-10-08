@@ -2,19 +2,25 @@ package provider
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os/exec"
+	"time"
 
 	"github.com/Automaat/cache-buster/internal/cache"
 	"github.com/Automaat/cache-buster/internal/config"
 	"github.com/kballard/go-shellquote"
 )
 
+// DefaultCleanTimeout bounds a clean command so a hung tool cannot stall a run.
+const DefaultCleanTimeout = 2 * time.Minute
+
 // CommandProvider cleans caches by running an external command.
 type CommandProvider struct {
 	*BaseProvider
 	cleanCmd string   // original clean_cmd, kept for dry-run display
 	cmdArgs  []string // clean_cmd parsed once at construction
+	timeout  time.Duration
 }
 
 // NewCommandProvider creates a provider that cleans via external command.
@@ -29,10 +35,22 @@ func NewCommandProvider(name string, cfg config.Provider) (*CommandProvider, err
 		return nil, fmt.Errorf("invalid clean_cmd: %w", err)
 	}
 
+	timeout := DefaultCleanTimeout
+	if cfg.CleanTimeout != "" {
+		timeout, err = config.ParseDuration(cfg.CleanTimeout)
+		if err != nil {
+			return nil, fmt.Errorf("parse clean_timeout: %w", err)
+		}
+		if timeout <= 0 {
+			return nil, fmt.Errorf("clean_timeout must be positive, got %q", cfg.CleanTimeout)
+		}
+	}
+
 	return &CommandProvider{
 		BaseProvider: base,
 		cleanCmd:     cfg.CleanCmd,
 		cmdArgs:      args,
+		timeout:      timeout,
 	}, nil
 }
 
@@ -49,6 +67,9 @@ func (p *CommandProvider) Available() bool {
 
 // Clean implements Provider.
 func (p *CommandProvider) Clean(ctx context.Context, opts CleanOptions) (CleanResult, error) {
+	if skipped, ok := p.skipIfBusy(ctx); ok {
+		return skipped, nil
+	}
 	if opts.Mode == CleanModeSmart {
 		return p.smartClean(ctx, opts)
 	}
@@ -79,5 +100,12 @@ func (p *CommandProvider) fullClean(ctx context.Context, opts CleanOptions) (Cle
 		}, nil
 	}
 
-	return runMeasuredClean(ctx, p.name, p.cmdArgs, p.CurrentSize)
+	runCtx, cancel := context.WithTimeout(ctx, p.timeout)
+	defer cancel()
+
+	result, err := runMeasuredClean(runCtx, p.name, p.cmdArgs, p.CurrentSize)
+	if err != nil && ctx.Err() == nil && errors.Is(runCtx.Err(), context.DeadlineExceeded) {
+		return result, fmt.Errorf("clean command timed out after %s: %w", p.timeout, err)
+	}
+	return result, err
 }

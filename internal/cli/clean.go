@@ -3,6 +3,7 @@ package cli
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/signal"
@@ -32,6 +33,7 @@ func init() {
 	CleanCmd.Flags().Bool("dry-run", false, "Preview without deleting")
 	CleanCmd.Flags().Bool("force", false, "Skip confirmation prompt")
 	CleanCmd.Flags().Bool("quiet", false, "Minimal output")
+	CleanCmd.Flags().Bool("json", false, "Output results in JSON format (requires --force or --dry-run)")
 	CleanCmd.Flags().Bool("smart", false, "Smart clean: removes files older than max_age, then LRU-trims to stay under max_size")
 }
 
@@ -41,11 +43,29 @@ func runClean(cmd *cobra.Command, args []string) error {
 	force, _ := cmd.Flags().GetBool("force")
 	quiet, _ := cmd.Flags().GetBool("quiet")
 	smart, _ := cmd.Flags().GetBool("smart")
+	jsonOut, _ := cmd.Flags().GetBool("json")
 
-	return runCleanWithLoader(config.NewLoader(), args, allFlag, dryRun, force, quiet, smart, os.Stdin)
+	return runCleanWithOptions(config.NewLoader(), args, cleanOptions{
+		all: allFlag, dryRun: dryRun, force: force, quiet: quiet, smart: smart, json: jsonOut,
+	}, os.Stdin)
+}
+
+type cleanOptions struct {
+	all, dryRun, force, quiet, smart, json bool
 }
 
 func runCleanWithLoader(loader *config.Loader, args []string, allFlag, dryRun, force, quiet, smart bool, stdin *os.File) error {
+	return runCleanWithOptions(loader, args, cleanOptions{
+		all: allFlag, dryRun: dryRun, force: force, quiet: quiet, smart: smart,
+	}, stdin)
+}
+
+func runCleanWithOptions(loader *config.Loader, args []string, opts cleanOptions, stdin *os.File) error {
+	allFlag, dryRun, force, quiet, smart := opts.all, opts.dryRun, opts.force, opts.quiet, opts.smart
+	if opts.json && !force && !dryRun {
+		return fmt.Errorf("--json requires --force or --dry-run (no interactive prompt)")
+	}
+
 	cfg, err := loader.Load()
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
@@ -62,7 +82,7 @@ func runCleanWithLoader(loader *config.Loader, args []string, allFlag, dryRun, f
 	}
 
 	for _, name := range unavailable {
-		if !quiet {
+		if !quiet && !opts.json {
 			fmt.Fprintf(os.Stderr, "Skipping %s: unavailable\n", name)
 		}
 	}
@@ -82,7 +102,7 @@ func runCleanWithLoader(loader *config.Loader, args []string, allFlag, dryRun, f
 		mode = provider.CleanModeSmart
 	}
 
-	return executeClean(ctx, providers, dryRun, quiet, mode)
+	return executeClean(ctx, providers, unavailable, opts, mode)
 }
 
 // volumesProvider is skipped by --all --smart: smart mode cannot bound a
@@ -162,49 +182,139 @@ func confirmClean(providers []provider.Provider, smart bool, stdin *os.File) boo
 	return response == "y" || response == "yes"
 }
 
-func executeClean(ctx context.Context, providers []provider.Provider, dryRun, quiet bool, mode provider.CleanMode) error {
+// ProviderCleanResult is one provider's outcome in clean output.
+type ProviderCleanResult struct {
+	Name       string `json:"name"`
+	Status     string `json:"status"`
+	Reason     string `json:"reason,omitempty"`
+	Error      string `json:"error,omitempty"`
+	Output     string `json:"output,omitempty"`
+	Freed      string `json:"freed,omitempty"`
+	FreedBytes int64  `json:"freed_bytes"`
+}
+
+// CleanOutput holds the full clean outcome for JSON serialization.
+type CleanOutput struct {
+	Total      string                `json:"total"`
+	Providers  []ProviderCleanResult `json:"providers"`
+	TotalBytes int64                 `json:"total_bytes"`
+	DryRun     bool                  `json:"dry_run"`
+}
+
+// Statuses reported per provider.
+const (
+	statusCleaned     = "cleaned"
+	statusDryRun      = "dry-run"
+	statusSkipped     = "skipped"
+	statusError       = "error"
+	statusUnavailable = "unavailable"
+)
+
+func executeClean(
+	ctx context.Context,
+	providers []provider.Provider,
+	unavailable []string,
+	opts cleanOptions,
+	mode provider.CleanMode,
+) error {
+	dryRun, quiet, jsonOut := opts.dryRun, opts.quiet, opts.json
+	text := !jsonOut
 	var totalCleaned int64
 	var errors []string
+	results := make([]ProviderCleanResult, 0, len(providers)+len(unavailable))
+
+	for _, name := range unavailable {
+		results = append(results, ProviderCleanResult{Name: name, Status: statusUnavailable})
+	}
 
 	for _, p := range providers {
 		select {
 		case <-ctx.Done():
-			if !quiet {
+			if !quiet && text {
 				fmt.Println("\nCancelled")
 			}
-			return nil
+			return finishClean(results, totalCleaned, opts, errors, true)
 		default:
 		}
 
-		if !quiet && !dryRun {
+		if !quiet && !dryRun && text {
 			fmt.Printf("Cleaning %s... ", p.Name())
 		}
 
 		result, err := p.Clean(ctx, provider.CleanOptions{DryRun: dryRun, Mode: mode})
 		totalCleaned += result.BytesCleaned
-		if err != nil {
+		entry := ProviderCleanResult{
+			Name:       p.Name(),
+			Output:     strings.TrimSpace(result.Output),
+			Freed:      size.FormatSize(result.BytesCleaned),
+			FreedBytes: result.BytesCleaned,
+		}
+
+		switch {
+		case err != nil:
+			entry.Status = statusError
+			entry.Error = err.Error()
 			errors = append(errors, fmt.Sprintf("%s: %v", p.Name(), err))
-			if !quiet {
+			if !quiet && text {
 				fmt.Println("error")
 				if result.Output != "" {
 					fmt.Print(result.Output)
 				}
 			}
-			continue
-		}
-
-		if dryRun {
-			if !quiet {
+		case result.SkipReason != "":
+			entry.Status = statusSkipped
+			entry.Reason = result.SkipReason
+			if text {
+				printSkipped(p.Name(), result.SkipReason, dryRun, quiet)
+			}
+		case dryRun:
+			entry.Status = statusDryRun
+			if !quiet && text {
 				fmt.Printf("[dry-run] %s: %s\n", p.Name(), result.Output)
 			}
-		} else if !quiet {
-			fmt.Printf("done (freed %s)\n", size.FormatSize(result.BytesCleaned))
+		default:
+			entry.Status = statusCleaned
+			if !quiet && text {
+				fmt.Printf("done (freed %s)\n", size.FormatSize(result.BytesCleaned))
+			}
 		}
+		results = append(results, entry)
 	}
 
-	if !quiet && !dryRun {
+	return finishClean(results, totalCleaned, opts, errors, false)
+}
+
+// printSkipped reports a skipped provider. Skips go to stderr in quiet mode so
+// they stay visible without breaking the single-line byte count on stdout.
+func printSkipped(name, reason string, dryRun, quiet bool) {
+	switch {
+	case quiet:
+		fmt.Fprintf(os.Stderr, "skipped %s: %s\n", name, reason)
+	case dryRun:
+		fmt.Printf("[dry-run] %s: skipped (%s)\n", name, reason)
+	default:
+		fmt.Printf("skipped (%s)\n", reason)
+	}
+}
+
+func finishClean(results []ProviderCleanResult, totalCleaned int64, opts cleanOptions, errors []string, cancelled bool) error {
+	switch {
+	case opts.json:
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		if err := enc.Encode(CleanOutput{
+			Providers:  results,
+			TotalBytes: totalCleaned,
+			Total:      size.FormatSize(totalCleaned),
+			DryRun:     opts.dryRun,
+		}); err != nil {
+			return fmt.Errorf("encode json: %w", err)
+		}
+	case cancelled:
+		return nil
+	case !opts.quiet && !opts.dryRun:
 		fmt.Printf("\nTotal: %s freed\n", size.FormatSize(totalCleaned))
-	} else if quiet && !dryRun {
+	case opts.quiet && !opts.dryRun:
 		fmt.Println(size.FormatSize(totalCleaned))
 	}
 

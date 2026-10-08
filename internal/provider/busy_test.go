@@ -1,0 +1,257 @@
+package provider
+
+import (
+	"context"
+	"errors"
+	"os"
+	"path/filepath"
+	"syscall"
+	"testing"
+	"time"
+
+	"github.com/Automaat/cache-buster/internal/config"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+func TestMatchProcess(t *testing.T) {
+	tests := []struct {
+		name   string
+		line   string
+		wanted []string
+		want   string
+	}{
+		{"exact binary", "go build ./...", []string{"go"}, "go"},
+		{"absolute path", "/usr/local/go/bin/go test ./...", []string{"go"}, "go"},
+		{"second wanted", "/Users/me/.cargo/bin/rustc --crate-name x", []string{"cargo", "rustc"}, "rustc"},
+		{"homebrew ruby script", "/opt/homebrew/ruby -W1 /opt/homebrew/Library/Homebrew/brew.rb cleanup", []string{"brew"}, "brew"},
+		{"argument is not a tool", "vim go", []string{"go"}, ""},
+		{"prefix is not a match", "gopls serve", []string{"go"}, ""},
+		{"empty line", "", []string{"go"}, ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, matchProcess(tt.line, tt.wanted))
+		})
+	}
+}
+
+func fakeGuard(lines []string, listErr error, held map[string]bool) *busyGuard {
+	return &busyGuard{
+		processes: []string{"cargo", "rustc"},
+		listProcesses: func(context.Context) ([]string, error) {
+			return lines, listErr
+		},
+		lockHeld: func(path string) (bool, error) {
+			return held[path], nil
+		},
+	}
+}
+
+func TestBusyGuard_BusyReason(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("nil guard is never busy", func(t *testing.T) {
+		var g *busyGuard
+		assert.Empty(t, g.busyReason(ctx))
+	})
+
+	t.Run("process running", func(t *testing.T) {
+		g := fakeGuard([]string{"zsh", "cargo build --release"}, nil, nil)
+		assert.Equal(t, "cargo is running", g.busyReason(ctx))
+	})
+
+	t.Run("no matching process", func(t *testing.T) {
+		g := fakeGuard([]string{"zsh", "vim main.go"}, nil, nil)
+		assert.Empty(t, g.busyReason(ctx))
+	})
+
+	t.Run("lock held", func(t *testing.T) {
+		g := fakeGuard(nil, nil, map[string]bool{"/c/.lock": true})
+		g.locks = []string{"/c/.lock"}
+		assert.Equal(t, "lock held: /c/.lock", g.busyReason(ctx))
+	})
+
+	t.Run("process list failure counts as busy", func(t *testing.T) {
+		g := fakeGuard(nil, errors.New("ps denied"), nil)
+		assert.Contains(t, g.busyReason(ctx), "cannot list processes: ps denied")
+	})
+
+	t.Run("lock check failure counts as busy", func(t *testing.T) {
+		g := fakeGuard(nil, nil, nil)
+		g.locks = []string{"/c/.lock"}
+		g.lockHeld = func(string) (bool, error) { return false, errors.New("boom") }
+		assert.Contains(t, g.busyReason(ctx), "cannot check lock /c/.lock: boom")
+	})
+}
+
+func lockFile(t *testing.T, path string) {
+	t.Helper()
+	f, err := os.Create(filepath.Clean(path))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = f.Close() })
+	require.NoError(t, syscall.Flock(int(f.Fd()), syscall.LOCK_EX))
+}
+
+func TestFlockHeld(t *testing.T) {
+	t.Run("missing file is not held", func(t *testing.T) {
+		held, err := flockHeld(filepath.Join(t.TempDir(), ".lock"))
+		require.NoError(t, err)
+		assert.False(t, held)
+	})
+
+	t.Run("unlocked file is not held and stays lockable", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), ".lock")
+		require.NoError(t, os.WriteFile(path, nil, 0o600))
+
+		held, err := flockHeld(path)
+		require.NoError(t, err)
+		assert.False(t, held)
+
+		held, err = flockHeld(path)
+		require.NoError(t, err)
+		assert.False(t, held, "probe must release its lock")
+	})
+
+	t.Run("lock held by another descriptor", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), ".lock")
+		lockFile(t, path)
+
+		held, err := flockHeld(path)
+		require.NoError(t, err)
+		assert.True(t, held)
+	})
+}
+
+func newUVTestProvider(t *testing.T, cacheDir string) *FileProvider {
+	t.Helper()
+	p, err := NewFileProvider("uv", config.Provider{
+		Enabled: true,
+		Paths:   []string{cacheDir},
+		MaxSize: "1",
+	})
+	require.NoError(t, err)
+	return p
+}
+
+func TestFileProvider_SkipsWhenLockHeld(t *testing.T) {
+	cacheDir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(cacheDir, "blob"), make([]byte, 64), 0o600))
+	lockPath := filepath.Join(cacheDir, ".lock")
+	lockFile(t, lockPath)
+
+	p := newUVTestProvider(t, cacheDir)
+	p.busy.listProcesses = func(context.Context) ([]string, error) { return nil, nil }
+
+	for _, mode := range []CleanMode{CleanModeFull, CleanModeSmart} {
+		result, err := p.Clean(context.Background(), CleanOptions{Mode: mode})
+		require.NoError(t, err)
+		assert.Equal(t, "lock held: "+lockPath, result.SkipReason)
+		assert.Zero(t, result.BytesCleaned)
+	}
+	assert.FileExists(t, filepath.Join(cacheDir, "blob"), "busy provider must not delete files")
+}
+
+func TestFileProvider_CleansWhenIdle(t *testing.T) {
+	cacheDir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(cacheDir, "blob"), make([]byte, 64), 0o600))
+
+	p := newUVTestProvider(t, cacheDir)
+	p.busy.listProcesses = func(context.Context) ([]string, error) { return []string{"zsh"}, nil }
+
+	result, err := p.Clean(context.Background(), CleanOptions{Mode: CleanModeFull})
+	require.NoError(t, err)
+	assert.Empty(t, result.SkipReason)
+	assert.NoFileExists(t, filepath.Join(cacheDir, "blob"))
+}
+
+func TestCommandProvider_SkipsWhenToolRunning(t *testing.T) {
+	cacheDir := t.TempDir()
+	marker := filepath.Join(t.TempDir(), "ran")
+	p, err := NewCommandProvider("go-build", config.Provider{
+		Enabled:  true,
+		Paths:    []string{cacheDir},
+		MaxSize:  "1G",
+		CleanCmd: "touch " + marker,
+	})
+	require.NoError(t, err)
+	p.busy.listProcesses = func(context.Context) ([]string, error) {
+		return []string{"/usr/local/go/bin/go build ./..."}, nil
+	}
+
+	result, err := p.Clean(context.Background(), CleanOptions{})
+	require.NoError(t, err)
+	assert.Equal(t, "go is running", result.SkipReason)
+	assert.NoFileExists(t, marker, "busy provider must not run its clean command")
+
+	dry, err := p.Clean(context.Background(), CleanOptions{DryRun: true})
+	require.NoError(t, err)
+	assert.Equal(t, "go is running", dry.SkipReason)
+}
+
+func TestNewBusyGuard(t *testing.T) {
+	assert.Nil(t, newBusyGuard("npm", []string{"/x"}))
+
+	uv := newBusyGuard("uv", []string{"/a", "/b"})
+	require.NotNil(t, uv)
+	assert.Equal(t, []string{"/a/.lock", "/b/.lock"}, uv.locks)
+	assert.Equal(t, []string{"uv"}, uv.processes)
+
+	assert.Equal(t, []string{"cargo", "rustc"}, newBusyGuard("cargo", nil).processes)
+}
+
+func TestCommandProvider_CleanTimeout(t *testing.T) {
+	p, err := NewCommandProvider("hang-test", config.Provider{
+		Enabled:      true,
+		Paths:        []string{t.TempDir()},
+		MaxSize:      "1G",
+		CleanCmd:     `sh -c "sleep 30"`,
+		CleanTimeout: "1s",
+	})
+	require.NoError(t, err)
+
+	start := time.Now()
+	_, err = p.Clean(context.Background(), CleanOptions{})
+	elapsed := time.Since(start)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "timed out after 1s")
+	assert.Less(t, elapsed, 15*time.Second, "hung command must be cancelled")
+}
+
+func TestCommandProvider_ParentCancelIsNotTimeout(t *testing.T) {
+	p, err := NewCommandProvider("cancel-test", config.Provider{
+		Enabled:  true,
+		Paths:    []string{t.TempDir()},
+		MaxSize:  "1G",
+		CleanCmd: `sh -c "sleep 30"`,
+	})
+	require.NoError(t, err)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	time.AfterFunc(200*time.Millisecond, cancel)
+
+	_, err = p.Clean(ctx, CleanOptions{})
+	require.Error(t, err)
+	assert.NotContains(t, err.Error(), "timed out")
+}
+
+func TestCommandProvider_TimeoutConfig(t *testing.T) {
+	cfg := config.Provider{Enabled: true, Paths: []string{t.TempDir()}, MaxSize: "1G", CleanCmd: "true"}
+
+	p, err := NewCommandProvider("t", cfg)
+	require.NoError(t, err)
+	assert.Equal(t, DefaultCleanTimeout, p.timeout)
+
+	cfg.CleanTimeout = "90s"
+	p, err = NewCommandProvider("t", cfg)
+	require.NoError(t, err)
+	assert.Equal(t, 90*time.Second, p.timeout)
+
+	for _, bad := range []string{"0", "abc"} {
+		cfg.CleanTimeout = bad
+		_, err = NewCommandProvider("t", cfg)
+		assert.Error(t, err, bad)
+	}
+}

@@ -16,6 +16,7 @@ type BaseProvider struct {
 	paths   []string
 	maxSize int64
 	maxAge  time.Duration
+	busy    *busyGuard
 }
 
 // NewBaseProvider creates a BaseProvider from config.
@@ -40,7 +41,17 @@ func NewBaseProvider(name string, cfg config.Provider) (*BaseProvider, error) {
 		paths:   paths,
 		maxSize: maxBytes,
 		maxAge:  maxAge,
+		busy:    newBusyGuard(name, paths),
 	}, nil
+}
+
+// skipIfBusy returns a skipped result when the provider's tool is active.
+func (b *BaseProvider) skipIfBusy(ctx context.Context) (CleanResult, bool) {
+	reason := b.busy.busyReason(ctx)
+	if reason == "" {
+		return CleanResult{}, false
+	}
+	return CleanResult{SkipReason: reason, Output: "skipped: " + reason}, true
 }
 
 // Name implements Provider.

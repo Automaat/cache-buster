@@ -53,7 +53,10 @@ type CleanOptions struct {
 
 // CleanResult contains cleaning operation results.
 type CleanResult struct {
-	Output       string
+	Output string
+	// SkipReason is set when the provider declined to clean, for example
+	// because its tool is busy. A skip is not an error.
+	SkipReason   string
 	BytesCleaned int64
 	FilesDeleted int64
 }

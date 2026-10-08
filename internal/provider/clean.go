@@ -7,7 +7,10 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"time"
 )
+
+const cleanWaitDelay = 5 * time.Second
 
 // runMeasuredClean runs args as a command, measuring cache size before and
 // after via sizeFn to report freed bytes. name is used for warnings. It is the
@@ -28,6 +31,9 @@ func runMeasuredClean(
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
+	// Without a delay a grandchild holding the pipes keeps Run blocked after
+	// the context kills the command.
+	cmd.WaitDelay = cleanWaitDelay
 
 	err := cmd.Run()
 	output := strings.TrimSpace(stdout.String() + stderr.String())

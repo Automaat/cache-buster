@@ -162,10 +162,27 @@ providers:
 | `max_size` | Size limit (e.g., `10G`, `500M`) |
 | `max_age` | File age threshold for smart clean (e.g., `30d`) |
 | `clean_cmd` | Command for full clean (empty = file-based deletion) |
+| `clean_timeout` | Max runtime of `clean_cmd` before it is cancelled and reported (default `2m`) |
 | `type` | `dir-pattern` removes whole stale directories matching a glob in `paths` |
 | `min_idle` | `dir-pattern`: minimum idle time, from the newest mtime in the tree (default `2h`) |
 | `skip_if_open` | `dir-pattern`: skip directories with open files via `lsof +D` (default `true`) |
 | `skip_if_git_worktree` | `dir-pattern`: skip directories containing a `.git` entry (default `true`) |
+
+### Busy tools
+
+`clean` skips a provider while its tool is active, so a clean never breaks a
+running build or waits on a held lock. The skip reason shows in `clean` output
+and in `clean --json` (`"status": "skipped"`, `"reason"`). A skip is not a
+failure. If the check itself fails, the provider is skipped too.
+
+| Provider | Skipped while |
+|----------|---------------|
+| `go-build`, `go-mod` | a `go` process runs |
+| `cargo` | a `cargo` or `rustc` process runs |
+| `homebrew` | a `brew` process runs |
+| `uv` | `<path>/.lock` is flock-held, or a `uv` process runs |
+
+`clean --json` needs `--force` or `--dry-run` because it cannot prompt.
 
 `dir-pattern` paths must contain a glob character. The provider ignores
 `max_age` and removes every stale match whole regardless of `max_size`, which is
