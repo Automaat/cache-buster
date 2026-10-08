@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Automaat/cache-buster/internal/cache"
 	"github.com/Automaat/cache-buster/internal/config"
 )
 
@@ -116,7 +117,7 @@ func (p *RustupProvider) Clean(ctx context.Context, opts CleanOptions) (CleanRes
 		return CleanResult{Output: overrides}, fmt.Errorf("rustup override list: %w", err)
 	}
 
-	removable, err := removableToolchains(listing, overrides)
+	removable, err := removableToolchains(listing, overrides, p.isLinked)
 	if err != nil {
 		return CleanResult{}, err
 	}
@@ -125,7 +126,10 @@ func (p *RustupProvider) Clean(ctx context.Context, opts CleanOptions) (CleanRes
 	}
 
 	if opts.DryRun {
-		return CleanResult{Output: "would uninstall: " + strings.Join(removable, ", ")}, nil
+		return CleanResult{
+			BytesCleaned: p.projectedBytes(ctx, removable),
+			Output:       "would uninstall: " + strings.Join(removable, ", "),
+		}, nil
 	}
 
 	var removed []string
@@ -144,6 +148,41 @@ func (p *RustupProvider) Clean(ctx context.Context, opts CleanOptions) (CleanRes
 	return p.rustupResult(ctx, current, removed), nil
 }
 
+// isLinked reports whether name is a symlink (made by `rustup toolchain
+// link`) under a configured toolchains dir. It fails closed: a toolchain
+// that cannot be found or inspected counts as linked and is kept.
+func (p *RustupProvider) isLinked(name string) bool {
+	for _, dir := range p.paths {
+		info, err := os.Lstat(filepath.Join(dir, name))
+		if err == nil {
+			return info.Mode()&os.ModeSymlink != 0
+		}
+		if !os.IsNotExist(err) {
+			return true
+		}
+	}
+	return true
+}
+
+// projectedBytes sums the on-disk size of the toolchains a real run would
+// uninstall.
+func (p *RustupProvider) projectedBytes(ctx context.Context, names []string) int64 {
+	var total int64
+	for _, name := range names {
+		for _, dir := range p.paths {
+			path := filepath.Join(dir, name)
+			if _, err := os.Lstat(path); err != nil {
+				continue
+			}
+			if res, err := cache.CalculateSizeContext(ctx, []string{path}); err == nil {
+				total += res.Size
+			}
+			break
+		}
+	}
+	return total
+}
+
 // rustupResult reports what was uninstalled so far and the bytes freed.
 func (p *RustupProvider) rustupResult(ctx context.Context, before int64, removed []string) CleanResult {
 	var freed int64
@@ -159,7 +198,7 @@ func (p *RustupProvider) rustupResult(ctx context.Context, before int64, removed
 // removableToolchains parses `rustup toolchain list` and returns toolchains
 // safe to uninstall. It fails closed: without an identifiable default
 // toolchain nothing is removed.
-func removableToolchains(listing, overrides string) ([]string, error) {
+func removableToolchains(listing, overrides string, linked func(name string) bool) ([]string, error) {
 	pinned := overrideToolchains(overrides)
 	var (
 		names      []string
@@ -178,8 +217,8 @@ func removableToolchains(listing, overrides string) ([]string, error) {
 		names = append(names, name)
 
 		marker := toolchainMarker(fields[1:])
-		// A trailing path marks a linked toolchain: not ours to unlink.
-		if len(fields) > 1 && !strings.HasPrefix(fields[1], "(") {
+		// A linked toolchain points at a user's own build: not ours to unlink.
+		if linked(name) {
 			keep[name] = true
 		}
 		if strings.Contains(marker, "default") {
@@ -208,8 +247,7 @@ func removableToolchains(listing, overrides string) ([]string, error) {
 
 var toolchainNamePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
 
-// toolchainMarker returns the parenthesised suffix of a listing row. A
-// linked toolchain's path is not a marker.
+// toolchainMarker returns the parenthesised suffix of a listing row.
 func toolchainMarker(rest []string) string {
 	if len(rest) == 0 || !strings.HasPrefix(rest[0], "(") {
 		return ""
@@ -226,6 +264,9 @@ func toolchainMarker(rest []string) string {
 func overrideToolchains(overrides string) []string {
 	var pinned []string
 	for line := range strings.SplitSeq(overrides, "\n") {
+		if strings.TrimSpace(line) == "no overrides" {
+			continue
+		}
 		fields := strings.Fields(line)
 		if len(fields) < 2 {
 			continue

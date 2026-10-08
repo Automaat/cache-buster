@@ -109,15 +109,15 @@ Providers are auto-detected — only tools installed on your system appear in th
 | edge | 3G | file-based |
 | vivaldi | 3G | file-based |
 | **ML and test tooling** | | |
-| huggingface (`~/.cache/huggingface/hub` only) | 20G | whole-entry (newest kept) |
-| playwright | 5G | whole-entry |
+| huggingface (disabled by default; `~/.cache/huggingface/hub` only) | 20G | whole-entry (newest kept) |
+| playwright (disabled by default) | 5G | whole-entry |
 | **Other caches** | | |
 | lima | 10G | whole-entry |
 | gh | 1G | file-based |
-| chrome-devtools-mcp | 2G | whole-entry |
+| chrome-devtools-mcp (disabled by default; never evicts `chrome-profile-*`) | 2G | whole-entry |
 | vscode-shipit | 1G | file-based |
 | **Toolchains** | | |
-| rustup (disabled by default; once over the limit uninstalls every toolchain except `stable`, default, active and pinned ones) | 10G | `rustup toolchain uninstall` |
+| rustup (disabled by default; once over the limit uninstalls every toolchain except `stable`, default, active and directory-override ones) | 10G | `rustup toolchain uninstall` |
 
 ## Commands
 
@@ -215,6 +215,7 @@ providers:
 | `min_idle` | `dir-pattern`: minimum idle time, from the newest mtime in the tree (default `2h`) |
 | `skip_if_open` | `dir-pattern`: skip directories with open files via `lsof +D` (default `true`) |
 | `skip_if_git_worktree` | `dir-pattern`: skip directories containing a `.git` entry (default `true`) |
+| `skip_prefixes` | Whole-entry providers never evict entries whose name starts with one of these prefixes; user values add to the built-in ones |
 
 The optional top-level `auto` block configures `cache-buster auto`:
 

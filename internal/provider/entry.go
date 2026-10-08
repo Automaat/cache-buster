@@ -20,6 +20,7 @@ import (
 // always kept.
 type EntryProvider struct {
 	*BaseProvider
+	skipPrefixes []string
 }
 
 // NewEntryProvider creates a provider that deletes whole top-level entries.
@@ -28,7 +29,7 @@ func NewEntryProvider(name string, cfg config.Provider) (*EntryProvider, error) 
 	if err != nil {
 		return nil, err
 	}
-	return &EntryProvider{BaseProvider: base}, nil
+	return &EntryProvider{BaseProvider: base, skipPrefixes: cfg.SkipPrefixes}, nil
 }
 
 type cacheEntry struct {
@@ -67,6 +68,8 @@ func (p *EntryProvider) Clean(ctx context.Context, opts CleanOptions) (CleanResu
 		} else if err := os.RemoveAll(e.path); err != nil {
 			fmt.Fprintf(&output, "error removing %s: %v\n", e.path, err)
 			failed++
+			// RemoveAll may have deleted part of the tree before failing.
+			freed += p.partiallyFreed(ctx, e)
 			continue
 		}
 		freed += e.size
@@ -91,6 +94,26 @@ func (p *EntryProvider) Clean(ctx context.Context, opts CleanOptions) (CleanResu
 	return res, nil
 }
 
+// partiallyFreed returns bytes a failed RemoveAll still deleted. An
+// unmeasurable remainder credits nothing, so freed is never over-reported.
+func (p *EntryProvider) partiallyFreed(ctx context.Context, e cacheEntry) int64 {
+	res, err := cache.CalculateSizeContext(ctx, []string{e.path})
+	if err != nil || res.Size >= e.size {
+		return 0
+	}
+	return e.size - res.Size
+}
+
+// skipped reports whether name matches a configured protected prefix.
+func (p *EntryProvider) skipped(name string) bool {
+	for _, prefix := range p.skipPrefixes {
+		if prefix != "" && strings.HasPrefix(name, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
 func (p *EntryProvider) listEntries(ctx context.Context) (entries []cacheEntry, total int64, err error) {
 	for _, base := range p.paths {
 		dirents, err := os.ReadDir(base)
@@ -103,7 +126,7 @@ func (p *EntryProvider) listEntries(ctx context.Context) (entries []cacheEntry, 
 		for _, d := range dirents {
 			// Lock and bookkeeping entries are neither evictable nor
 			// candidates for the protected newest slot.
-			if strings.HasPrefix(d.Name(), ".") || strings.HasPrefix(d.Name(), "__") {
+			if strings.HasPrefix(d.Name(), ".") || strings.HasPrefix(d.Name(), "__") || p.skipped(d.Name()) {
 				continue
 			}
 			path := filepath.Join(base, d.Name())
