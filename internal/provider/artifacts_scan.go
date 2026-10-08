@@ -54,6 +54,7 @@ type artifactDir struct {
 type project struct {
 	Dir       string
 	root      string
+	alias     string
 	artifacts []*artifactDir
 
 	measured bool
@@ -97,7 +98,7 @@ func (p *ProjectArtifactsProvider) discover(ctx context.Context) (*artifactScan,
 			continue
 		}
 		seen[resolved] = true
-		w := &walker{p: p, scan: scan, root: resolved, seen: seen}
+		w := &walker{p: p, scan: scan, root: resolved, raw: filepath.Clean(root), seen: seen}
 		w.walk(searchCtx, resolved, 0)
 	}
 	if err := ctx.Err(); err != nil {
@@ -149,6 +150,7 @@ type walker struct {
 	p    *ProjectArtifactsProvider
 	scan *artifactScan
 	root string
+	raw  string
 	seen map[string]bool
 }
 
@@ -166,7 +168,7 @@ func (w *walker) walk(ctx context.Context, dir string, depth int) {
 	}
 
 	if arts := w.p.detect(dir, byName); len(arts) > 0 {
-		w.scan.projects = append(w.scan.projects, &project{Dir: dir, root: w.root, artifacts: arts})
+		w.scan.projects = append(w.scan.projects, &project{Dir: dir, root: w.root, alias: w.alias(dir), artifacts: arts})
 	}
 
 	for _, e := range entries {
@@ -184,6 +186,19 @@ func (w *walker) walk(ctx context.Context, dir string, depth int) {
 			w.walk(ctx, child, depth+1)
 		}
 	}
+}
+
+// alias spells dir through the configured root when that differs from the
+// resolved one, because a process command line may use either spelling.
+func (w *walker) alias(dir string) string {
+	if w.raw == w.root {
+		return ""
+	}
+	rel, err := filepath.Rel(w.root, dir)
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(w.raw, rel)
 }
 
 // detect returns the artifact directories of one project directory. Every

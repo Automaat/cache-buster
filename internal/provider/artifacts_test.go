@@ -1241,7 +1241,7 @@ func TestMatchKind_VersionedPython(t *testing.T) {
 	}{
 		{"/proj/.venv/bin/python3.12 serve.py", kindPython, "python3.12"},
 		{"pip3.12 install x", kindPython, "pip3.12"},
-		{`C:\py\pythonw.exe app.py`, kindPython, "pythonw"},
+		{"pythonw.exe app.py", kindPython, "pythonw"},
 		{"python3.12 serve.py", kindNode, ""},
 		{"cargo build", kindPython, ""},
 		{"/usr/bin/pythonista", kindPython, ""},
@@ -1266,4 +1266,43 @@ func TestProjectArtifacts_VersionedPythonDaemonBlocksVenv(t *testing.T) {
 
 	assert.DirExists(t, h.path("svc", ".venv"))
 	assert.Contains(t, res.Output, "python3.12 is running")
+}
+
+func TestProjectArtifacts_CommandLineThroughSymlinkedRootBlocks(t *testing.T) {
+	resolved := evalDirOf(t, t.TempDir())
+	nodeProject(t, filepath.Join(resolved, "zz"), 10, 90*day)
+	link := filepath.Join(t.TempDir(), "link")
+	if err := os.Symlink(resolved, link); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	p, err := NewProjectArtifactsProvider("project-artifacts", config.Provider{
+		Type: config.TypeProjectArtifacts, Paths: []string{link}, MaxSize: "1K",
+	})
+	require.NoError(t, err)
+	p.home = filepath.Join(t.TempDir(), "home")
+	p.openCheck = func(context.Context, string) (bool, error) { return false, nil }
+	p.processes = func(context.Context) ([]toolProcess, error) {
+		return []toolProcess{{Tool: "node", CommandLine: "node " + filepath.Join(link, "zz", "server.js"), Cwd: "/nowhere"}}, nil
+	}
+
+	res, err := p.Clean(context.Background(), CleanOptions{Mode: CleanModeFull})
+
+	require.NoError(t, err)
+	assert.DirExists(t, filepath.Join(resolved, "zz", "node_modules"))
+	assert.Contains(t, res.Output, "node is running")
+}
+
+func evalDirOf(t *testing.T, dir string) string {
+	t.Helper()
+	resolved, err := filepath.EvalSymlinks(dir)
+	require.NoError(t, err)
+	return resolved
+}
+
+func TestProjectArtifacts_MaxDepthAboveLimitIsRejected(t *testing.T) {
+	_, err := NewProjectArtifactsProvider("project-artifacts", config.Provider{
+		Type: config.TypeProjectArtifacts, Paths: []string{t.TempDir()}, MaxSize: "1G",
+		MaxDepth: config.MaxProjectDepth + 1,
+	})
+	require.ErrorContains(t, err, "max_depth")
 }

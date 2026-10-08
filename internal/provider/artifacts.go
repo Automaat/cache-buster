@@ -69,6 +69,9 @@ func NewProjectArtifactsProvider(name string, cfg config.Provider) (*ProjectArti
 		return nil, err
 	}
 	depth := cfg.MaxDepth
+	if depth > config.MaxProjectDepth {
+		return nil, fmt.Errorf("max_depth must be at most %d, got %d", config.MaxProjectDepth, depth)
+	}
 	if depth <= 0 {
 		depth = defaultArtifactDepth
 	}

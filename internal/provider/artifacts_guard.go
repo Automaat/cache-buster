@@ -255,7 +255,7 @@ func (ps *pass) busyReason(c *candidate) string {
 			continue
 		}
 		switch {
-		case foldContains(proc.CommandLine, proj.Dir):
+		case foldContains(proc.CommandLine, proj.Dir), foldContains(proc.CommandLine, proj.alias):
 			return tool + " is running in the project"
 		case proc.CwdUnknown:
 			return tool + " is running and its directory cannot be read"
