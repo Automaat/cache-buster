@@ -19,11 +19,7 @@ func StillLow(report Report, cfg config.Auto) (bool, error) {
 	if report.DryRun {
 		return false, nil
 	}
-	tier, err := ChooseTier(report.End, cfg)
-	if err != nil {
-		return false, err
-	}
-	return tier != TierOK, nil
+	return BelowFloor(report.End, cfg)
 }
 
 // NotifyIfStillLow sends one notification when the run left free space under

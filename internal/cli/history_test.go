@@ -238,3 +238,14 @@ func TestStatus_ListsUnmanagedDirsFromInjectedScan(t *testing.T) {
 	require.NoError(t, err)
 	assert.NotContains(t, noScan, "unmanaged")
 }
+
+func TestAuto_FreeSpaceReadFailureIsStillRecorded(t *testing.T) {
+	f := newAutoFixture(t, 100*autoGiB, "")
+	f.env.free = func() (auto.FreeSpace, error) { return auto.FreeSpace{}, os.ErrInvalid }
+
+	require.Error(t, runAutoWithLoader(t.Context(), f.loader, f.env, false))
+
+	runs := readRecords(t, f)
+	require.Len(t, runs, 1)
+	assert.Contains(t, runs[0].Error, "read free space")
+}

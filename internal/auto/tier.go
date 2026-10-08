@@ -89,10 +89,23 @@ func clampInt64[T statfsInt](v T) int64 {
 	return int64(v)
 }
 
+// BelowFloor reports whether free space is under min_free or the min_free_pct
+// floor, ignoring the fixed critical level.
+func BelowFloor(fs FreeSpace, cfg config.Auto) (bool, error) {
+	minFree, err := cfg.MinFreeBytes()
+	if err != nil {
+		return false, err
+	}
+	if fs.Free < minFree {
+		return true, nil
+	}
+	return cfg.MinFreePct > 0 && fs.Total > 0 && float64(fs.Free)*100 < cfg.MinFreePct*float64(fs.Total), nil
+}
+
 // ChooseTier maps free space to a pressure tier. Free space under either the
 // absolute or the percentage floor is low; under CriticalFree it is critical.
 func ChooseTier(fs FreeSpace, cfg config.Auto) (Tier, error) {
-	minFree, err := cfg.MinFreeBytes()
+	below, err := BelowFloor(fs, cfg)
 	if err != nil {
 		return TierOK, err
 	}
@@ -100,9 +113,7 @@ func ChooseTier(fs FreeSpace, cfg config.Auto) (Tier, error) {
 	switch {
 	case fs.Free < CriticalFree:
 		return TierCritical, nil
-	case fs.Free < minFree:
-		return TierLow, nil
-	case cfg.MinFreePct > 0 && fs.Total > 0 && float64(fs.Free)*100 < cfg.MinFreePct*float64(fs.Total):
+	case below:
 		return TierLow, nil
 	default:
 		return TierOK, nil

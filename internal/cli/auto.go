@@ -17,6 +17,9 @@ import (
 // autoRunTimeout caps one unattended run so a stuck provider cannot pile up runs.
 const autoRunTimeout = 45 * time.Minute
 
+// notifyTimeout keeps a hung notifier from holding the run lock.
+const notifyTimeout = 10 * time.Second
+
 // AutoCmd trims caches based on free disk space.
 var AutoCmd = &cobra.Command{
 	Use:   "auto",
@@ -189,13 +192,12 @@ func runAutoWithLoader(ctx context.Context, loader *config.Loader, env autoEnv, 
 // Neither failure changes the run's outcome: they are reported and the run
 // keeps its own result.
 func (e autoEnv) recordRun(ctx context.Context, cfg config.Auto, report auto.Report, runErr error) {
-	if report.Start.Total == 0 && report.Start.Free == 0 {
-		return
-	}
 	notified := false
 	if runErr == nil {
 		var err error
-		notified, err = auto.NotifyIfStillLow(ctx, e.notify, report, cfg)
+		notifyCtx, cancel := context.WithTimeout(ctx, notifyTimeout)
+		defer cancel()
+		notified, err = auto.NotifyIfStillLow(notifyCtx, e.notify, report, cfg)
 		if err != nil {
 			fmt.Fprintf(e.out, "warning: %v\n", err)
 		}

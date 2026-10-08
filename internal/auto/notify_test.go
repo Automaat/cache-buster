@@ -5,6 +5,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/Automaat/cache-buster/internal/config"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -74,4 +75,16 @@ func TestOsascriptNotifier_PassesTextAsArguments(t *testing.T) {
 	for _, a := range gotArgs[:len(gotArgs)-2] {
 		assert.NotContains(t, a, "evil", "script text must not embed the message")
 	}
+}
+
+func TestNotifyIfStillLow_UsesConfiguredFloorNotCriticalLevel(t *testing.T) {
+	var sent []sentNote
+	cfg := config.Auto{MinFree: "2G", MinFreePct: 0}
+	report := Report{End: FreeSpace{Free: 4 * gib, Total: 1000 * gib}}
+
+	got, err := NotifyIfStillLow(t.Context(), noteRecorder(&sent, nil), report, cfg)
+
+	require.NoError(t, err)
+	assert.False(t, got, "4 GiB is above min_free, so the user asked for no warning")
+	assert.Empty(t, sent)
 }
