@@ -169,11 +169,11 @@ func cadenceFindings(in Input) []Finding {
 
 	tick := Finding{Area: "last tick"}
 	switch {
-	case in.Tick.Time.IsZero() && in.Agent.Installed:
+	case (in.Tick.Time.IsZero() || in.Tick.Time.After(in.Now)) && in.Agent.Installed:
 		tick.Level = Warn
 		tick.Message = "no tick recorded: the installed agent may still run the old 30-minute auto cadence"
 		tick.Hint = "run: bilgie install-agent"
-	case in.Tick.Time.IsZero():
+	case in.Tick.Time.IsZero() || in.Tick.Time.After(in.Now):
 		tick.Level = Note
 		tick.Message = "no tick recorded yet"
 	default:
@@ -190,7 +190,7 @@ func cadenceFindings(in Input) []Finding {
 }
 
 func nextPass(in Input, interval time.Duration) string {
-	if in.Pass.Time.IsZero() {
+	if in.Pass.Time.IsZero() || in.Pass.Time.After(in.Now) {
 		return "at the next tick (no pass recorded yet)"
 	}
 	due := in.Pass.Time.Add(interval)
