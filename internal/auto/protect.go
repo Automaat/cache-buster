@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+
+	"github.com/Automaat/cache-buster/internal/config"
 )
 
 // protectedRoots returns the home-relative locations auto never touches.
@@ -31,6 +33,61 @@ func protectedElement(part string) bool {
 
 // isProtected reports whether path is, is inside, or contains protected data.
 func isProtected(path, home string, scanTree bool) bool {
+	return isProtectedWith(path, home, nil, scanTree)
+}
+
+// ProtectedPaths returns the absolute protected locations: the built-in
+// defaults and the configured entries, with ~ expanded.
+func ProtectedPaths(cfg *config.Config, home string) []string {
+	var out []string
+	for _, entry := range config.MergeProtected(cfg.Protected) {
+		if rest, ok := strings.CutPrefix(entry, "~/"); ok {
+			if home == "" {
+				continue
+			}
+			entry = filepath.Join(home, rest)
+		}
+		if !filepath.IsAbs(entry) {
+			continue
+		}
+		out = append(out, filepath.Clean(entry))
+	}
+	return out
+}
+
+// insideGitCheckout reports whether path is a git checkout or worktree root
+// or lies inside one. The walk stops at home and the filesystem root, so a
+// dotfiles repository in home does not protect everything below it.
+func insideGitCheckout(path, home string) bool {
+	var homes []string
+	if home != "" {
+		homes = withoutDataAlias([]string{filepath.Clean(home)})
+		if resolved, err := filepath.EvalSymlinks(home); err == nil {
+			homes = append(homes, withoutDataAlias([]string{resolved})...)
+		}
+	}
+	isHome := func(dir string) bool {
+		return slices.ContainsFunc(homes, func(h string) bool { return strings.EqualFold(h, dir) })
+	}
+	for _, start := range withoutDataAlias([]string{filepath.Clean(path)}) {
+		for dir := start; ; dir = filepath.Dir(dir) {
+			if dir == string(filepath.Separator) || dir == "." || isHome(dir) {
+				break
+			}
+			if _, err := os.Lstat(filepath.Join(dir, ".git")); err == nil {
+				return true
+			}
+			if filepath.Dir(dir) == dir {
+				break
+			}
+		}
+	}
+	return false
+}
+
+// isProtectedWith is isProtected plus extra protected roots, such as the
+// configured protected list.
+func isProtectedWith(path, home string, extra []string, scanTree bool) bool {
 	candidates := []string{filepath.Clean(path)}
 	if resolved, err := filepath.EvalSymlinks(path); err == nil {
 		candidates = append(candidates, resolved)
@@ -38,7 +95,7 @@ func isProtected(path, home string, scanTree bool) bool {
 	candidates = withoutDataAlias(candidates)
 
 	var roots []string
-	for _, root := range protectedRoots(home) {
+	for _, root := range append(protectedRoots(home), extra...) {
 		roots = append(roots, root)
 		if resolved, err := filepath.EvalSymlinks(root); err == nil {
 			roots = append(roots, resolved)
@@ -47,7 +104,7 @@ func isProtected(path, home string, scanTree bool) bool {
 	roots = withoutDataAlias(roots)
 
 	for _, p := range candidates {
-		if p == string(filepath.Separator) || isXcodeArchives(p) {
+		if p == string(filepath.Separator) || isXcodeArchives(p) || insideGitCheckout(p, home) {
 			return true
 		}
 		for part := range strings.SplitSeq(p, string(filepath.Separator)) {
