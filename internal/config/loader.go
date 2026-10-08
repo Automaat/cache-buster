@@ -67,7 +67,8 @@ func (l *Loader) Load() (*Config, error) {
 	}
 
 	// Merge user overrides on top of defaults, field by field.
-	for name, userP := range userCfg.Providers {
+	for name := range userCfg.Providers {
+		userP := userCfg.Providers[name]
 		defaultP, hasDefault := cfg.Providers[name]
 		if !hasDefault {
 			// New provider not in defaults: use as-is; do not auto-enable when `enabled` is omitted.
@@ -89,6 +90,18 @@ func (l *Loader) Load() (*Config, error) {
 		}
 		if l.v.IsSet("providers." + name + ".enabled") {
 			merged.Enabled = userP.Enabled
+		}
+		if l.v.IsSet("providers." + name + ".type") {
+			merged.Type = userP.Type
+		}
+		if l.v.IsSet("providers." + name + ".min_idle") {
+			merged.MinIdle = userP.MinIdle
+		}
+		if l.v.IsSet("providers." + name + ".skip_if_open") {
+			merged.SkipIfOpen = userP.SkipIfOpen
+		}
+		if l.v.IsSet("providers." + name + ".skip_if_git_worktree") {
+			merged.SkipIfGitWorktree = userP.SkipIfGitWorktree
 		}
 		cfg.Providers[name] = merged
 	}
