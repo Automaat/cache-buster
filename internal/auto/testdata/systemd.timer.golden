@@ -4,7 +4,7 @@ Description=Run bilgie automatic cache cleanup every 45m0s
 [Timer]
 OnActiveSec=1min
 OnUnitInactiveSec=2700s
-AccuracySec=1min
+AccuracySec=10s
 Unit=bilgie.service
 
 [Install]

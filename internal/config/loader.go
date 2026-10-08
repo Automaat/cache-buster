@@ -176,11 +176,26 @@ func unionStrings(base, extra []string) []string {
 
 // mergeAuto applies the user's auto settings over the defaults, field by field.
 func (l *Loader) mergeAuto(cfg, userCfg *Config) {
-	if l.v.IsSet("auto.interval") {
-		cfg.Auto.Interval = userCfg.Auto.Interval
-	}
-	if l.v.IsSet("auto.min_free") {
-		cfg.Auto.MinFree = userCfg.Auto.MinFree
+	for _, f := range []struct {
+		key  string
+		dst  *string
+		user string
+	}{
+		{"interval", &cfg.Auto.Interval, userCfg.Auto.Interval},
+		{"tick_interval", &cfg.Auto.TickInterval, userCfg.Auto.TickInterval},
+		{"min_free", &cfg.Auto.MinFree, userCfg.Auto.MinFree},
+		{"min_free_cap", &cfg.Auto.MinFreeCap, userCfg.Auto.MinFreeCap},
+		{"critical_free", &cfg.Auto.CriticalFree, userCfg.Auto.CriticalFree},
+		{"emergency_free", &cfg.Auto.EmergencyFree, userCfg.Auto.EmergencyFree},
+		{"hysteresis", &cfg.Auto.Hysteresis, userCfg.Auto.Hysteresis},
+		{"low_cooldown", &cfg.Auto.LowCooldown, userCfg.Auto.LowCooldown},
+		{"critical_cooldown", &cfg.Auto.CriticalCooldown, userCfg.Auto.CriticalCooldown},
+		{"forecast", &cfg.Auto.Forecast, userCfg.Auto.Forecast},
+		{"notify_cooldown", &cfg.Auto.NotifyCooldown, userCfg.Auto.NotifyCooldown},
+	} {
+		if l.v.IsSet("auto." + f.key) {
+			*f.dst = f.user
+		}
 	}
 	if l.v.IsSet("auto.min_free_pct") {
 		cfg.Auto.MinFreePct = userCfg.Auto.MinFreePct

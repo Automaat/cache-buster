@@ -180,7 +180,7 @@ func systemdEnvQuote(s string) string {
 	return `"` + r.Replace(s) + `"`
 }
 
-// RenderSystemdService builds the oneshot unit that runs `exe auto`.
+// RenderSystemdService builds the oneshot unit that runs `exe tick`.
 func RenderSystemdService(exe, home, logPath string) ([]byte, error) {
 	if strings.ContainsAny(logPath, "\n\r") || strings.ContainsAny(exe, "\n\r") {
 		return nil, fmt.Errorf("paths must not contain line breaks")
@@ -191,7 +191,7 @@ Description=%s automatic cache cleanup
 
 [Service]
 Type=oneshot
-ExecStart=%s auto
+ExecStart=%s tick
 Environment=%s
 Nice=10
 IOSchedulingClass=idle
@@ -215,7 +215,7 @@ Description=Run %s automatic cache cleanup every %s
 [Timer]
 OnActiveSec=1min
 OnUnitInactiveSec=%ds
-AccuracySec=1min
+AccuracySec=10s
 Unit=%s.service
 
 [Install]

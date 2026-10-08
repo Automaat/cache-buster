@@ -117,7 +117,7 @@ func xmlText(s string) string {
 	return esc.String()
 }
 
-// RenderTaskXML builds the Task Scheduler definition that runs `exe auto`
+// RenderTaskXML builds the Task Scheduler definition that runs `exe tick`
 // every interval from start on, at below-normal priority and only while the
 // user is logged on, so it needs no stored password.
 func RenderTaskXML(exe string, interval time.Duration, start time.Time) (string, error) {
@@ -160,7 +160,7 @@ func RenderTaskXML(exe string, interval time.Duration, start time.Time) (string,
   <Actions Context="Author">
     <Exec>
       <Command>%s</Command>
-      <Arguments>auto</Arguments>
+      <Arguments>tick</Arguments>
     </Exec>
   </Actions>
 </Task>

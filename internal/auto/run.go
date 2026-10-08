@@ -44,6 +44,14 @@ type Deps struct {
 	// Verbose prints every entry a provider would remove instead of the
 	// concise per-provider summary.
 	Verbose bool
+	// MinTier raises the pass to at least this tier; the tick sets it to its
+	// hysteresis-settled tier so a pass does not ease off earlier than the
+	// tick decided.
+	MinTier Tier
+	// Predicted marks a pass started by the falling-trend forecast: it runs
+	// as the low tier even though space is still above the threshold, and
+	// does not stop for "recovered" before any provider ran.
+	Predicted bool
 }
 
 // Result is one provider's outcome.
@@ -108,7 +116,7 @@ func (r Report) Err() error {
 }
 
 // candidate is a provider auto may run. A sweep is a disabled
-// directory-pattern provider that runs only at the critical tier.
+// directory-pattern provider that runs only at the emergency tier.
 type candidate struct {
 	cfg   config.Provider
 	name  string
@@ -122,9 +130,14 @@ func Run(ctx context.Context, cfg *config.Config, dryRun bool, deps Deps) (Repor
 	if err != nil {
 		return Report{}, fmt.Errorf("read free space: %w", err)
 	}
-	tier, err := ChooseTier(start, cfg.Auto)
+	limits, err := cfg.Auto.Limits()
 	if err != nil {
 		return Report{}, err
+	}
+	th := ThresholdsFor(start.Total, limits)
+	tier := max(th.Raw(start.Free), deps.MinTier)
+	if deps.Predicted {
+		tier = max(tier, TierLow)
 	}
 
 	rep := Report{Start: start, End: start, Tier: tier, DryRun: dryRun}
@@ -149,13 +162,13 @@ func Run(ctx context.Context, cfg *config.Config, dryRun bool, deps Deps) (Repor
 			return rep, err
 		}
 
-		current := currentTier(cfg, tier, deps, &rep)
-		if tier != TierOK && current == TierOK {
+		current := currentTier(th, tier, deps, &rep)
+		if tier != TierOK && current == TierOK && !deps.Predicted {
 			rep.Recovered = true
 			fmt.Fprintf(deps.Out, "free space recovered: %s free, stopping\n", size.FormatSize(rep.End.Free))
 			break
 		}
-		if c.sweep && current != TierCritical {
+		if c.sweep && current != TierEmergency {
 			continue
 		}
 
@@ -196,7 +209,7 @@ func blocksOf(results []Result) []report.Block {
 
 // currentTier rereads free space so a run stops once enough was freed. An
 // unreadable value keeps the starting tier.
-func currentTier(cfg *config.Config, start Tier, deps Deps, rep *Report) Tier {
+func currentTier(th Thresholds, start Tier, deps Deps, rep *Report) Tier {
 	if start == TierOK {
 		return start
 	}
@@ -205,11 +218,7 @@ func currentTier(cfg *config.Config, start Tier, deps Deps, rep *Report) Tier {
 		return start
 	}
 	rep.End = now
-	tier, err := ChooseTier(now, cfg.Auto)
-	if err != nil {
-		return start
-	}
-	return tier
+	return th.Settle(start, now.Free)
 }
 
 func dryRunSuffix(dryRun bool) string {
@@ -220,7 +229,7 @@ func dryRunSuffix(dryRun bool) string {
 }
 
 // candidates lists the providers for a tier, cheapest to rebuild first.
-// At the critical tier the stale-directory sweeps go first because they free
+// At the emergency tier the stale-directory sweeps go first because they free
 // the most. docker-volumes is never listed.
 func candidates(cfg *config.Config, tier Tier) []candidate {
 	var sweeps, regular []string
@@ -235,7 +244,7 @@ func candidates(cfg *config.Config, tier Tier) []candidate {
 		case pc.Enabled:
 			byName[name] = candidate{name: name, cfg: pc}
 			regular = append(regular, name)
-		case pc.Type == config.TypeDirPattern && tier == TierCritical:
+		case pc.Type == config.TypeDirPattern && tier == TierEmergency:
 			byName[name] = candidate{name: name, cfg: pc, sweep: true}
 			sweeps = append(sweeps, name)
 		}
