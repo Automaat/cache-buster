@@ -18,6 +18,7 @@ var busyProcesses = map[string][]string{
 	"go-mod":   {"go"},
 	"homebrew": {"brew"},
 	"cargo":    {"cargo", "rustc"},
+	"gradle":   {"gradle", "gradlew"},
 	"rustup":   {"rustup", "cargo", "rustc"},
 	"uv":       {"uv"},
 }
@@ -170,7 +171,10 @@ func (g *busyGuard) busyReason(ctx context.Context) string {
 }
 
 // toolAliases maps a sibling binary to the tool it belongs to.
-var toolAliases = map[string]string{"uvx": "uv"}
+var toolAliases = map[string]string{
+	"uvx": "uv",
+	"org.gradle.launcher.daemon.bootstrap.GradleDaemon": "gradle",
+}
 
 // matchProcess reports which wanted tool a process command line involves.
 // Any token whose basename is the tool counts, wherever it sits (wrappers,

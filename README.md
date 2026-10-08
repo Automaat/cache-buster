@@ -112,25 +112,25 @@ Providers are auto-detected — only tools installed on your system appear in th
 |----------|---------------|--------------|
 | **Go** | | |
 | go-build | 10G | `go clean -cache` |
-| go-mod | 5G | `go clean -modcache` |
+| go-mod | 5G | smart: whole `module@version` directories, never `cache/download`; full: `go clean -modcache` |
 | **JavaScript** | | |
-| npm | 3G | `npm cache clean --force` |
-| yarn | 2G | `yarn cache clean` |
-| pnpm | 5G | `pnpm store prune` |
+| npm | 3G | smart: `_cacache` file by file (then `npm cache verify`), each `_npx/<hash>` whole; full: `npm cache clean --force` |
+| yarn | 2G | smart: whole `v*/<package>` directories; full: `yarn cache clean` |
+| pnpm | 5G | smart: store files (content-addressed); full: `pnpm store prune` |
 | **Python** | | |
 | uv | 4G | file-based |
 | pip | 3G | `pip cache purge` |
 | **Rust** | | |
-| cargo | 5G | file-based |
+| cargo | 5G | `registry/cache` `.crate` files by age, whole `registry/src/<index>/<crate>`, `git/checkouts/*/*` and `git/db/*` directories; `registry/index` untouched |
 | **Java** | | |
-| gradle | 10G | file-based |
+| gradle | 10G | whole top-level `caches/*` directories |
 | **Apple** | | |
-| xcode-deriveddata | 20G | file-based |
-| xcode-archives | 10G | file-based |
+| xcode-deriveddata | 20G | whole project directories |
+| xcode-archives | 10G | whole `.xcarchive` bundles |
 | ios-simulator | 10G | `xcrun simctl delete unavailable` |
 | **Tools** | | |
 | homebrew | 5G | `brew cleanup -s` |
-| mise | 8G | `mise prune` |
+| mise | 8G | smart: `downloads` files; installs are never trimmed; full: `mise prune` |
 | docker | 50G | `docker system prune -af` |
 | docker-volumes (disabled by default; ignores max_age) | 50G | `docker volume prune -f` |
 | jetbrains | 3G | file-based |
@@ -319,6 +319,23 @@ Entries must be literal paths, absolute or starting with `~/`: globs, `.`/`..` e
 effect. `auto` also skips any path that holds a `.git` entry (a git checkout or worktree), anything under a
 `worktrees` directory, and never prunes Docker volumes (Docker Desktop keeps them inside its VM image).
 
+### Whole-unit trees
+
+Some caches hold trees that are only valid complete: an installed package under
+`~/.npm/_npx`, an extracted crate under `~/.cargo/registry/src` (cargo trusts its
+`.cargo-ok` marker), a Go module under `pkg/mod`. `npm`, `cargo`, `go-mod`, `yarn`,
+`gradle`, `mise`, `xcode-deriveddata` and `xcode-archives` never delete inside such a
+tree. Independent files (`_cacache`, `.crate` archives, mise `downloads`) are trimmed
+by age, then oldest first. Trees go whole, oldest first by newest file mtime, and only while
+over `max_size`; `max_age` does not apply to them because mtime records install time, not use.
+`max_size` counts only what the provider may delete, so untouched parts such as
+`registry/index` do not count.
+
+A tree is kept when it is the newest of its pattern, was modified in the last 2 hours or is named
+on the command line of a running process. A tree is first renamed aside and then deleted, so it is
+whole or gone; a leftover `.bilgie-trash-*` directory from a failed delete is removed on the next run.
+Dot entries are ignored. In full mode providers with a `clean_cmd` run it.
+
 ### Busy tools
 
 `clean` skips a provider while its tool is active, so a clean never breaks a
@@ -330,6 +347,7 @@ failure. If the check itself fails, the provider is skipped too.
 |----------|---------------|
 | `go-build`, `go-mod` | a `go` process runs |
 | `cargo` | a `cargo` or `rustc` process runs |
+| `gradle` | a `gradle` or `gradlew` process, or a Gradle daemon, runs |
 | `homebrew` | a `brew` process runs |
 | `uv` | `<path>/.lock` is flock-held, or a `uv` process runs |
 

@@ -47,7 +47,7 @@ in `appname.Legacy` and are used only by `migrate` and by the legacy cleanup in 
 
 1. Add default config in `internal/config/defaults.go`; spell cache-root paths with `Platform` helpers (`p.cache`, `p.data`) and list OS-specific providers in `providerOSes` (`internal/config/platform.go`)
 2. For command-based providers: set `clean_cmd` field
-3. For file-based providers (no CLI): add to `fileBasedProviders` in `registry.go`
+3. For file-based providers (no CLI): add to `fileBasedProviders` in `registry.go`; for caches with trees that are only valid whole (installed packages, extracted crates, bundles) add a `treeSpecs` entry in `tree.go` instead, so smart clean never deletes inside a tree
 4. Test size calculation and clean operation
 5. Verify `Available()` returns correct result
 

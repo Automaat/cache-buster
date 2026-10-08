@@ -8,11 +8,7 @@ import (
 
 // fileBasedProviders lists providers that clean by deleting files.
 var fileBasedProviders = map[string]bool{
-	"uv":                true,
-	"xcode-deriveddata": true,
-	"xcode-archives":    true,
-	"cargo":             true,
-	"gradle":            true,
+	"uv": true,
 
 	"edge":          true,
 	"vivaldi":       true,
@@ -41,6 +37,10 @@ func NewProvider(name string, cfg config.Provider) (Provider, error) {
 
 	if name == "docker-volumes" {
 		return NewDockerVolumesProvider(name, cfg)
+	}
+
+	if spec, ok := treeSpecs[name]; ok {
+		return NewTreeProvider(name, cfg, spec)
 	}
 
 	if entryBasedProviders[name] {
