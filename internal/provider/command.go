@@ -35,18 +35,9 @@ func NewCommandProvider(name string, cfg config.Provider) (*CommandProvider, err
 		return nil, fmt.Errorf("invalid clean_cmd: %w", err)
 	}
 
-	timeout := DefaultCleanTimeout
-	if cfg.CleanTimeout != "" {
-		if strings.TrimSpace(cfg.CleanTimeout) == "" {
-			return nil, fmt.Errorf("clean_timeout must not be blank")
-		}
-		timeout, err = config.ParseDuration(cfg.CleanTimeout)
-		if err != nil {
-			return nil, fmt.Errorf("parse clean_timeout: %w", err)
-		}
-		if timeout <= 0 {
-			return nil, fmt.Errorf("clean_timeout must be positive, got %q", cfg.CleanTimeout)
-		}
+	timeout, err := parseCleanTimeout(cfg.CleanTimeout)
+	if err != nil {
+		return nil, err
 	}
 
 	return &CommandProvider{
@@ -105,4 +96,21 @@ func (p *CommandProvider) fullClean(ctx context.Context, opts CleanOptions) (Cle
 	}
 
 	return runMeasuredCleanTimeout(ctx, p.name, p.cmdArgs, p.CurrentSize, p.timeout)
+}
+
+func parseCleanTimeout(raw string) (time.Duration, error) {
+	if raw == "" {
+		return DefaultCleanTimeout, nil
+	}
+	if strings.TrimSpace(raw) == "" {
+		return 0, fmt.Errorf("clean_timeout must not be blank")
+	}
+	timeout, err := config.ParseDuration(raw)
+	if err != nil {
+		return 0, fmt.Errorf("parse clean_timeout: %w", err)
+	}
+	if timeout <= 0 {
+		return 0, fmt.Errorf("clean_timeout must be positive, got %q", raw)
+	}
+	return timeout, nil
 }
