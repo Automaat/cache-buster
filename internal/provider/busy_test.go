@@ -132,6 +132,63 @@ func TestExcludeSelf(t *testing.T) {
 	})
 }
 
+func TestExcludeSelf_WrapperForms(t *testing.T) {
+	wanted := []string{"cargo", "rustc"}
+	tests := []struct {
+		name    string
+		wrapper string
+		self    string
+		windows bool
+		busy    bool
+	}{
+		{"quoted path with spaces", `sh -c 'bilgie --config "/x y/c.yaml" clean cargo'`, "bilgie --config /x y/c.yaml clean cargo", false, false},
+		{"padded whitespace", `bash -c "bilgie  clean  cargo"`, "bilgie clean cargo", false, false},
+		{"nested wrappers", `sudo sh -c 'bash -c "bilgie  clean cargo"'`, "bilgie clean cargo", false, false},
+		{"env assignment", "env VAR=x bilgie clean cargo", "bilgie clean cargo", false, false},
+		{"sudo", "sudo -u bob bilgie clean cargo", "bilgie clean cargo", false, false},
+		{"backslash escape", `sh -c bilgie\ clean\ cargo`, "bilgie clean cargo", false, false},
+		{"absolute exe in wrapper", "sh -c '/usr/local/bin/bilgie clean cargo'", "bilgie clean cargo", false, false},
+		{"cargo inside wrapper stays busy", `sh -c 'cargo run -- clean cargo'`, "bilgie clean cargo", false, true},
+		{"trailing semicolon", "sh -c 'bilgie clean cargo; echo done'", "bilgie clean cargo", false, false},
+		{"subshell parens", "sh -c '(bilgie clean cargo)'", "bilgie clean cargo", false, false},
+		{"background ampersand", "sh -c 'bilgie clean cargo&'", "bilgie clean cargo", false, false},
+		{"blank quoted word", "sh -c \"bilgie clean ' ' cargo\"", "bilgie clean cargo", false, false},
+		{"windows exe path with spaces", `cmd /c "C:\Program Files\bilgie.exe" clean cargo`, `"C:\Program Files\bilgie.exe" clean cargo`, true, false},
+		{"tool before bilgie behind sudo stays busy", "sudo cargo run -- bilgie clean cargo", "bilgie clean cargo", false, true},
+		{"tool before bilgie behind env stays busy", "env FOO=1 cargo install foo bilgie clean cargo", "bilgie clean cargo", false, true},
+		{"other program with same args stays busy", `sh -c 'go run . clean cargo'`, "bilgie clean cargo", false, true},
+		{"unterminated quote stays busy", `sh -c 'bilgie clean cargo`, "bilgie clean cargo", false, true},
+		{"unterminated nested quote stays busy", `sh -c "bilgie clean 'cargo"`, "bilgie clean cargo", false, true},
+		{"trailing backslash stays busy", `sh -c "bilgie clean cargo" \`, "bilgie clean cargo", false, true},
+		{"windows backslash path", `cmd /c "C:\Tools\bilgie.exe" --config "C:\x y\c.yaml" clean cargo`, `C:\Tools\bilgie.exe --config C:\x y\c.yaml clean cargo`, true, false},
+		{"windows exe suffix", `cmd /c bilgie.exe clean cargo`, `bilgie clean cargo`, true, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			procs := []osshim.Process{
+				{PID: 50, PPID: 0, CommandLine: tt.wrapper},
+				{PID: 60, PPID: 50, CommandLine: tt.self},
+			}
+			lines := excludeSelfFor(procs, 60, wanted, tt.windows)
+			g := fakeGuard(lines, nil, nil)
+			if tt.busy {
+				assert.Equal(t, "cargo is running", g.busyReason(context.Background()))
+			} else {
+				assert.Empty(t, lines)
+			}
+		})
+	}
+}
+
+func TestExcludeSelf_LinuxPaddedWrapper(t *testing.T) {
+	procs := []osshim.Process{
+		{PID: 50, PPID: 0, CommandLine: `bash -c bilgie  clean  cargo bash`, Args: `bash -c "bilgie  clean  cargo"`},
+		{PID: 60, PPID: 50, CommandLine: "bilgie clean cargo bilgie", Args: "bilgie clean cargo"},
+	}
+	assert.Empty(t, excludeSelfFor(procs, 60, []string{"cargo"}, false))
+}
+
 func TestProcessLister_OmitsOwnProcess(t *testing.T) {
 	lines, err := processLister([]string{"go"})(context.Background())
 	require.NoError(t, err)

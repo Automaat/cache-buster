@@ -3,6 +3,7 @@ package provider
 import (
 	"errors"
 	"fmt"
+	"os"
 
 	"github.com/smykla-skalski/bilgie/internal/config"
 )
@@ -63,6 +64,10 @@ func newProvider(name string, cfg config.Provider) (Provider, error) {
 		return NewDirPatternProvider(name, cfg)
 	}
 
+	if cfg.Type == config.TypeProjectArtifacts {
+		return NewProjectArtifactsProvider(name, cfg)
+	}
+
 	if name == "docker" {
 		return NewDockerProvider(name, cfg)
 	}
@@ -108,6 +113,7 @@ func LoadProviders(cfg *config.Config) ([]Provider, error) {
 		if err != nil {
 			return nil, err
 		}
+		applyProtected(p, cfg)
 
 		providers = append(providers, p)
 	}
@@ -122,5 +128,21 @@ func LoadProvider(name string, cfg *config.Config) (Provider, error) {
 		return nil, &LoadError{Name: name, Err: errors.New("not found")}
 	}
 
-	return NewProvider(name, provCfg)
+	p, err := NewProvider(name, provCfg)
+	if err != nil {
+		return nil, err
+	}
+	applyProtected(p, cfg)
+	return p, nil
+}
+
+// applyProtected hands the configured protected paths to providers that
+// enforce them themselves.
+func applyProtected(p Provider, cfg *config.Config) {
+	aware, ok := p.(ProtectionAware)
+	if !ok {
+		return
+	}
+	home, _ := os.UserHomeDir()
+	aware.SetProtected(expandProtected(config.MergeProtected(cfg.Protected), home))
 }

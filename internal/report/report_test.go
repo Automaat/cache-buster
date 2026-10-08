@@ -103,3 +103,18 @@ func TestWriteBlockTruncatesNotesOnRuneBoundary(t *testing.T) {
 	assert.True(t, utf8.ValidString(buf.String()))
 	assert.Contains(t, buf.String(), strings.Repeat("é", maxNoteWidth)+"...")
 }
+
+func TestWriteTop_ShowsEntryDetail(t *testing.T) {
+	var buf strings.Builder
+	WriteTop(&buf, Summary{
+		Entries: 2,
+		Top: []provider.Entry{
+			{Path: "/code/api/target", Size: 4096, Detail: "rust, project api, idle 45d"},
+			{Path: "/code/web/node_modules", Size: 1024},
+		},
+	})
+
+	out := buf.String()
+	assert.Contains(t, out, "/code/api/target  (rust, project api, idle 45d)")
+	assert.Contains(t, out, "/code/web/node_modules\n")
+}

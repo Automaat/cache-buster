@@ -26,9 +26,11 @@ type ProviderStatus struct {
 	MaxFmt         string `json:"max"`
 	Error          string `json:"error,omitempty"`
 	DiskImageFmt   string `json:"disk_image,omitempty"`
+	RecoverableFmt string `json:"recoverable,omitempty"`
 	Current        int64  `json:"current_bytes"`
 	Max            int64  `json:"max_bytes"`
 	DiskImageBytes int64  `json:"disk_image_bytes,omitempty"`
+	Recoverable    int64  `json:"recoverable_bytes,omitempty"`
 	OverLimit      bool   `json:"over_limit"`
 }
 
@@ -186,13 +188,20 @@ func scanProvider(ctx context.Context, cfg *config.Config, name string) Provider
 		}
 	}
 
+	if rc, ok := p.(provider.Recoverer); ok {
+		if recoverable, recErr := rc.Recoverable(ctx); recErr == nil && recoverable > 0 {
+			status.Recoverable = recoverable
+			status.RecoverableFmt = size.FormatSize(recoverable)
+		}
+	}
+
 	return status
 }
 
 func outputJSON(statuses []ProviderStatus, unmanaged *auto.UnmanagedReport, protected *auto.ProtectedReport) error {
 	var total int64
-	for _, s := range statuses {
-		total += s.Current
+	for i := range statuses {
+		total += statuses[i].Current
 	}
 
 	out := StatusOutput{
@@ -215,7 +224,8 @@ func outputTable(statuses []ProviderStatus) error {
 	rows := make([][]string, 0, len(statuses))
 	var total int64
 
-	for _, s := range statuses {
+	for i := range statuses {
+		s := &statuses[i]
 		total += s.Current
 
 		statusText := okStyle.Render("ok")
@@ -228,6 +238,9 @@ func outputTable(statuses []ProviderStatus) error {
 		currentFmt := s.CurrentFmt
 		if s.DiskImageFmt != "" {
 			currentFmt = fmt.Sprintf("%s (%s on disk)", s.CurrentFmt, s.DiskImageFmt)
+		}
+		if s.RecoverableFmt != "" {
+			currentFmt = fmt.Sprintf("%s (%s recoverable)", currentFmt, s.RecoverableFmt)
 		}
 		maxFmt := s.MaxFmt
 		if s.Error != "" {
@@ -260,9 +273,9 @@ func outputTable(statuses []ProviderStatus) error {
 		Width(width)
 
 	fmt.Println(t)
-	for _, s := range statuses {
-		if s.Error != "" {
-			fmt.Println(errorStyle.Render(s.Error))
+	for i := range statuses {
+		if statuses[i].Error != "" {
+			fmt.Println(errorStyle.Render(statuses[i].Error))
 		}
 	}
 	fmt.Println()
