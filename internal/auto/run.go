@@ -209,7 +209,7 @@ func neverRun(name string, pc config.Provider) bool {
 // isXcodeArchives matches an Xcode/Archives pair of path elements, so a
 // renamed provider on the archives folder is still excluded.
 func isXcodeArchives(path string) bool {
-	parts := strings.Split(filepath.ToSlash(path), "/")
+	parts := strings.Split(filepath.ToSlash(filepath.Clean(path)), "/")
 	for i := 0; i+1 < len(parts); i++ {
 		if strings.EqualFold(parts[i], "Xcode") && strings.EqualFold(parts[i+1], "Archives") {
 			return true

@@ -827,6 +827,21 @@ func TestIsProtected_FilesystemRootAndDataAlias(t *testing.T) {
 	assert.False(t, within("/Users/me2", "/Users/me"))
 }
 
+func TestRun_SkipsUncleanXcodeArchivesPathOutsideHome(t *testing.T) {
+	for _, spelling := range []string{"Xcode/./Archives", "Xcode/Foo/../Archives", "Xcode//Archives"} {
+		h := newHarness(t)
+		h.dir("o", "Xcode", "Archives")
+		p := h.home + "/o/" + spelling
+		h.add("renamed", true, true, func(f *fakeProvider, pc *config.Provider) { f.paths = []string{p}; pc.Paths = []string{p} })
+		h.home = "/nonexistent-home"
+
+		_, err := h.run(false, 1*gib)
+
+		require.NoError(t, err)
+		assert.Empty(t, h.calls, spelling)
+	}
+}
+
 func TestIsProtected_RootWithoutHome(t *testing.T) {
 	for _, scan := range []bool{true, false} {
 		assert.True(t, isProtected("/", "", scan))
