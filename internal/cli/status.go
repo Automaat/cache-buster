@@ -11,6 +11,7 @@ import (
 
 	"charm.land/lipgloss/v2"
 	"charm.land/lipgloss/v2/table"
+	"github.com/Automaat/cache-buster/internal/auto"
 	"github.com/Automaat/cache-buster/internal/config"
 	"github.com/Automaat/cache-buster/internal/provider"
 	"github.com/Automaat/cache-buster/pkg/size"
@@ -33,10 +34,14 @@ type ProviderStatus struct {
 
 // StatusOutput holds full status output for JSON serialization.
 type StatusOutput struct {
-	Total      string           `json:"total"`
-	Providers  []ProviderStatus `json:"providers"`
-	TotalBytes int64            `json:"total_bytes"`
+	Total      string                `json:"total"`
+	Providers  []ProviderStatus      `json:"providers"`
+	Unmanaged  *auto.UnmanagedReport `json:"unmanaged,omitempty"`
+	TotalBytes int64                 `json:"total_bytes"`
 }
+
+// unmanagedScan finds large directories no provider covers; nil skips the scan.
+type unmanagedScan func(ctx context.Context, cfg *config.Config) auto.UnmanagedReport
 
 // StatusCmd shows cache status for all enabled providers.
 var StatusCmd = &cobra.Command{
@@ -47,14 +52,36 @@ var StatusCmd = &cobra.Command{
 
 func init() {
 	StatusCmd.Flags().Bool("json", false, "Output in JSON format")
+	StatusCmd.Flags().Int("unmanaged", auto.DefaultUnmanagedTop, "Number of large directories no provider covers to list (0 disables the scan)")
 }
 
 func runStatus(cmd *cobra.Command, _ []string) error {
 	jsonFlag, _ := cmd.Flags().GetBool("json")
-	return runStatusWithLoader(config.NewLoader(), jsonFlag)
+	top, _ := cmd.Flags().GetInt("unmanaged")
+	if top < 0 {
+		return fmt.Errorf("--unmanaged must not be negative, got %d", top)
+	}
+	var scan unmanagedScan
+	if top > 0 {
+		scan = defaultUnmanagedScan(top)
+	}
+	return runStatusWithLoader(config.NewLoader(), jsonFlag, scan)
 }
 
-func runStatusWithLoader(loader *config.Loader, jsonOutput bool) error {
+func defaultUnmanagedScan(top int) unmanagedScan {
+	return func(ctx context.Context, cfg *config.Config) auto.UnmanagedReport {
+		home, _ := os.UserHomeDir()
+		return auto.ScanUnmanaged(ctx, auto.ScanOptions{
+			Roots:    auto.UnmanagedRoots(home),
+			Covered:  auto.CoveredPaths(cfg),
+			Top:      top,
+			MinBytes: auto.DefaultUnmanagedMin,
+			Budget:   auto.DefaultUnmanagedBudget,
+		})
+	}
+}
+
+func runStatusWithLoader(loader *config.Loader, jsonOutput bool, scan unmanagedScan) error {
 	cfg, err := loader.Load()
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
@@ -69,12 +96,27 @@ func runStatusWithLoader(loader *config.Loader, jsonOutput bool) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	var unmanaged *auto.UnmanagedReport
+	var wg sync.WaitGroup
+	if scan != nil {
+		wg.Go(func() {
+			report := scan(ctx, cfg)
+			unmanaged = &report
+		})
+	}
 	statuses := scanProviders(ctx, cfg, providers)
+	wg.Wait()
 
 	if jsonOutput {
-		return outputJSON(statuses)
+		return outputJSON(statuses, unmanaged)
 	}
-	return outputTable(statuses)
+	if err := outputTable(statuses); err != nil {
+		return err
+	}
+	if unmanaged != nil {
+		outputUnmanaged(*unmanaged)
+	}
+	return nil
 }
 
 func scanProviders(ctx context.Context, cfg *config.Config, names []string) []ProviderStatus {
@@ -125,7 +167,7 @@ func scanProvider(ctx context.Context, cfg *config.Config, name string) Provider
 	return status
 }
 
-func outputJSON(statuses []ProviderStatus) error {
+func outputJSON(statuses []ProviderStatus, unmanaged *auto.UnmanagedReport) error {
 	var total int64
 	for _, s := range statuses {
 		total += s.Current
@@ -135,6 +177,10 @@ func outputJSON(statuses []ProviderStatus) error {
 		Providers:  statuses,
 		TotalBytes: total,
 		Total:      size.FormatSize(total),
+		Unmanaged:  unmanaged,
+	}
+	if unmanaged != nil && unmanaged.Dirs == nil {
+		unmanaged.Dirs = []auto.UnmanagedDir{}
 	}
 
 	enc := json.NewEncoder(os.Stdout)
@@ -195,4 +241,23 @@ func outputTable(statuses []ProviderStatus) error {
 	fmt.Println(totalStyle.Render(fmt.Sprintf("Total: %s", size.FormatSize(total))))
 
 	return nil
+}
+
+func outputUnmanaged(report auto.UnmanagedReport) {
+	fmt.Println()
+	if len(report.Dirs) == 0 {
+		fmt.Println(dimStyle.Render("No unmanaged directories above " + size.FormatSize(auto.DefaultUnmanagedMin)))
+	} else {
+		fmt.Println(headerStyle.Render("Unmanaged large directories (no provider covers them)"))
+		for _, d := range report.Dirs {
+			mark := ""
+			if d.Partial {
+				mark = " (at least)"
+			}
+			fmt.Printf("  %10s%s  %s\n", size.FormatSize(d.Bytes), mark, d.Path)
+		}
+	}
+	if report.Incomplete {
+		fmt.Println(dimStyle.Render("Scan stopped at its time budget; sizes may be incomplete."))
+	}
 }

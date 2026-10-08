@@ -126,7 +126,15 @@ Providers are auto-detected — only tools installed on your system appear in th
 ```bash
 cache-buster status          # Table output
 cache-buster status --json   # JSON output
+cache-buster status --unmanaged 20  # List more unmanaged directories (0 turns the scan off)
 ```
+
+After the provider table, `status` lists the largest directories (100 MiB and up) that no
+provider covers. It looks at the top-level directories of `~/.local/share`, `~/Library/Caches`
+(`~/.cache` off macOS), the OS temp dir and `/private/tmp`. A directory counts as covered when
+an enabled provider, or a `dir-pattern` sweep, points at it, into it or at a parent of it. The
+scan measures top-level totals only, runs for at most 10 seconds and stops on Ctrl-C; when it
+stops early the sizes are lower bounds and `status` says so. `--json` adds an `unmanaged` object.
 
 ### clean
 
@@ -178,6 +186,20 @@ Safety rules:
 mise, Go, Cargo and Docker) and loads it with `launchctl bootstrap`. Output goes to
 `~/Library/Logs/cache-buster/auto.log`. Install from a built or installed binary, not
 `go run`. The plist records the binary path, so run `install-agent` again after moving it.
+
+Every run appends one JSON line to `~/.local/state/cache-buster/runs.jsonl`: time, tier, free space
+before and after, bytes freed per provider, and skipped providers with their reasons. The log rotates
+to `runs.jsonl.1` at 8 MiB.
+
+```bash
+cache-buster history           # Last 10 runs
+cache-buster history -n 50     # More runs (0 shows all)
+cache-buster history --json    # Full records, including per-provider detail
+```
+
+`history` skips unreadable lines and reports how many. When a real run (not a dry-run) ends with
+free space still under `min_free` or `min_free_pct`, `auto` shows one macOS notification; a run that
+recovered enough space stays quiet. A failed notification or log write is reported but does not fail the run.
 
 ### config
 

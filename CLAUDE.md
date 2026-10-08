@@ -9,7 +9,7 @@ cmd/cache-buster/     - CLI entrypoint
 internal/
   cache/              - Cache size scanning
   auto/               - Free-space tiers, auto run, launchd agent, first-run marker
-  cli/                - Cobra command implementations (status, clean, config, auto, install-agent)
+  cli/                - Cobra command implementations (status, clean, config, auto, history, install-agent)
   config/             - Config loading, defaults, validation
   provider/           - Provider interface + implementations (command, file, docker)
 pkg/size/             - Human-readable size parsing/formatting

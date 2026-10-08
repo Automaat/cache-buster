@@ -65,6 +65,8 @@ type autoEnv struct {
 	free        auto.FreeFunc
 	newProvider func(name string, cfg config.Provider) (provider.Provider, error)
 	exec        auto.Executor
+	notify      auto.Notifier
+	now         func() time.Time
 	out         io.Writer
 	stateDir    string
 	home        string
@@ -89,6 +91,8 @@ func defaultAutoEnv() (autoEnv, error) {
 		free:        auto.StatfsFree(auto.DataVolumePath()),
 		newProvider: provider.NewProvider,
 		exec:        auto.ExecCommand,
+		notify:      auto.DefaultNotifier(auto.ExecCommand),
+		now:         time.Now,
 		out:         os.Stdout,
 		stateDir:    stateDir,
 		home:        home,
@@ -168,6 +172,7 @@ func runAutoWithLoader(ctx context.Context, loader *config.Loader, env autoEnv, 
 		Out:         env.out,
 		Home:        env.home,
 	})
+	env.recordRun(ctx, cfg.Auto, report, err)
 	if err != nil {
 		return err
 	}
@@ -178,6 +183,30 @@ func runAutoWithLoader(ctx context.Context, loader *config.Loader, env autoEnv, 
 		}
 	}
 	return report.Err()
+}
+
+// recordRun notifies when space is still low and appends the run record.
+// Neither failure changes the run's outcome: they are reported and the run
+// keeps its own result.
+func (e autoEnv) recordRun(ctx context.Context, cfg config.Auto, report auto.Report, runErr error) {
+	if report.Start.Total == 0 && report.Start.Free == 0 {
+		return
+	}
+	notified := false
+	if runErr == nil {
+		var err error
+		notified, err = auto.NotifyIfStillLow(ctx, e.notify, report, cfg)
+		if err != nil {
+			fmt.Fprintf(e.out, "warning: %v\n", err)
+		}
+	}
+	now := e.now
+	if now == nil {
+		now = time.Now
+	}
+	if err := auto.AppendRun(e.stateDir, auto.NewRunRecord(report, now(), runErr, notified)); err != nil {
+		fmt.Fprintf(e.out, "warning: record run: %v\n", err)
+	}
 }
 
 func runInstallAgent(_ *cobra.Command, _ []string) error {
