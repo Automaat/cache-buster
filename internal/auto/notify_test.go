@@ -3,6 +3,7 @@ package auto
 import (
 	"context"
 	"errors"
+	"runtime"
 	"testing"
 
 	"github.com/Automaat/cache-buster/internal/config"
@@ -71,8 +72,9 @@ func TestOsascriptNotifier_PassesTextAsArguments(t *testing.T) {
 	require.NoError(t, notify(t.Context(), "title", hostile))
 
 	assert.Equal(t, "osascript", gotName)
-	assert.Equal(t, []string{hostile, "title"}, gotArgs[len(gotArgs)-2:])
-	for _, a := range gotArgs[:len(gotArgs)-2] {
+	require.Len(t, gotArgs, 8)
+	assert.Equal(t, []string{hostile, "title"}, gotArgs[6:])
+	for _, a := range gotArgs[:6] {
 		assert.NotContains(t, a, "evil", "script text must not embed the message")
 	}
 }
@@ -87,4 +89,14 @@ func TestNotifyIfStillLow_UsesConfiguredFloorNotCriticalLevel(t *testing.T) {
 	require.NoError(t, err)
 	assert.False(t, got, "4 GiB is above min_free, so the user asked for no warning")
 	assert.Empty(t, sent)
+}
+
+func TestDefaultNotifier_OnlyWhereSupported(t *testing.T) {
+	notify := DefaultNotifier(func(context.Context, string, ...string) ([]byte, error) { return nil, nil })
+
+	if runtime.GOOS == "darwin" {
+		require.NotNil(t, notify)
+		return
+	}
+	assert.Nil(t, notify)
 }

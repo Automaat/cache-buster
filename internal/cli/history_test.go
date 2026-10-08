@@ -7,12 +7,14 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/Automaat/cache-buster/internal/auto"
 	"github.com/Automaat/cache-buster/internal/config"
 	"github.com/Automaat/cache-buster/internal/provider"
+	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -248,4 +250,30 @@ func TestAuto_FreeSpaceReadFailureIsStillRecorded(t *testing.T) {
 	runs := readRecords(t, f)
 	require.Len(t, runs, 1)
 	assert.Contains(t, runs[0].Error, "read free space")
+}
+
+func TestRunHistory_ReadsStateDirUnderHome(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_STATE_HOME", filepath.Join(home, "xdg"))
+	stateDir, err := auto.StateDir()
+	require.NoError(t, err)
+	require.True(t, strings.HasPrefix(stateDir, home))
+	require.NoError(t, auto.AppendRun(stateDir, auto.NewRunRecord(auto.Report{Tier: auto.TierLow}, time.Now(), nil, false)))
+
+	cmd := &cobra.Command{}
+	cmd.Flags().Int("limit", 10, "")
+	cmd.Flags().Bool("json", false, "")
+
+	var runErr error
+	out := captureStdout(t, func() { runErr = runHistory(cmd, nil) })
+
+	require.NoError(t, runErr)
+	assert.Contains(t, out, "low")
+}
+
+func TestHistoryNotes(t *testing.T) {
+	notes := historyNotes(auto.RunRecord{DryRun: true, Recovered: true, Notified: true, Error: "x"})
+
+	assert.Equal(t, "dry-run, recovered, notified, run error", notes)
 }
