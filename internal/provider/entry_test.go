@@ -117,7 +117,8 @@ func TestEntryProvider_RemovalFailureIsAnError(t *testing.T) {
 		t.Skip("removal succeeded despite read-only parent (running as root?)")
 	}
 	assert.Contains(t, res.Output, "error removing")
-	assert.Equal(t, int64(0), res.BytesCleaned)
+	// RemoveAll emptied the entry before failing on the entry itself.
+	assert.Equal(t, int64(2048), res.BytesCleaned)
 }
 
 func TestEntryProvider_IgnoresBookkeepingEntries(t *testing.T) {
@@ -131,4 +132,59 @@ func TestEntryProvider_IgnoresBookkeepingEntries(t *testing.T) {
 	assert.NoDirExists(t, old)
 	assert.DirExists(t, newest)
 	assert.DirExists(t, lock)
+}
+
+func TestEntryProvider_SkipPrefixNeverEvicted(t *testing.T) {
+	root := t.TempDir()
+	profile := makeEntry(t, root, "chrome-profile-abc", 4096, 90*24*time.Hour)
+	old := makeEntry(t, root, "old", 2048, 48*time.Hour)
+	newest := makeEntry(t, root, "new", 10, time.Hour)
+
+	p, err := NewEntryProvider("test", config.Provider{
+		Paths: []string{root}, MaxSize: "1K", Enabled: true,
+		SkipPrefixes: []string{"chrome-profile-"},
+	})
+	require.NoError(t, err)
+	_, err = p.Clean(context.Background(), CleanOptions{})
+	require.NoError(t, err)
+
+	assert.DirExists(t, profile)
+	assert.NoDirExists(t, old)
+	assert.DirExists(t, newest)
+}
+
+func TestEntryProvider_DefaultChromeDevtoolsKeepsProfiles(t *testing.T) {
+	cfg := config.DefaultConfig()
+	def := cfg.Providers["chrome-devtools-mcp"]
+	assert.False(t, def.Enabled)
+	assert.NotContains(t, cfg.AllEnabledProviders(), "chrome-devtools-mcp")
+
+	root := t.TempDir()
+	profile := makeEntry(t, root, "chrome-profile-default", 4096, 90*24*time.Hour)
+	makeEntry(t, root, "old", 2048, 48*time.Hour)
+	makeEntry(t, root, "new", 10, time.Hour)
+
+	def.Paths = []string{root}
+	def.MaxSize = "1K"
+	p, err := NewProvider("chrome-devtools-mcp", def)
+	require.NoError(t, err)
+	_, err = p.Clean(context.Background(), CleanOptions{})
+	require.NoError(t, err)
+	assert.DirExists(t, profile)
+}
+
+func TestEntryProvider_PartialRemovalIsCredited(t *testing.T) {
+	root := t.TempDir()
+	old := makeEntry(t, root, "old", 2048, 48*time.Hour)
+	require.NoError(t, os.MkdirAll(filepath.Join(old, "locked"), 0o750))
+	require.NoError(t, os.WriteFile(filepath.Join(old, "locked", "keep"), make([]byte, 1024), 0o600))
+	require.NoError(t, os.Chmod(filepath.Join(old, "locked"), 0o500))
+	t.Cleanup(func() { _ = os.Chmod(filepath.Join(old, "locked"), 0o700) })
+	makeEntry(t, root, "new", 10, time.Hour)
+
+	res, err := newEntryProvider(t, root, "1K", "").Clean(context.Background(), CleanOptions{})
+	if err == nil {
+		t.Skip("removal succeeded despite read-only dir (running as root?)")
+	}
+	assert.Equal(t, int64(2048), res.BytesCleaned)
 }

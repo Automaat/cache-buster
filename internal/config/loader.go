@@ -106,6 +106,9 @@ func (l *Loader) Load() (*Config, error) {
 		if l.v.IsSet("providers." + name + ".skip_if_git_worktree") {
 			merged.SkipIfGitWorktree = userP.SkipIfGitWorktree
 		}
+		if l.v.IsSet("providers." + name + ".skip_prefixes") {
+			merged.SkipPrefixes = userP.SkipPrefixes
+		}
 		cfg.Providers[name] = merged
 	}
 

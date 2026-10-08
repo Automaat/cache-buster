@@ -175,16 +175,30 @@ func extraCacheProviders() map[string]Provider {
 			MaxAge:  "30d",
 		}
 	}
+	// Opt-in: entry mtime records download time, not use, so a daily-use
+	// entry can be evicted before an idle one.
+	optIn := func(path, maxSize string) Provider {
+		p := cache(path, maxSize)
+		p.Enabled = false
+		return p
+	}
 	return map[string]Provider{
 		"edge":    cache("~/Library/Caches/Microsoft Edge", "3G"),
 		"vivaldi": cache("~/Library/Caches/Vivaldi", "3G"),
 		// hub only: ~/.cache/huggingface also holds the login token.
-		"huggingface":         cache("~/.cache/huggingface/hub", "20G"),
-		"playwright":          cache("~/Library/Caches/ms-playwright", "5G"),
-		"lima":                cache("~/Library/Caches/lima", "10G"),
-		"gh":                  cache("~/.cache/gh", "1G"),
-		"chrome-devtools-mcp": cache("~/.cache/chrome-devtools-mcp", "2G"),
-		"vscode-shipit":       cache("~/Library/Caches/com.microsoft.VSCode.ShipIt", "1G"),
+		"huggingface": optIn("~/.cache/huggingface/hub", "20G"),
+		"playwright":  optIn("~/Library/Caches/ms-playwright", "5G"),
+		"lima":        cache("~/Library/Caches/lima", "10G"),
+		"gh":          cache("~/.cache/gh", "1G"),
+		// chrome-profile-* holds browser logins and cookies.
+		"chrome-devtools-mcp": {
+			Enabled:      false,
+			Paths:        []string{"~/.cache/chrome-devtools-mcp"},
+			MaxSize:      "2G",
+			MaxAge:       "30d",
+			SkipPrefixes: []string{"chrome-profile-"},
+		},
+		"vscode-shipit": cache("~/Library/Caches/com.microsoft.VSCode.ShipIt", "1G"),
 		// Toolchains are not a plain cache, so this stays opt-in.
 		"rustup": {
 			Enabled:  false,
