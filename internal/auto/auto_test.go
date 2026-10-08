@@ -837,6 +837,34 @@ func TestReport_Previewed(t *testing.T) {
 	assert.True(t, Report{Tier: TierCritical, Results: ran}.Previewed())
 }
 
+func TestAgentUninstall_UnrecognisedBootoutAndPrintFailureKeepsState(t *testing.T) {
+	rec := &recorder{}
+	a := newAgent(t, rec)
+	require.NoError(t, a.Install(t.Context()))
+	rec.fail = map[string]error{
+		"bootout": errors.New("exit status 5"),
+		"print":   errors.New("permission denied"),
+	}
+
+	require.ErrorContains(t, a.Uninstall(t.Context()), "launchctl bootout")
+
+	assert.FileExists(t, a.PlistPath())
+	assert.True(t, FirstRunPending(a.StateDir))
+}
+
+func TestWithoutDataAlias_CaseInsensitive(t *testing.T) {
+	got := withoutDataAlias([]string{"/system/volumes/data/Users/me", "/System/Volumes/DataX/y"})
+	assert.Contains(t, got, "/Users/me")
+	assert.NotContains(t, got, "X/y")
+	assert.Len(t, got, 3)
+}
+
+func TestIsBuiltin_CleanTimeoutDoesNotDisqualify(t *testing.T) {
+	def := config.DefaultProviders()["docker"]
+	def.CleanTimeout = "5m"
+	assert.True(t, isBuiltin("docker", def))
+}
+
 func TestAgentUninstall_UnrecognisedBootoutWithFailingPrintStillRemoves(t *testing.T) {
 	rec := &recorder{}
 	a := newAgent(t, rec)

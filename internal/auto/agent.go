@@ -55,7 +55,7 @@ func (a Agent) domainTarget() string {
 
 // unload asks launchd to drop the job. A job that was never loaded is the
 // state the caller wants. When bootout fails in a form not recognised as
-// "not loaded", a failing `launchctl print` confirms the job is absent.
+// "not loaded", a failing `launchctl print` confirms the job is absent; any other print failure keeps the error.
 func (a Agent) unload(ctx context.Context) error {
 	target := a.domainTarget() + "/" + AgentLabel
 	out, err := a.Exec(ctx, "launchctl", "bootout", target)
@@ -66,10 +66,21 @@ func (a Agent) unload(ctx context.Context) error {
 	if ctx.Err() != nil {
 		return bootoutErr
 	}
-	if _, printErr := a.Exec(ctx, "launchctl", "print", target); printErr == nil {
+	printOut, printErr := a.Exec(ctx, "launchctl", "print", target)
+	if printErr == nil || (!jobNotLoaded(string(printOut)) && exitCode(printErr) != serviceNotFoundExit) {
 		return bootoutErr
 	}
 	return nil
+}
+
+// serviceNotFoundExit is the launchctl exit status for an unknown service.
+const serviceNotFoundExit = 113
+
+func exitCode(err error) int {
+	if ee, ok := errors.AsType[*exec.ExitError](err); ok {
+		return ee.ExitCode()
+	}
+	return 0
 }
 
 func jobNotLoaded(output string) bool {

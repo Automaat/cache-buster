@@ -229,7 +229,6 @@ func isBuiltin(name string, pc config.Provider) bool {
 		slices.Equal(def.Paths, pc.Paths) &&
 		def.Type == pc.Type &&
 		def.CleanCmd == pc.CleanCmd &&
-		def.CleanTimeout == pc.CleanTimeout &&
 		def.MinIdle == pc.MinIdle &&
 		slices.Equal(def.SkipPrefixes, pc.SkipPrefixes) &&
 		boolOrTrue(def.SkipIfOpen) == boolOrTrue(pc.SkipIfOpen) &&

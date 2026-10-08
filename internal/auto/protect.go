@@ -73,10 +73,14 @@ const dataVolumeAlias = "/System/Volumes/Data"
 func withoutDataAlias(paths []string) []string {
 	out := slices.Clone(paths)
 	for _, p := range paths {
-		if p == dataVolumeAlias {
+		if len(p) < len(dataVolumeAlias) || !strings.EqualFold(p[:len(dataVolumeAlias)], dataVolumeAlias) {
+			continue
+		}
+		rest := p[len(dataVolumeAlias):]
+		if rest == "" {
 			out = append(out, string(filepath.Separator))
-		} else if rest, ok := strings.CutPrefix(p, dataVolumeAlias+string(filepath.Separator)); ok {
-			out = append(out, string(filepath.Separator)+rest)
+		} else if strings.HasPrefix(rest, string(filepath.Separator)) {
+			out = append(out, rest)
 		}
 	}
 	return out
