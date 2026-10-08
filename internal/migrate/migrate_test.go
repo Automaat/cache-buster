@@ -174,6 +174,24 @@ func TestDir_RenameFailureWithTheOldDirStillThereIsReported(t *testing.T) {
 	assert.False(t, moved)
 }
 
+func TestTolerateLostRace(t *testing.T) {
+	root := t.TempDir()
+	oldDir := filepath.Join(root, "old")
+	newDir := filepath.Join(root, "new")
+	notExist := &os.PathError{Op: "open", Path: oldDir, Err: os.ErrNotExist}
+
+	require.Error(t, tolerateLostRace(notExist, oldDir, newDir), "old and new both missing")
+
+	require.NoError(t, os.Mkdir(newDir, 0o750))
+	require.NoError(t, tolerateLostRace(notExist, oldDir, newDir), "old moved, new present")
+
+	require.NoError(t, os.Mkdir(oldDir, 0o750))
+	require.Error(t, tolerateLostRace(notExist, oldDir, newDir), "old still present")
+
+	require.NoError(t, os.Remove(oldDir))
+	assert.Error(t, tolerateLostRace(os.ErrPermission, oldDir, newDir), "other errors pass through")
+}
+
 func TestDir_CreatesMissingParentOfTheNewDir(t *testing.T) {
 	root := t.TempDir()
 	oldDir := filepath.Join(root, "old")

@@ -64,21 +64,27 @@ func Dir(oldDir, newDir string) (bool, error) {
 		return false, errors.New("not a directory")
 	}
 	if err := checkReadable(oldDir); err != nil {
-		return false, err
+		return false, tolerateLostRace(err, oldDir, newDir)
 	}
 	if err := os.MkdirAll(filepath.Dir(newDir), 0o750); err != nil {
 		return false, err
 	}
 	if err := rename(oldDir, newDir); err != nil {
-		if errors.Is(err, os.ErrNotExist) && !pathExists(oldDir) && pathExists(newDir) {
-			return false, nil
-		}
-		return false, err
+		return false, tolerateLostRace(err, oldDir, newDir)
 	}
 	return true, nil
 }
 
 var rename = os.Rename
+
+// tolerateLostRace drops a not-exist error when another process has already
+// moved oldDir to newDir; any other failure is returned as is.
+func tolerateLostRace(err error, oldDir, newDir string) error {
+	if errors.Is(err, os.ErrNotExist) && !pathExists(oldDir) && pathExists(newDir) {
+		return nil
+	}
+	return err
+}
 
 func pathExists(path string) bool {
 	_, err := os.Lstat(path)
