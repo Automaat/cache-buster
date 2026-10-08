@@ -658,11 +658,11 @@ func TestTreeProvider_GoModSymlinkedRootStillEvicts(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("symlink creation needs privileges on windows")
 	}
-	real := t.TempDir()
+	target := t.TempDir()
 	link := filepath.Join(t.TempDir(), "mod")
-	require.NoError(t, os.Symlink(real, link))
-	oldMod := filepath.Join(real, "github.com", "a", "b@v1.0.0")
-	newMod := filepath.Join(real, "github.com", "a", "b@v1.1.0")
+	require.NoError(t, os.Symlink(target, link))
+	oldMod := filepath.Join(target, "github.com", "a", "b@v1.0.0")
+	newMod := filepath.Join(target, "github.com", "a", "b@v1.1.0")
 	writeAged(t, filepath.Join(oldMod, "go.mod"), 100, 90*day)
 	writeAged(t, filepath.Join(newMod, "go.mod"), 100, 80*day)
 	ageAll(t, oldMod, 90*day)
