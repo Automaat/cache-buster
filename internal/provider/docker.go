@@ -35,11 +35,13 @@ func NewDockerProvider(name string, cfg config.Provider) (*DockerProvider, error
 	}, nil
 }
 
-// The flag may follow whitespace, a quote or the string start; its value
-// stops at whitespace, quotes and shell operators. A leading quote is kept
-// so the surrounding quoting stays balanced.
+// The flag may follow whitespace or the string start, bare or fully quoted.
+// A value is a quoted string or runs until whitespace, quotes or shell
+// operators; a bare true/false word after the flag is dropped with it.
 var embeddedVolumesFlag = regexp.MustCompile(
-	`(?:\s+|^|(['"]))--volumes(?:=[^\s'";&|()<>` + "`" + `]*)?($|[\s'";&|()<>` + "`" + `])`)
+	`(?:\s+|^)(?:'--volumes(?:=[^']*)?'|"--volumes(?:=[^"]*)?"|--volumes` +
+		`(?:=(?:"[^"]*"|'[^']*'|[^\s'";&|()<>` + "`" + `]*)|\s+(?:true|false))?)` +
+		`($|[\s'";&|()<>` + "`" + `])`)
 
 // stripVolumesFlag drops --volumes from configs written by older versions,
 // whose saved clean_cmd would otherwise keep deleting volumes.
@@ -49,8 +51,15 @@ func stripVolumesFlag(cmd string) string {
 		return cmd
 	}
 	kept := parts[:0]
-	for _, part := range parts {
-		if part == "--volumes" || strings.HasPrefix(part, "--volumes=") {
+	for i := 0; i < len(parts); i++ {
+		part := parts[i]
+		if part == "--volumes" {
+			if i+1 < len(parts) && (parts[i+1] == "true" || parts[i+1] == "false") {
+				i++
+			}
+			continue
+		}
+		if strings.HasPrefix(part, "--volumes=") {
 			continue
 		}
 		// Wrapped commands such as sh -c carry the flag inside one token.
@@ -63,7 +72,7 @@ func stripVolumesFlag(cmd string) string {
 // the delimiter that the next adjacent flag needs.
 func removeEmbeddedVolumes(part string) string {
 	for {
-		next := embeddedVolumesFlag.ReplaceAllString(part, "$1$2")
+		next := embeddedVolumesFlag.ReplaceAllString(part, "$1")
 		if next == part {
 			return part
 		}
