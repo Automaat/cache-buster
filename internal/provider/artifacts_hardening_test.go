@@ -513,6 +513,8 @@ func TestProjectArtifacts_OneOpenFileListingServesEveryCandidate(t *testing.T) {
 		nodeProject(t, h.path(fmt.Sprintf("p%03d", i)), 10, 90*day)
 	}
 	busy := h.path("p007", "node_modules")
+	frozen := time.Now()
+	h.p.now = func() time.Time { return frozen }
 	calls := 0
 	h.p.openMany = func(_ context.Context, dirs []string) (map[string]bool, error) {
 		calls++
