@@ -101,6 +101,11 @@ func (p *EntryProvider) listEntries(ctx context.Context) (entries []cacheEntry, 
 			return nil, 0, err
 		}
 		for _, d := range dirents {
+			// Lock and bookkeeping entries are neither evictable nor
+			// candidates for the protected newest slot.
+			if strings.HasPrefix(d.Name(), ".") || strings.HasPrefix(d.Name(), "__") {
+				continue
+			}
 			path := filepath.Join(base, d.Name())
 			info, err := os.Lstat(path)
 			if err != nil {

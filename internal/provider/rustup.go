@@ -178,6 +178,10 @@ func removableToolchains(listing, overrides string) ([]string, error) {
 		names = append(names, name)
 
 		marker := toolchainMarker(fields[1:])
+		// A trailing path marks a linked toolchain: not ours to unlink.
+		if len(fields) > 1 && !strings.HasPrefix(fields[1], "(") {
+			keep[name] = true
+		}
 		if strings.Contains(marker, "default") {
 			hasDefault = true
 			keep[name] = true

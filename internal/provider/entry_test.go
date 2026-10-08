@@ -119,3 +119,16 @@ func TestEntryProvider_RemovalFailureIsAnError(t *testing.T) {
 	assert.Contains(t, res.Output, "error removing")
 	assert.Equal(t, int64(0), res.BytesCleaned)
 }
+
+func TestEntryProvider_IgnoresBookkeepingEntries(t *testing.T) {
+	root := t.TempDir()
+	old := makeEntry(t, root, "old", 2048, 48*time.Hour)
+	newest := makeEntry(t, root, "model", 10, time.Hour)
+	lock := makeEntry(t, root, ".locks", 10, time.Minute)
+
+	_, err := newEntryProvider(t, root, "1K", "").Clean(context.Background(), CleanOptions{})
+	require.NoError(t, err)
+	assert.NoDirExists(t, old)
+	assert.DirExists(t, newest)
+	assert.DirExists(t, lock)
+}

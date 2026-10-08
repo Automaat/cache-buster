@@ -54,9 +54,9 @@ func TestRemovableToolchains(t *testing.T) {
 			wantErr: true,
 		},
 		{
-			name:    "linked toolchain path is not a marker",
+			name:    "linked toolchain is kept and its path is not a marker",
 			listing: "stable-aarch64-apple-darwin\nnightly (default)\nmytc /Users/me/default-build\n1.75.0\n",
-			want:    []string{"mytc", "1.75.0"},
+			want:    []string{"1.75.0"},
 		},
 		{
 			name:    "stderr noise is not a toolchain",
