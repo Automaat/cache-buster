@@ -54,6 +54,8 @@ const minSkipRuns = 3
 // runwayDays warns when the trend reaches min_free sooner than this.
 const runwayDays = 14
 
+const minTrendSpan = 24 * time.Hour
+
 const withinLimit = "within limit"
 
 // Finding is one check result.
@@ -74,6 +76,7 @@ type Input struct {
 	ConfigErr error
 
 	Runs    []auto.RunRecord
+	RunsErr error
 	Corrupt int
 
 	Agent    auto.AgentState
@@ -143,6 +146,13 @@ func agentFinding(in Input) Finding {
 }
 
 func lastRunFindings(in Input) []Finding {
+	if in.RunsErr != nil {
+		return []Finding{{
+			Area: "history", Level: Fail,
+			Message: "cannot read the run log: " + in.RunsErr.Error(),
+			Hint:    "check that the state directory and runs.jsonl are readable by your user",
+		}}
+	}
 	if len(in.Runs) == 0 {
 		level := Note
 		if in.Agent.Installed {
@@ -156,7 +166,7 @@ func lastRunFindings(in Input) []Finding {
 		return append(out, extraRunNotes(in)...)
 	}
 
-	last := in.Runs[len(in.Runs)-1]
+	last, deleting := newestRun(in.Runs)
 	mode := ""
 	if last.DryRun {
 		mode = ", dry-run"
@@ -185,20 +195,29 @@ func lastRunFindings(in Input) []Finding {
 	}
 
 	out := []Finding{main}
-	if f, ok := staleFinding(in, newestRun(in.Runs)); ok {
-		out = append(out, f)
+	switch {
+	case deleting:
+		if f, ok := staleFinding(in, last); ok {
+			out = append(out, f)
+		}
+	case in.Agent.Installed && !in.FirstRunPending:
+		out = append(out, Finding{
+			Area: "schedule", Level: Warn,
+			Message: "only dry-runs are recorded: the agent has not completed a deleting run",
+			Hint:    hintLog(in.LogPath, "run: bilgie install-agent to reinstall it"),
+		})
 	}
 	out = append(out, freedFinding(in))
 	return append(out, extraRunNotes(in)...)
 }
 
-func newestRun(runs []auto.RunRecord) auto.RunRecord {
+func newestRun(runs []auto.RunRecord) (auto.RunRecord, bool) {
 	for _, r := range slices.Backward(runs) {
 		if !r.DryRun {
-			return r
+			return r, true
 		}
 	}
-	return runs[len(runs)-1]
+	return runs[len(runs)-1], false
 }
 
 func hintLog(logPath, fallback string) string {
@@ -325,7 +344,7 @@ func trendFinding(in Input) (Finding, bool) {
 		Message: fmt.Sprintf("free space %s over %s (%s -> %s, %d run(s))",
 			signedSize(delta), Age(span), size.FormatSize(oldest.FreeBefore), size.FormatSize(in.Free.Free), len(window)),
 	}
-	if delta < 0 && span >= time.Hour && in.Cfg != nil {
+	if delta < 0 && span >= minTrendSpan && in.Cfg != nil {
 		if minFree, err := in.Cfg.Auto.MinFreeBytes(); err == nil && in.Free.Free > minFree {
 			perDay := float64(-delta) / (float64(span) / float64(24*time.Hour))
 			days := float64(in.Free.Free-minFree) / perDay

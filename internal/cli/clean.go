@@ -351,6 +351,9 @@ func executeClean(
 	}
 
 	if concise && dryRun && !quiet && text {
+		for _, u := range unavailable {
+			skippedBlocks = append(skippedBlocks, report.Block{Name: u.Name, Status: statusUnavailable, Reason: u.Reason})
+		}
 		report.WriteSkipped(os.Stdout, skippedBlocks)
 	}
 	return finishClean(results, totalCleaned, opts, errors, false)

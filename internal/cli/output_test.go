@@ -22,6 +22,11 @@ const (
 // i%7+1 bytes so the largest entries are well defined.
 func bigCacheFixture(t *testing.T, files int) (cacheDir string, loader *config.Loader) {
 	t.Helper()
+	return bigCacheFixtureWith(t, files, "")
+}
+
+func bigCacheFixtureWith(t *testing.T, files int, extraProviders string) (cacheDir string, loader *config.Loader) {
+	t.Helper()
 	root := t.TempDir()
 	cacheDir = filepath.Join(root, "cache")
 	for i := range files {
@@ -43,7 +48,7 @@ providers:
     max_size: 1G
     max_age: 1d
     clean_cmd: "true"
-`
+` + extraProviders
 	require.NoError(t, os.WriteFile(cfgPath, []byte(cfg), 0o600))
 	loader = config.NewLoader()
 	loader.SetConfigPath(cfgPath)
@@ -163,4 +168,17 @@ func TestRealClean_ShowsLargestEntriesAndVerboseKeepsOldLine(t *testing.T) {
 	require.NoError(t, err)
 	assert.Regexp(t, `done \(freed [^,)]+\)\n`, verbose)
 	assert.NotContains(t, verbose, "largest:")
+}
+
+func TestCleanDryRun_ListsUnavailableProvidersAsSkipped(t *testing.T) {
+	cacheDir, _ := bigCacheFixture(t, 1)
+	_, loader := bigCacheFixtureWith(t, 3, "  ghost:\n    enabled: true\n    paths:\n      - "+cacheDir+"\n    max_size: 1G\n    clean_cmd: \"bilgie-no-such-tool-xyz clean\"\n")
+
+	var err error
+	out := captureStdout(t, func() {
+		err = runCleanWithOptions(loader, []string{"big", "ghost"}, cleanOptions{dryRun: true, smart: true}, os.Stdin)
+	})
+	require.NoError(t, err)
+	assert.Contains(t, out, "skipped (1):\n  ghost: ")
+	assert.Contains(t, out, "1 skipped")
 }

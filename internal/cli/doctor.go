@@ -64,11 +64,7 @@ func runDoctorWithLoader(ctx context.Context, loader *config.Loader, env autoEnv
 	in.LogPath = agent.LogFile()
 	in.Agent, in.AgentErr = agent.Status(ctx)
 
-	runs, corrupt, err := auto.ReadRuns(env.stateDir, 0)
-	if err != nil {
-		return err
-	}
-	in.Runs, in.Corrupt = runs, corrupt
+	in.Runs, in.Corrupt, in.RunsErr = auto.ReadRuns(env.stateDir, 0)
 	in.FirstRunPending = auto.FirstRunPending(env.stateDir)
 
 	in.Free, in.FreeErr = env.free()

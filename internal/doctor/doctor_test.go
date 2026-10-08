@@ -245,6 +245,42 @@ func TestZeroByteRunsAreNotCounted(t *testing.T) {
 	assert.Contains(t, find(t, Diagnose(in), "freed").Message, "1.0 GiB freed by 1 run(s)")
 }
 
+func TestLastRunFailureIsNotMaskedByManualDryRun(t *testing.T) {
+	in := healthy()
+	in.Runs = []auto.RunRecord{
+		{Time: fixedNow.Add(-40 * time.Minute), Tier: "low", Error: "boom"},
+		{Time: fixedNow.Add(-time.Minute), Tier: "low", DryRun: true},
+	}
+	f := find(t, Diagnose(in), "last run")
+	assert.Equal(t, Fail, f.Level)
+	assert.Contains(t, f.Message, "run error: boom")
+}
+
+func TestOnlyDryRunsWarnsOnceFirstRunIsDone(t *testing.T) {
+	in := healthy()
+	in.Runs = []auto.RunRecord{{Time: fixedNow.Add(-time.Minute), Tier: "low", DryRun: true}}
+	assert.Equal(t, Warn, find(t, Diagnose(in), "schedule").Level)
+
+	in.FirstRunPending = true
+	for _, f := range Diagnose(in).Findings {
+		assert.NotEqual(t, "schedule", f.Area)
+	}
+}
+
+func TestShortTrendSpanDoesNotProjectARunway(t *testing.T) {
+	in := healthy()
+	in.Runs = []auto.RunRecord{{Time: fixedNow.Add(-90 * time.Minute), Tier: "ok", FreeBefore: 260 * gib}}
+	assert.Equal(t, OK, find(t, Diagnose(in), "trend").Level)
+}
+
+func TestUnreadableRunLogIsAFinding(t *testing.T) {
+	in := healthy()
+	in.Runs, in.RunsErr = nil, errors.New("read run log: permission denied")
+	f := find(t, Diagnose(in), "history")
+	assert.Equal(t, Fail, f.Level)
+	assert.Contains(t, f.Hint, "readable")
+}
+
 func TestAge(t *testing.T) {
 	assert.Equal(t, "under a minute", Age(10*time.Second))
 	assert.Equal(t, "5m", Age(5*time.Minute))
