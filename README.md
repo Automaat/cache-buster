@@ -182,6 +182,11 @@ failure. If the check itself fails, the provider is skipped too.
 | `homebrew` | a `brew` process runs |
 | `uv` | `<path>/.lock` is flock-held, or a `uv` process runs |
 
+Busy detection errs toward skipping: any process whose command line contains
+the tool name counts, including wrappers such as `sudo` or `sh -c`. A hung
+`clean_cmd` is killed with its whole process group, so it must not need a
+terminal.
+
 `clean --json` needs `--force` or `--dry-run` because it cannot prompt.
 
 `dir-pattern` paths must contain a glob character. The provider ignores

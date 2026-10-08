@@ -138,3 +138,31 @@ func TestClean_JSONDryRunReportsSkip(t *testing.T) {
 func TestCleanCmd_HasJSONFlag(t *testing.T) {
 	assert.NotNil(t, CleanCmd.Flags().Lookup("json"))
 }
+
+func TestClean_JSONWithNoAvailableProviders(t *testing.T) {
+	cfgPath := filepath.Join(t.TempDir(), "config.yaml")
+	cfg := `version: "1"
+providers:
+  ghost:
+    enabled: true
+    paths:
+      - ` + t.TempDir() + `
+    max_size: 1GB
+    clean_cmd: "definitely-not-a-real-binary-xyz clean"
+`
+	require.NoError(t, os.WriteFile(cfgPath, []byte(cfg), 0o600))
+	loader := config.NewLoader()
+	loader.SetConfigPath(cfgPath)
+	loader.SkipDefaults()
+
+	var err error
+	output := captureStdout(t, func() {
+		err = runCleanWithOptions(loader, nil, cleanOptions{all: true, force: true, json: true}, os.Stdin)
+	})
+
+	require.Error(t, err)
+	var got CleanOutput
+	require.NoError(t, json.Unmarshal([]byte(output), &got), output)
+	require.Len(t, got.Providers, 1)
+	assert.Equal(t, statusUnavailable, got.Providers[0].Status)
+}

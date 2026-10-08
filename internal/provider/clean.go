@@ -50,9 +50,13 @@ func runMeasuredCleanTimeout(
 	}
 
 	cmd := exec.CommandContext(cmdCtx, args[0], args[1:]...)
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	cmd.Cancel = func() error {
-		return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+	if timeout > 0 {
+		// A group lets the timeout kill descendants. It is skipped for
+		// unbounded commands so they keep the terminal's foreground group.
+		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+		cmd.Cancel = func() error {
+			return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+		}
 	}
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout

@@ -78,6 +78,13 @@ func runCleanWithOptions(loader *config.Loader, args []string, opts cleanOptions
 
 	providers, unavailable := loadAndFilterProviders(cfg, providerNames)
 	if len(providers) == 0 {
+		if opts.json {
+			results := make([]ProviderCleanResult, 0, len(unavailable))
+			for _, name := range unavailable {
+				results = append(results, ProviderCleanResult{Name: name, Status: statusUnavailable})
+			}
+			_ = finishClean(results, 0, opts, nil, false)
+		}
 		return fmt.Errorf("no available providers to clean")
 	}
 
@@ -199,6 +206,7 @@ type CleanOutput struct {
 	Providers  []ProviderCleanResult `json:"providers"`
 	TotalBytes int64                 `json:"total_bytes"`
 	DryRun     bool                  `json:"dry_run"`
+	Cancelled  bool                  `json:"cancelled,omitempty"`
 }
 
 // Statuses reported per provider.
@@ -307,6 +315,7 @@ func finishClean(results []ProviderCleanResult, totalCleaned int64, opts cleanOp
 			TotalBytes: totalCleaned,
 			Total:      size.FormatSize(totalCleaned),
 			DryRun:     opts.dryRun,
+			Cancelled:  cancelled,
 		}); err != nil {
 			return fmt.Errorf("encode json: %w", err)
 		}
