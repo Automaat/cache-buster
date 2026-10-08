@@ -5,6 +5,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -17,7 +19,8 @@ func TestProcessCommandLinesSeesChild(t *testing.T) {
 	exe, err := os.Executable()
 	require.NoError(t, err)
 
-	cmd := exec.Command(exe)
+	marker := "-osshim.marker=" + strconv.Itoa(os.Getpid())
+	cmd := exec.Command(exe, marker)
 	cmd.Env = append(os.Environ(), helperEnv+"=child", "OSSHIM_HEARTBEAT="+heartbeatPath(t))
 	require.NoError(t, cmd.Start())
 	t.Cleanup(func() {
@@ -25,7 +28,10 @@ func TestProcessCommandLinesSeesChild(t *testing.T) {
 		_ = cmd.Wait()
 	})
 
-	want := strings.TrimSuffix(filepath.Base(exe), ".exe")
+	want := marker
+	if runtime.GOOS == "windows" {
+		want = strings.TrimSuffix(filepath.Base(exe), ".exe")
+	}
 	require.Eventually(t, func() bool {
 		lines, listErr := ProcessCommandLines(context.Background())
 		if listErr != nil {

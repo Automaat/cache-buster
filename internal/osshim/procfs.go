@@ -116,7 +116,7 @@ func procHasOpenFiles(ctx context.Context, root, dir string, selfUID int) (bool,
 		}
 
 		open, err := procPidHasOpenFiles(base, dir)
-		for attempt := 0; attempt < inspectRetries && errors.Is(err, os.ErrPermission); attempt++ {
+		for attempt := 0; attempt < inspectRetries && !other && errors.Is(err, os.ErrPermission) && !processIsDead(base); attempt++ {
 			time.Sleep(inspectRetryDelay)
 			open, err = procPidHasOpenFiles(base, dir)
 		}

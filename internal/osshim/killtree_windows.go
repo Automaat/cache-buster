@@ -44,11 +44,7 @@ func killTree(root uint32, killRoot func() error) error {
 		if rootErr != nil {
 			break
 		}
-		start, err := creationTime(pid)
-		if err != nil || start < rootStart {
-			continue
-		}
-		if err := terminatePID(pid); err != nil {
+		if err := terminateIfStartedAfter(pid, rootStart); err != nil {
 			errs = append(errs, err)
 		}
 	}
@@ -59,8 +55,11 @@ func killTree(root uint32, killRoot func() error) error {
 	return errors.Join(errs...)
 }
 
-func terminatePID(pid uint32) error {
-	h, err := windows.OpenProcess(windows.PROCESS_TERMINATE, false, pid)
+// terminateIfStartedAfter kills pid through a single handle once its start
+// time proves it is no older than the tree root, so a recycled id is never hit.
+// A process that already exited is not an error.
+func terminateIfStartedAfter(pid uint32, rootStart int64) error {
+	h, err := windows.OpenProcess(windows.PROCESS_TERMINATE|windows.PROCESS_QUERY_LIMITED_INFORMATION, false, pid)
 	if err != nil {
 		if errors.Is(err, windows.ERROR_INVALID_PARAMETER) {
 			return nil
@@ -68,6 +67,14 @@ func terminatePID(pid uint32) error {
 		return err
 	}
 	defer func() { _ = windows.CloseHandle(h) }()
+
+	start, err := handleCreationTime(h)
+	if err != nil {
+		return err
+	}
+	if start < rootStart {
+		return nil
+	}
 	return windows.TerminateProcess(h, 1)
 }
 
@@ -80,7 +87,10 @@ func creationTime(pid uint32) (int64, error) {
 		return 0, err
 	}
 	defer func() { _ = windows.CloseHandle(h) }()
+	return handleCreationTime(h)
+}
 
+func handleCreationTime(h windows.Handle) (int64, error) {
 	var created, exited, kernel, user windows.Filetime
 	if err := windows.GetProcessTimes(h, &created, &exited, &kernel, &user); err != nil {
 		return 0, err

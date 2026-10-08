@@ -15,11 +15,12 @@ func QueryDiskSpace(path string) (DiskSpace, error) {
 	if err := unix.Statfs(path, &st); err != nil {
 		return DiskSpace{}, err
 	}
-	free, err := blocksToBytes(st.Bavail, st.Bsize)
+	unit := blockUnit(&st)
+	free, err := blocksToBytes(st.Bavail, unit)
 	if err != nil {
 		return DiskSpace{}, err
 	}
-	total, err := blocksToBytes(st.Blocks, st.Bsize)
+	total, err := blocksToBytes(st.Blocks, unit)
 	if err != nil {
 		return DiskSpace{}, err
 	}
@@ -37,4 +38,11 @@ func blocksToBytes[B, S integer](blocks B, size S) (uint64, error) {
 		return 0, fmt.Errorf("invalid filesystem geometry: %d blocks of %d bytes", blocks, size)
 	}
 	return uint64(blocks) * uint64(size), nil
+}
+
+func toUint64[T integer](v T) uint64 {
+	if v < 0 {
+		return 0
+	}
+	return uint64(v)
 }
