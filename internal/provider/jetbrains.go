@@ -91,6 +91,7 @@ func (p *JetBrainsProvider) cleanDirs(ctx context.Context, removable []string, o
 	var (
 		bytesTotal int64
 		output     strings.Builder
+		entries    []Entry
 	)
 
 	for _, dir := range removable {
@@ -111,6 +112,7 @@ func (p *JetBrainsProvider) cleanDirs(ctx context.Context, removable []string, o
 		if opts.DryRun {
 			fmt.Fprintf(&output, "would remove: %s (%s)\n", filepath.Base(dir), size.FormatSize(dirSize.Size))
 			bytesTotal += dirSize.Size
+			entries = append(entries, Entry{Path: dir, Size: dirSize.Size})
 			continue
 		}
 
@@ -120,16 +122,19 @@ func (p *JetBrainsProvider) cleanDirs(ctx context.Context, removable []string, o
 		}
 
 		bytesTotal += dirSize.Size
+		entries = append(entries, Entry{Path: dir, Size: dirSize.Size})
 	}
 
 	if opts.DryRun {
 		return CleanResult{
+			Entries:      entries,
 			BytesCleaned: bytesTotal,
 			Output:       strings.TrimSpace(output.String()),
 		}, nil
 	}
 
 	result := CleanResult{
+		Entries:      entries,
 		BytesCleaned: bytesTotal,
 		Output:       fmt.Sprintf("removed %d old version directories", len(removable)),
 	}

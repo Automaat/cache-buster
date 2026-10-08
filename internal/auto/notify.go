@@ -154,3 +154,57 @@ func toastScriptFor(title, message string) string {
 func encodePowerShell(script string) string {
 	return base64.StdEncoding.EncodeToString(utf16LE(script))
 }
+
+// notifyWorsenBytes is how much free space must drop since a tier's last
+// notification for it to be sent again before the cooldown ends.
+const notifyWorsenBytes int64 = 10 << 30
+
+// NotifyAllowed reports whether a notification for tier may go out: not
+// within cooldown of the previous one for that tier, unless free space
+// dropped by more than notifyWorsenBytes since then. A tier with no earlier
+// notification (a worse tier than before) is always allowed.
+func (p *PassState) NotifyAllowed(tier Tier, free int64, now time.Time, cooldown time.Duration) bool {
+	if p == nil {
+		return true
+	}
+	rec, ok := p.Notified[tier.String()]
+	if !ok || now.Sub(rec.Time) >= cooldown || rec.Time.After(now) {
+		return true
+	}
+	return rec.Free-free > notifyWorsenBytes
+}
+
+// NoteNotified records a sent notification.
+func (p *PassState) NoteNotified(tier Tier, free int64, now time.Time) {
+	if p == nil {
+		return
+	}
+	if p.Notified == nil {
+		p.Notified = make(map[string]NotifyRecord)
+	}
+	p.Notified[tier.String()] = NotifyRecord{Time: now, Free: free}
+}
+
+// NotifyLimited is NotifyIfStillLow behind the per-tier cooldown kept in pass.
+// A suppressed notification returns false with no error.
+func NotifyLimited(
+	ctx context.Context, notify Notifier, report Report, cfg config.Auto, pass *PassState, now time.Time,
+) (bool, error) {
+	low, err := StillLow(report, cfg)
+	if err != nil || !low {
+		return false, err
+	}
+	limits, err := cfg.Limits()
+	if err != nil {
+		return false, err
+	}
+	tier := ThresholdsFor(report.End.Total, limits).Raw(report.End.Free)
+	if !pass.NotifyAllowed(tier, report.End.Free, now, limits.NotifyCooldown) {
+		return false, nil
+	}
+	sent, err := NotifyIfStillLow(ctx, notify, report, cfg)
+	if sent {
+		pass.NoteNotified(tier, report.End.Free, now)
+	}
+	return sent, err
+}

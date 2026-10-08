@@ -23,7 +23,7 @@ import (
 const gib = int64(1) << 30
 
 func autoCfg() config.Auto {
-	return config.Auto{Interval: "30m", MinFree: "30G", MinFreePct: 15}
+	return config.Auto{Interval: "30m", MinFree: "30G", MinFreePct: 15, MinFreeCap: "200G"}
 }
 
 func TestChooseTier(t *testing.T) {
@@ -40,10 +40,17 @@ func TestChooseTier(t *testing.T) {
 		{"under pct floor only", autoCfg(), 100 * gib, TierLow},
 		{"under min_free only", config.Auto{MinFree: "200G", MinFreePct: 1}, 150 * gib, TierLow},
 		{"pct disabled", config.Auto{MinFree: "30G", MinFreePct: 0}, 40 * gib, TierOK},
-		{"just above critical", autoCfg(), 5*gib + 1, TierLow},
-		{"exactly critical boundary", autoCfg(), 5 * gib, TierLow},
-		{"just under critical", autoCfg(), 5*gib - 1, TierCritical},
-		{"nearly full", autoCfg(), 400 << 20, TierCritical},
+		{"just above critical", autoCfg(), 10*gib + 1, TierLow},
+		{"exactly critical boundary", autoCfg(), 10 * gib, TierLow},
+		{"just under critical", autoCfg(), 10*gib - 1, TierCritical},
+		{"just above emergency", autoCfg(), 5*gib + 1, TierCritical},
+		{"exactly emergency boundary", autoCfg(), 5 * gib, TierCritical},
+		{"just under emergency", autoCfg(), 5*gib - 1, TierEmergency},
+		{"nearly full", autoCfg(), 400 << 20, TierEmergency},
+		{"large disk default is not permanently low", config.Auto{}, 139 * gib, TierOK},
+		{"cap bounds the pct floor", config.Auto{MinFree: "30G", MinFreePct: 15}, 101 * gib, TierOK},
+		{"below the cap is low", config.Auto{MinFree: "30G", MinFreePct: 15}, 99 * gib, TierLow},
+		{"explicit min_free above the cap is kept", config.Auto{MinFree: "200G", MinFreePct: 15}, 150 * gib, TierLow},
 		{"blank settings use defaults", config.Auto{MinFreePct: 0}, 20 * gib, TierLow},
 	}
 	for _, tt := range tests {
@@ -77,6 +84,7 @@ func TestTierString(t *testing.T) {
 	assert.Equal(t, "ok", TierOK.String())
 	assert.Equal(t, "low", TierLow.String())
 	assert.Equal(t, "critical", TierCritical.String())
+	assert.Equal(t, "emergency", TierEmergency.String())
 	assert.Equal(t, "unknown", Tier(9).String())
 }
 
@@ -119,6 +127,7 @@ type harness struct {
 	fakes map[string]*fakeProvider
 	out   bytes.Buffer
 	home  string
+	wrap  map[string]provider.Provider
 }
 
 func newHarness(t *testing.T) *harness {
@@ -158,6 +167,11 @@ func (h *harness) add(name string, enabled, over bool, mutate ...func(*fakeProvi
 
 func (h *harness) run(dryRun bool, free ...int64) (Report, error) {
 	h.t.Helper()
+	return h.runWith(false, dryRun, free...)
+}
+
+func (h *harness) runWith(verbose, dryRun bool, free ...int64) (Report, error) {
+	h.t.Helper()
 	i := 0
 	deps := Deps{
 		Free: func() (FreeSpace, error) {
@@ -166,14 +180,18 @@ func (h *harness) run(dryRun bool, free ...int64) (Report, error) {
 			return FreeSpace{Free: v, Total: 1000 * gib}, nil
 		},
 		NewProvider: func(name string, _ config.Provider) (provider.Provider, error) {
+			if w, ok := h.wrap[name]; ok {
+				return w, nil
+			}
 			f, ok := h.fakes[name]
 			if !ok {
 				return nil, errors.New("unknown " + name)
 			}
 			return f, nil
 		},
-		Out:  &h.out,
-		Home: h.home,
+		Out:     &h.out,
+		Home:    h.home,
+		Verbose: verbose,
 	}
 	return Run(h.t.Context(), h.cfg, dryRun, deps)
 }
@@ -189,7 +207,8 @@ func TestRun_OKTierTrimsOnlyOverLimitProviders(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, TierOK, report.Tier)
 	assert.Equal(t, []string{"npm", "go-build"}, h.calls)
-	assert.Contains(t, h.out.String(), "pip: skipped (within limit)")
+	assert.Contains(t, h.out.String(), "skipped (1):\n  pip: within limit")
+	assert.Contains(t, h.out.String(), "total: freed 2.0 GiB across 2 providers; 1 skipped")
 	for _, o := range h.opts {
 		assert.Equal(t, provider.CleanModeSmart, o.Mode)
 		assert.False(t, o.DryRun)
@@ -234,7 +253,7 @@ func TestRun_CriticalSweepsFirstEvenWhenDisabled(t *testing.T) {
 	report, err := h.run(false, 2*gib)
 
 	require.NoError(t, err)
-	assert.Equal(t, TierCritical, report.Tier)
+	assert.Equal(t, TierEmergency, report.Tier)
 	assert.Equal(t, []string{"sail-dirs", "npm"}, h.calls)
 }
 
@@ -382,8 +401,9 @@ func TestRun_ReportsSkipsAndErrorsWithoutAborting(t *testing.T) {
 	assert.Equal(t, []string{"npm", "pip", "yarn"}, h.calls)
 	require.Error(t, report.Err())
 	assert.Contains(t, report.Err().Error(), "pip: boom")
-	assert.Contains(t, h.out.String(), "npm: skipped (npm is running)")
-	assert.Contains(t, h.out.String(), "gone: skipped (unavailable)")
+	assert.Contains(t, h.out.String(), "skipped (2):\n  npm: npm is running\n  gone: unavailable")
+	assert.Contains(t, h.out.String(), "pip: error: boom")
+	assert.Contains(t, h.out.String(), "total: freed 2.0 GiB across 1 provider; 2 skipped; 1 failed")
 }
 
 func TestRun_FreeSpaceErrorDeletesNothing(t *testing.T) {
@@ -626,7 +646,7 @@ func TestRenderPlist_ValidXMLWithExpectedKeys(t *testing.T) {
 	text := string(data)
 	assert.Contains(t, tokens, AgentLabel)
 	assert.Contains(t, tokens, "/Users/me/bin/cache&buster", "ampersand must round-trip through escaping")
-	assert.Contains(t, tokens, "auto")
+	assert.Contains(t, tokens, "tick")
 	assert.Contains(t, text, "<key>StartInterval</key>\n\t<integer>1800</integer>")
 	assert.Contains(t, text, "<key>RunAtLoad</key>\n\t<true/>")
 	assert.Contains(t, text, "/Users/me/.local/share/mise/shims")
@@ -866,7 +886,7 @@ func TestReport_Previewed(t *testing.T) {
 	assert.False(t, Report{Tier: TierLow, Results: []Result{{Status: StatusError}, {Status: StatusSkipped}}}.Previewed())
 	assert.False(t, Report{Tier: TierLow}.Previewed())
 	assert.True(t, Report{Tier: TierLow, Results: []Result{{Status: StatusError}, {Status: StatusDryRun}}}.Previewed())
-	assert.True(t, Report{Tier: TierCritical, Results: ran}.Previewed())
+	assert.True(t, Report{Tier: TierEmergency, Results: ran}.Previewed())
 }
 
 func TestAgentUninstall_UnrecognisedBootoutAndPrintFailureKeepsState(t *testing.T) {
@@ -944,4 +964,17 @@ func TestRun_InterruptDoesNotWaitForHungProbe(t *testing.T) {
 
 	require.Error(t, err)
 	assert.Less(t, time.Since(start), 5*time.Second)
+}
+
+func TestRun_VerbosePrintsEveryResultLikeBefore(t *testing.T) {
+	h := newHarness(t)
+	h.add("npm", true, true)
+	h.add("pip", true, false)
+
+	_, err := h.runWith(true, false, 400*gib)
+
+	require.NoError(t, err)
+	assert.Contains(t, h.out.String(), "pip: skipped (within limit)")
+	assert.Contains(t, h.out.String(), "npm: freed 1.0 GiB")
+	assert.NotContains(t, h.out.String(), "total:")
 }

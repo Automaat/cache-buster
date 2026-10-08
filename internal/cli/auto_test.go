@@ -167,7 +167,7 @@ func TestAuto_ExplicitDryRunKeepsMarker(t *testing.T) {
 }
 
 func TestAuto_NoMarkerCleansOnLowSpace(t *testing.T) {
-	f := newAutoFixture(t, 100*autoGiB, "")
+	f := newAutoFixture(t, 40*autoGiB, "")
 
 	require.NoError(t, runAutoWithLoader(t.Context(), f.loader, f.env, false))
 
@@ -224,7 +224,7 @@ func TestAuto_CriticalSweepsDisabledDirPatternProvider(t *testing.T) {
 	require.NoError(t, runAutoWithLoader(t.Context(), f.loader, f.env, false))
 
 	assert.NoDirExists(t, stale)
-	assert.Contains(t, f.out.String(), "tier critical")
+	assert.Contains(t, f.out.String(), "tier emergency")
 }
 
 func TestAuto_ConcurrentRunExits(t *testing.T) {
@@ -263,14 +263,14 @@ func TestAuto_ConfigOverridesChangeTier(t *testing.T) {
 }
 
 func TestInstallAgent_WritesPlistWithoutRealLaunchctl(t *testing.T) {
-	f := newAutoFixture(t, 100*autoGiB, "auto:\n  interval: 60m\n")
+	f := newAutoFixture(t, 100*autoGiB, "auto:\n  interval: 60m\n  tick_interval: 5m\n")
 
 	require.NoError(t, runInstallAgentWithLoader(t.Context(), f.loader, f.env))
 
 	plist := filepath.Join(f.home, "Library", "LaunchAgents", auto.AgentLabel+".plist")
 	data, err := os.ReadFile(plist)
 	require.NoError(t, err)
-	assert.Contains(t, string(data), "<integer>3600</integer>")
+	assert.Contains(t, string(data), "<integer>300</integer>")
 	assert.True(t, auto.FirstRunPending(f.env.stateDir))
 	require.Len(t, f.launchd, 3)
 	assert.Equal(t, []string{"launchctl", "bootout", "gui/501/dev.mskalski.cache-buster"}, f.launchd[0])
@@ -400,4 +400,34 @@ func TestInstallAgent_WritesSystemdUnitsUnderTheConfigDir(t *testing.T) {
 
 	assert.FileExists(t, filepath.Join(f.home, "xdg", "systemd", "user", auto.SystemdUnit+".timer"))
 	assert.NoDirExists(t, filepath.Join(f.home, ".config"))
+}
+
+func TestAuto_LoadErrorNamedInOutputAndRunLogWhileOthersRun(t *testing.T) {
+	f := newAutoFixture(t, 1*autoGiB, `  rel:
+    enabled: true
+    type: dir-pattern
+    min_idle: banana
+    paths:
+      - `+filepath.Join(t.TempDir(), "dirs-*")+`
+    max_size: 1G
+`)
+
+	err := runAutoWithLoader(t.Context(), f.loader, f.env, false)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "provider rel: parse min_idle")
+	assert.NotContains(t, err.Error(), "rel: provider rel")
+	assert.Contains(t, f.out.String(), "provider rel: parse min_idle")
+	assert.True(t, f.cleaned(), "the healthy provider still ran")
+
+	runs, _, readErr := auto.ReadRuns(f.env.stateDir, 0)
+	require.NoError(t, readErr)
+	require.NotEmpty(t, runs)
+	var logged string
+	for _, p := range runs[len(runs)-1].Providers {
+		if p.Name == "rel" {
+			logged = p.Error
+		}
+	}
+	assert.Contains(t, logged, "provider rel: parse min_idle")
 }

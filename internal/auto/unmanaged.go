@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/smykla-skalski/bilgie/internal/config"
+	"github.com/smykla-skalski/bilgie/internal/osshim"
 )
 
 // Unmanaged scan defaults.
@@ -70,12 +71,14 @@ func UnmanagedRoots(home string) []string {
 
 // CoveredPaths returns the concrete paths providers manage: every enabled
 // provider plus the directory-pattern sweeps that auto runs even when
-// disabled. Globs are expanded to what exists now.
+// disabled. Project-artifacts roots hold source trees and are not covered:
+// that provider removes only artifact directories below them. Globs are
+// expanded to what exists now.
 func CoveredPaths(cfg *config.Config) []string {
 	var out []string
 	for name := range cfg.Providers {
 		pc := cfg.Providers[name]
-		if !cfg.Applies(name) || (!pc.Enabled && pc.Type != config.TypeDirPattern) {
+		if !cfg.Applies(name) || pc.Type == config.TypeProjectArtifacts || (!pc.Enabled && pc.Type != config.TypeDirPattern) {
 			continue
 		}
 		paths, err := config.ExpandPaths(pc.Paths)
@@ -195,6 +198,7 @@ feed:
 
 func measureDir(ctx context.Context, root string) (int64, bool) {
 	var total int64
+	var links osshim.LinkSet
 	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return ctxErr
@@ -209,6 +213,9 @@ func measureDir(ctx context.Context, root string) (int64, bool) {
 			return nil
 		}
 		if info, infoErr := d.Info(); infoErr == nil {
+			if id, _, shared := osshim.SharedFileID(path, info); shared && !links.Add(id) {
+				return nil
+			}
 			total += diskUsage(info)
 		}
 		return nil

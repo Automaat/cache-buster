@@ -12,6 +12,7 @@ import (
 
 	"github.com/smykla-skalski/bilgie/internal/config"
 	"github.com/smykla-skalski/bilgie/internal/provider"
+	"github.com/smykla-skalski/bilgie/internal/report"
 	"github.com/smykla-skalski/bilgie/pkg/size"
 )
 
@@ -40,6 +41,17 @@ type Deps struct {
 	NewProvider func(name string, cfg config.Provider) (provider.Provider, error)
 	Out         io.Writer
 	Home        string
+	// Verbose prints every entry a provider would remove instead of the
+	// concise per-provider summary.
+	Verbose bool
+	// MinTier raises the pass to at least this tier; the tick sets it to its
+	// hysteresis-settled tier so a pass does not ease off earlier than the
+	// tick decided.
+	MinTier Tier
+	// Predicted marks a pass started by the falling-trend forecast: it runs
+	// as the low tier even though space is still above the threshold, and
+	// does not stop for "recovered" before any provider ran.
+	Predicted bool
 }
 
 // Result is one provider's outcome.
@@ -49,7 +61,25 @@ type Result struct {
 	Status string
 	Reason string
 	Output string
-	Freed  int64
+	// Entries are the paths removed, or that a dry-run would remove.
+	Entries        []provider.Entry
+	SkippedEntries int
+	Freed          int64
+}
+
+// Block converts the result to the renderer's form.
+func (r Result) Block() report.Block {
+	b := report.Block{
+		Name:    r.Name,
+		Status:  r.Status,
+		Reason:  r.Reason,
+		Output:  r.Output,
+		Summary: report.Summarize(r.Status, r.Freed, r.Entries, r.SkippedEntries),
+	}
+	if r.Err != nil {
+		b.Err = r.Err.Error()
+	}
+	return b
 }
 
 // Report is the outcome of a run.
@@ -78,7 +108,11 @@ func (r Report) Previewed() bool {
 func (r Report) Err() error {
 	var errs []error
 	for _, res := range r.Results {
-		if res.Err != nil {
+		switch {
+		case res.Err == nil:
+		case report.IsLoadFailure(res.Name, res.Err.Error()):
+			errs = append(errs, res.Err)
+		default:
 			errs = append(errs, fmt.Errorf("%s: %w", res.Name, res.Err))
 		}
 	}
@@ -86,7 +120,7 @@ func (r Report) Err() error {
 }
 
 // candidate is a provider auto may run. A sweep is a disabled
-// directory-pattern provider that runs only at the critical tier.
+// directory-pattern provider that runs only at the emergency tier.
 type candidate struct {
 	cfg   config.Provider
 	name  string
@@ -100,54 +134,86 @@ func Run(ctx context.Context, cfg *config.Config, dryRun bool, deps Deps) (Repor
 	if err != nil {
 		return Report{}, fmt.Errorf("read free space: %w", err)
 	}
-	tier, err := ChooseTier(start, cfg.Auto)
+	limits, err := cfg.Auto.Limits()
 	if err != nil {
 		return Report{}, err
 	}
+	th := ThresholdsFor(start.Total, limits)
+	tier := max(th.Raw(start.Free), deps.MinTier)
+	if deps.Predicted {
+		tier = max(tier, TierLow)
+	}
 
-	report := Report{Start: start, End: start, Tier: tier, DryRun: dryRun}
+	rep := Report{Start: start, End: start, Tier: tier, DryRun: dryRun}
 	fmt.Fprintf(deps.Out, "free %s of %s: tier %s%s\n",
 		size.FormatSize(start.Free), size.FormatSize(start.Total), tier, dryRunSuffix(dryRun))
+
+	var skippedBlocks []report.Block
+	finish := func() {
+		if deps.Verbose {
+			return
+		}
+		report.WriteSkipped(deps.Out, skippedBlocks)
+		report.WriteTotal(deps.Out, report.Totals(blocksOf(rep.Results), dryRun))
+	}
 
 	list := candidates(cfg, tier)
 	protected := ProtectedPaths(cfg, deps.Home)
 	for i := range list {
 		c := &list[i]
 		if err := ctx.Err(); err != nil {
-			return report, err
+			finish()
+			return rep, err
 		}
 
-		current := currentTier(cfg, tier, deps, &report)
-		if tier != TierOK && current == TierOK {
-			report.Recovered = true
-			fmt.Fprintf(deps.Out, "free space recovered: %s free, stopping\n", size.FormatSize(report.End.Free))
+		current := currentTier(th, tier, deps, &rep)
+		if tier != TierOK && current == TierOK && !deps.Predicted {
+			rep.Recovered = true
+			fmt.Fprintf(deps.Out, "free space recovered: %s free, stopping\n", size.FormatSize(rep.End.Free))
 			break
 		}
-		if c.sweep && current != TierCritical {
+		if c.sweep && current != TierEmergency {
 			continue
 		}
 
-		res := runCandidate(ctx, c, tier, dryRun, deps, protected)
-		report.Results = append(report.Results, res)
-		printResult(deps.Out, res)
+		res := runCandidate(ctx, cfg, c, tier, dryRun, deps, protected)
+		rep.Results = append(rep.Results, res)
+		switch {
+		case deps.Verbose:
+			printResult(deps.Out, res)
+		case res.Status == StatusSkipped:
+			skippedBlocks = append(skippedBlocks, res.Block())
+		default:
+			report.WriteBlock(deps.Out, res.Block())
+		}
 	}
 
 	if err := ctx.Err(); err != nil {
-		return report, err
+		finish()
+		return rep, err
 	}
 
+	finish()
 	if end, freeErr := deps.Free(); freeErr == nil {
-		report.End = end
+		rep.End = end
 	} else {
-		report.EndStale = true
+		rep.EndStale = true
 	}
-	fmt.Fprintf(deps.Out, "done: free %s\n", size.FormatSize(report.End.Free))
-	return report, nil
+	fmt.Fprintf(deps.Out, "done: free %s\n", size.FormatSize(rep.End.Free))
+	return rep, nil
+}
+
+func blocksOf(results []Result) []report.Block {
+	blocks := make([]report.Block, len(results))
+	for i, r := range results {
+		blocks[i] = r.Block()
+	}
+	return blocks
 }
 
 // currentTier rereads free space so a run stops once enough was freed. An
 // unreadable value keeps the starting tier.
-func currentTier(cfg *config.Config, start Tier, deps Deps, report *Report) Tier {
+func currentTier(th Thresholds, start Tier, deps Deps, rep *Report) Tier {
 	if start == TierOK {
 		return start
 	}
@@ -155,12 +221,8 @@ func currentTier(cfg *config.Config, start Tier, deps Deps, report *Report) Tier
 	if err != nil {
 		return start
 	}
-	report.End = now
-	tier, err := ChooseTier(now, cfg.Auto)
-	if err != nil {
-		return start
-	}
-	return tier
+	rep.End = now
+	return th.Settle(start, now.Free)
 }
 
 func dryRunSuffix(dryRun bool) string {
@@ -171,7 +233,7 @@ func dryRunSuffix(dryRun bool) string {
 }
 
 // candidates lists the providers for a tier, cheapest to rebuild first.
-// At the critical tier the stale-directory sweeps go first because they free
+// At the emergency tier the stale-directory sweeps go first because they free
 // the most. docker-volumes is never listed.
 func candidates(cfg *config.Config, tier Tier) []candidate {
 	var sweeps, regular []string
@@ -179,14 +241,14 @@ func candidates(cfg *config.Config, tier Tier) []candidate {
 
 	for name := range cfg.Providers {
 		pc := cfg.Providers[name]
-		if !cfg.Applies(name) || neverRun(name, pc) || (name != "docker" && pruneVolumes(pc.CleanCmd)) || !config.PathsExist(pc.Paths) {
+		if !cfg.Applies(name) || neverRun(name, pc) || (name != "docker" && pruneVolumes(pc.CleanCmd)) || !hasTargets(pc) {
 			continue
 		}
 		switch {
 		case pc.Enabled:
 			byName[name] = candidate{name: name, cfg: pc}
 			regular = append(regular, name)
-		case pc.Type == config.TypeDirPattern && tier == TierCritical:
+		case pc.Type == config.TypeDirPattern && tier == TierEmergency:
 			byName[name] = candidate{name: name, cfg: pc, sweep: true}
 			sweeps = append(sweeps, name)
 		}
@@ -200,6 +262,13 @@ func candidates(cfg *config.Config, tier Tier) []candidate {
 		out = append(out, byName[name])
 	}
 	return out
+}
+
+// hasTargets reports whether a provider has paths on disk. An enabled
+// dir-pattern provider with a broken config counts, so its load error is
+// reported rather than the provider silently vanishing.
+func hasTargets(pc config.Provider) bool {
+	return config.PathsExist(pc.Paths) || pc.Enabled && pc.DirPatternError() != nil
 }
 
 // neverRun lists the providers auto must not touch, whatever they are named.
@@ -228,16 +297,18 @@ func pruneVolumes(cmd string) bool {
 	return strings.Contains(lower, "volume")
 }
 
-func runCandidate(ctx context.Context, c *candidate, tier Tier, dryRun bool, deps Deps, protected []string) Result {
+func runCandidate(ctx context.Context, cfg *config.Config, c *candidate, tier Tier, dryRun bool, deps Deps, protected []string) Result {
 	res := Result{Name: c.name}
 
 	p, err := deps.NewProvider(c.name, c.cfg)
 	if err != nil {
-		res.Status, res.Err = StatusError, fmt.Errorf("load provider: %w", err)
+		res.Status, res.Err = StatusError, err
 		return res
 	}
 
-	if reason := protectedReason(p, deps.Home, protected); reason != "" {
+	if aware, ok := p.(provider.ProtectionAware); ok {
+		aware.SetProtected(append(slices.Clone(protected), protectedRoots(deps.Home)...))
+	} else if reason := protectedReason(p, deps.Home, protected); reason != "" {
 		return skipped(res, reason)
 	}
 	if !availableCtx(ctx, p) {
@@ -262,13 +333,19 @@ func runCandidate(ctx context.Context, c *candidate, tier Tier, dryRun bool, dep
 		}
 	}
 
-	out, err := p.Clean(ctx, provider.CleanOptions{
+	opts := provider.CleanOptions{
 		DryRun:  dryRun,
 		Mode:    provider.CleanModeSmart,
 		Timeout: DockerCleanTimeout,
-	})
+	}
+	if tier != TierOK {
+		opts.Recovered = recoveredFunc(cfg, deps, dryRun)
+	}
+	out, err := p.Clean(ctx, opts)
 	res.Output = strings.TrimSpace(out.Output)
 	res.Freed = out.BytesCleaned
+	res.Entries = out.Entries
+	res.SkippedEntries = out.SkippedEntries
 	switch {
 	case err != nil:
 		res.Status, res.Err = StatusError, err
@@ -280,6 +357,23 @@ func runCandidate(ctx context.Context, c *candidate, tier Tier, dryRun bool, dep
 		res.Status = StatusCleaned
 	}
 	return res
+}
+
+// recoveredFunc tells a provider freeing space in steps when it can stop: free
+// space is back above the floors. A dry-run frees nothing, so it adds the
+// bytes the provider reports it would free.
+func recoveredFunc(cfg *config.Config, deps Deps, dryRun bool) func(freed int64) bool {
+	return func(freed int64) bool {
+		now, err := deps.Free()
+		if err != nil {
+			return false
+		}
+		if dryRun {
+			now.Free += freed
+		}
+		tier, err := ChooseTier(now, cfg.Auto)
+		return err == nil && tier == TierOK
+	}
 }
 
 func skipped(res Result, reason string) Result {
@@ -301,13 +395,21 @@ func printResult(out io.Writer, res Result) {
 	case StatusSkipped:
 		fmt.Fprintf(out, "%s: skipped (%s)\n", res.Name, res.Reason)
 	case StatusError:
-		fmt.Fprintf(out, "%s: error: %v\n", res.Name, res.Err)
+		printError(out, res)
 	case StatusDryRun:
 		fmt.Fprintf(out, "%s: dry-run, would free %s\n", res.Name, size.FormatSize(res.Freed))
 		printPreview(out, res.Output)
 	default:
 		fmt.Fprintf(out, "%s: freed %s\n", res.Name, size.FormatSize(res.Freed))
 	}
+}
+
+func printError(out io.Writer, res Result) {
+	if report.IsLoadFailure(res.Name, res.Err.Error()) {
+		fmt.Fprintln(out, res.Err)
+		return
+	}
+	fmt.Fprintf(out, "%s: error: %v\n", res.Name, res.Err)
 }
 
 // printPreview lists what a dry-run would remove and counts the skip lines,

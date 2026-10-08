@@ -36,14 +36,14 @@ func readRecords(t *testing.T, f *autoFixture) []auto.RunRecord {
 }
 
 func TestAuto_AppendsOneRecordPerRunAndHistoryReadsItBack(t *testing.T) {
-	f := newAutoFixture(t, 100*autoGiB, "")
+	f := newAutoFixture(t, 40*autoGiB, "")
 
 	require.NoError(t, runAutoWithLoader(t.Context(), f.loader, f.env, false))
 
 	runs := readRecords(t, f)
 	require.Len(t, runs, 1)
 	assert.Equal(t, "low", runs[0].Tier)
-	assert.Equal(t, 100*autoGiB, runs[0].FreeBefore)
+	assert.Equal(t, 40*autoGiB, runs[0].FreeBefore)
 	require.Len(t, runs[0].Providers, 1)
 	assert.Equal(t, "tool", runs[0].Providers[0].Name)
 	assert.Equal(t, auto.StatusCleaned, runs[0].Providers[0].Status)
@@ -68,7 +68,7 @@ func TestAuto_RecordsSkippedProvidersWithReasons(t *testing.T) {
 
 func TestAuto_NotifiesOnlyWhenStillUnderThreshold(t *testing.T) {
 	t.Run("space stays low", func(t *testing.T) {
-		f := newAutoFixture(t, 100*autoGiB, "")
+		f := newAutoFixture(t, 40*autoGiB, "")
 		var notes noteLog
 		f.env.notify = notes.notifier(nil)
 
@@ -79,7 +79,7 @@ func TestAuto_NotifiesOnlyWhenStillUnderThreshold(t *testing.T) {
 	})
 
 	t.Run("cleanup recovers space", func(t *testing.T) {
-		f := newAutoFixture(t, 100*autoGiB, "")
+		f := newAutoFixture(t, 40*autoGiB, "")
 		var notes noteLog
 		f.env.notify = notes.notifier(nil)
 		f.env.free = func() (auto.FreeSpace, error) {
@@ -118,7 +118,7 @@ func TestAuto_NotifiesOnlyWhenStillUnderThreshold(t *testing.T) {
 }
 
 func TestAuto_NotifierFailureDoesNotFailTheRun(t *testing.T) {
-	f := newAutoFixture(t, 100*autoGiB, "")
+	f := newAutoFixture(t, 40*autoGiB, "")
 	var notes noteLog
 	f.env.notify = notes.notifier(errors.New("no permission"))
 
@@ -131,7 +131,7 @@ func TestAuto_NotifierFailureDoesNotFailTheRun(t *testing.T) {
 }
 
 func TestAuto_RecordFailureDoesNotFailTheRun(t *testing.T) {
-	f := newAutoFixture(t, 100*autoGiB, "")
+	f := newAutoFixture(t, 40*autoGiB, "")
 	require.NoError(t, os.MkdirAll(filepath.Join(f.env.stateDir, auto.RunLogName), 0o750))
 
 	require.NoError(t, runAutoWithLoader(t.Context(), f.loader, f.env, false))
@@ -141,7 +141,7 @@ func TestAuto_RecordFailureDoesNotFailTheRun(t *testing.T) {
 }
 
 func TestAuto_ProviderErrorStillRecorded(t *testing.T) {
-	f := newAutoFixture(t, 100*autoGiB, "")
+	f := newAutoFixture(t, 40*autoGiB, "")
 	f.env.newProvider = func(string, config.Provider) (provider.Provider, error) { return nil, os.ErrInvalid }
 
 	require.Error(t, runAutoWithLoader(t.Context(), f.loader, f.env, false))
@@ -242,7 +242,7 @@ func TestStatus_ListsUnmanagedDirsFromInjectedScan(t *testing.T) {
 }
 
 func TestAuto_FreeSpaceReadFailureIsStillRecorded(t *testing.T) {
-	f := newAutoFixture(t, 100*autoGiB, "")
+	f := newAutoFixture(t, 40*autoGiB, "")
 	f.env.free = func() (auto.FreeSpace, error) { return auto.FreeSpace{}, os.ErrInvalid }
 
 	require.Error(t, runAutoWithLoader(t.Context(), f.loader, f.env, false))
@@ -342,4 +342,52 @@ func TestStatus_NoEnabledProvidersStillListsProtectedEntries(t *testing.T) {
 	require.NoError(t, err)
 	assert.Contains(t, out, "No enabled providers")
 	assert.Contains(t, out, "/p/Downloads")
+}
+
+func TestHistoryProviders_AggregatesFreedBytesPerProvider(t *testing.T) {
+	stateDir := t.TempDir()
+	base := time.Date(2026, 10, 8, 12, 0, 0, 0, time.UTC)
+	runs := []auto.RunRecord{
+		{Time: base.Add(-3 * time.Hour), Tier: "low", Providers: []auto.ProviderRecord{
+			{Name: "npm", Status: auto.StatusCleaned, FreedBytes: 3 << 30},
+			{Name: "go", Status: auto.StatusSkipped, Reason: "within limit"},
+		}},
+		{Time: base.Add(-2 * time.Hour), Tier: "low", DryRun: true, Providers: []auto.ProviderRecord{
+			{Name: "npm", Status: auto.StatusDryRun, FreedBytes: 9 << 30},
+		}},
+		{Time: base.Add(-time.Hour), Tier: "low", Providers: []auto.ProviderRecord{
+			{Name: "npm", Status: auto.StatusCleaned, FreedBytes: 1 << 30},
+			{Name: "go", Status: auto.StatusCleaned, FreedBytes: 2 << 30},
+			{Name: "docker", Status: auto.StatusError, Error: "boom"},
+		}},
+	}
+	for _, r := range runs {
+		require.NoError(t, auto.AppendRun(stateDir, r))
+	}
+
+	var table bytes.Buffer
+	require.NoError(t, runHistoryProvidersIn(&table, stateDir, 10, false))
+	lines := strings.Split(strings.TrimSpace(table.String()), "\n")
+	require.Len(t, lines, 5, table.String())
+	assert.Contains(t, lines[0], "last 3 run(s)")
+	assert.Regexp(t, `^npm\s+3\s+4.0 GiB\s+9.0 GiB\s+0\s+0$`, lines[2])
+	assert.Regexp(t, `^go\s+2\s+2.0 GiB\s+0 B\s+1\s+0$`, lines[3])
+	assert.Regexp(t, `^docker\s+1\s+0 B\s+0 B\s+0\s+1$`, lines[4])
+
+	var last bytes.Buffer
+	require.NoError(t, runHistoryProvidersIn(&last, stateDir, 1, true))
+	var parsed struct {
+		Runs      int               `json:"runs"`
+		Providers []ProviderHistory `json:"providers"`
+	}
+	require.NoError(t, json.Unmarshal(last.Bytes(), &parsed))
+	assert.Equal(t, 1, parsed.Runs)
+	require.Len(t, parsed.Providers, 3)
+	assert.Equal(t, "go", parsed.Providers[0].Name)
+	assert.Equal(t, int64(2<<30), parsed.Providers[0].Freed)
+
+	require.Error(t, runHistoryProvidersIn(&last, stateDir, -1, false))
+	var empty bytes.Buffer
+	require.NoError(t, runHistoryProvidersIn(&empty, t.TempDir(), 10, false))
+	assert.Contains(t, empty.String(), "No auto runs recorded")
 }

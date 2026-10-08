@@ -33,7 +33,7 @@
   <Actions Context="Author">
     <Exec>
       <Command>C:\Users\me\bin\bilgie.exe</Command>
-      <Arguments>auto</Arguments>
+      <Arguments>tick</Arguments>
     </Exec>
   </Actions>
 </Task>

@@ -96,7 +96,7 @@ func TestScanProvider_InvalidMaxSize(t *testing.T) {
 
 	status := scanProvider(t.Context(), cfg, "cargo")
 
-	assert.Contains(t, status.Error, "load provider")
+	assert.Contains(t, status.Error, "provider cargo: ")
 	assert.Contains(t, status.Error, "parse max_size")
 }
 
@@ -393,7 +393,7 @@ func TestScanProvider_InvalidGlobPattern(t *testing.T) {
 
 	status := scanProvider(t.Context(), cfg, "cargo")
 
-	assert.Contains(t, status.Error, "load provider")
+	assert.Contains(t, status.Error, "provider cargo: ")
 	assert.Contains(t, status.Error, "expand paths")
 }
 

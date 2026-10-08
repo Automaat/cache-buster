@@ -127,6 +127,7 @@ func (l *Loader) Load() (*Config, error) {
 		if l.v.IsSet("providers." + name + ".skip_if_git_worktree") {
 			merged.SkipIfGitWorktree = userP.SkipIfGitWorktree
 		}
+		mergeProjectArtifacts(l, name, &merged, &userP)
 		// Union, never replace: an empty user list must not strip protections.
 		if l.v.IsSet("providers." + name + ".skip_prefixes") {
 			merged.SkipPrefixes = unionStrings(defaultP.SkipPrefixes, userP.SkipPrefixes)
@@ -135,6 +136,30 @@ func (l *Loader) Load() (*Config, error) {
 	}
 
 	return cfg, nil
+}
+
+// mergeProjectArtifacts applies the user's project-artifacts settings over
+// the defaults, field by field.
+func mergeProjectArtifacts(l *Loader, name string, merged, user *Provider) {
+	prefix := "providers." + name + "."
+	if l.v.IsSet(prefix + "max_depth") {
+		merged.MaxDepth = user.MaxDepth
+	}
+	if l.v.IsSet(prefix + "scan_budget") {
+		merged.ScanBudget = user.ScanBudget
+	}
+	if l.v.IsSet(prefix + "skip_if_dirty") {
+		merged.SkipIfDirty = user.SkipIfDirty
+	}
+	if l.v.IsSet(prefix + "rust") {
+		merged.Rust = user.Rust
+	}
+	if l.v.IsSet(prefix + "node") {
+		merged.Node = user.Node
+	}
+	if l.v.IsSet(prefix + "python") {
+		merged.Python = user.Python
+	}
 }
 
 // unionStrings appends the items of extra that base lacks, so a list saved
@@ -151,11 +176,26 @@ func unionStrings(base, extra []string) []string {
 
 // mergeAuto applies the user's auto settings over the defaults, field by field.
 func (l *Loader) mergeAuto(cfg, userCfg *Config) {
-	if l.v.IsSet("auto.interval") {
-		cfg.Auto.Interval = userCfg.Auto.Interval
-	}
-	if l.v.IsSet("auto.min_free") {
-		cfg.Auto.MinFree = userCfg.Auto.MinFree
+	for _, f := range []struct {
+		key  string
+		dst  *string
+		user string
+	}{
+		{"interval", &cfg.Auto.Interval, userCfg.Auto.Interval},
+		{"tick_interval", &cfg.Auto.TickInterval, userCfg.Auto.TickInterval},
+		{"min_free", &cfg.Auto.MinFree, userCfg.Auto.MinFree},
+		{"min_free_cap", &cfg.Auto.MinFreeCap, userCfg.Auto.MinFreeCap},
+		{"critical_free", &cfg.Auto.CriticalFree, userCfg.Auto.CriticalFree},
+		{"emergency_free", &cfg.Auto.EmergencyFree, userCfg.Auto.EmergencyFree},
+		{"hysteresis", &cfg.Auto.Hysteresis, userCfg.Auto.Hysteresis},
+		{"low_cooldown", &cfg.Auto.LowCooldown, userCfg.Auto.LowCooldown},
+		{"critical_cooldown", &cfg.Auto.CriticalCooldown, userCfg.Auto.CriticalCooldown},
+		{"forecast", &cfg.Auto.Forecast, userCfg.Auto.Forecast},
+		{"notify_cooldown", &cfg.Auto.NotifyCooldown, userCfg.Auto.NotifyCooldown},
+	} {
+		if l.v.IsSet("auto." + f.key) {
+			*f.dst = f.user
+		}
 	}
 	if l.v.IsSet("auto.min_free_pct") {
 		cfg.Auto.MinFreePct = userCfg.Auto.MinFreePct

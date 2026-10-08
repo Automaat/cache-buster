@@ -1,7 +1,9 @@
 package provider
 
 import (
+	"errors"
 	"fmt"
+	"os"
 
 	"github.com/smykla-skalski/bilgie/internal/config"
 )
@@ -25,10 +27,41 @@ var entryBasedProviders = map[string]bool{
 	"chrome-devtools-mcp": true,
 }
 
-// NewProvider creates a provider from config.
+// LoadError is a provider that failed to load from its config. Its text is
+// the line shown to the user: "provider <name>: <reason>".
+type LoadError struct {
+	Err  error
+	Name string
+}
+
+func (e *LoadError) Error() string {
+	return fmt.Sprintf("provider %s: %v", e.Name, e.Err)
+}
+
+func (e *LoadError) Unwrap() error { return e.Err }
+
+// Reason is the cause without the provider prefix.
+func (e *LoadError) Reason() string { return e.Err.Error() }
+
+// NewProvider creates a provider from config. A failure is a *LoadError.
 func NewProvider(name string, cfg config.Provider) (Provider, error) {
+	p, err := newProvider(name, cfg)
+	if err != nil {
+		if _, ok := errors.AsType[*LoadError](err); ok {
+			return nil, err
+		}
+		return nil, &LoadError{Name: name, Err: err}
+	}
+	return p, nil
+}
+
+func newProvider(name string, cfg config.Provider) (Provider, error) {
 	if cfg.Type == config.TypeDirPattern {
 		return NewDirPatternProvider(name, cfg)
+	}
+
+	if cfg.Type == config.TypeProjectArtifacts {
+		return NewProjectArtifactsProvider(name, cfg)
 	}
 
 	if name == "docker" {
@@ -78,8 +111,9 @@ func LoadProviders(cfg *config.Config) ([]Provider, error) {
 
 		p, err := NewProvider(name, provCfg)
 		if err != nil {
-			return nil, fmt.Errorf("provider %q: %w", name, err)
+			return nil, err
 		}
+		applyProtected(p, cfg)
 
 		providers = append(providers, p)
 	}
@@ -91,8 +125,24 @@ func LoadProviders(cfg *config.Config) ([]Provider, error) {
 func LoadProvider(name string, cfg *config.Config) (Provider, error) {
 	provCfg, ok := cfg.GetProvider(name)
 	if !ok {
-		return nil, fmt.Errorf("provider %q not found", name)
+		return nil, &LoadError{Name: name, Err: errors.New("not found")}
 	}
 
-	return NewProvider(name, provCfg)
+	p, err := NewProvider(name, provCfg)
+	if err != nil {
+		return nil, err
+	}
+	applyProtected(p, cfg)
+	return p, nil
+}
+
+// applyProtected hands the configured protected paths to providers that
+// enforce them themselves.
+func applyProtected(p Provider, cfg *config.Config) {
+	aware, ok := p.(ProtectionAware)
+	if !ok {
+		return
+	}
+	home, _ := os.UserHomeDir()
+	aware.SetProtected(expandProtected(config.MergeProtected(cfg.Protected), home))
 }

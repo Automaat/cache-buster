@@ -182,3 +182,22 @@ func TestScanUnmanaged_RealDirCoveredThroughSymlinkedProviderPath(t *testing.T) 
 	require.Len(t, report.Dirs, 1)
 	assert.Equal(t, "other", filepath.Base(report.Dirs[0].Path))
 }
+
+func TestMeasureDir_CountsHardlinkedFileOnce(t *testing.T) {
+	root := t.TempDir()
+	orig := filepath.Join(root, "data.bin")
+	require.NoError(t, os.WriteFile(orig, make([]byte, 64*1024), 0o600))
+	solo := filepath.Join(t.TempDir(), "solo")
+	require.NoError(t, os.MkdirAll(solo, 0o750))
+	require.NoError(t, os.WriteFile(filepath.Join(solo, "data.bin"), make([]byte, 64*1024), 0o600))
+	if err := os.Link(orig, filepath.Join(root, "copy.bin")); err != nil {
+		t.Skipf("hard links unsupported here: %v", err)
+	}
+
+	linked, ok := measureDir(t.Context(), root)
+	single, okSolo := measureDir(t.Context(), solo)
+
+	require.True(t, ok)
+	require.True(t, okSolo)
+	assert.Equal(t, single, linked, "two links use the space of one file")
+}

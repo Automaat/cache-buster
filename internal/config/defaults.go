@@ -19,6 +19,7 @@ func DefaultProvidersFor(p Platform) map[string]Provider {
 		xcodeProviders(),
 		otherProviders(p),
 		tempDirProviders(p),
+		projectProviders(),
 		extraCacheProviders(p),
 	} {
 		maps.Copy(all, group)
@@ -301,6 +302,28 @@ func tempDirProviders(p Platform) map[string]Provider {
 			Paths:   p.tempGlobs("sail*"),
 			MaxSize: "20G",
 			MinIdle: "2h",
+		},
+	}
+}
+
+// projectRoots are the home-relative directories project-artifacts scans when
+// they exist. They stay in ~/ form so a saved config is portable.
+var projectRoots = []string{"~/sideprojects", "~/kong", "~/work", "~/src", "~/code", "~/projects"}
+
+// projectProviders removes whole build artifacts of idle projects. Rust and
+// Node are on by default, Python is opt-in.
+func projectProviders() map[string]Provider {
+	on, off := true, false
+	return map[string]Provider{
+		"project-artifacts": {
+			Enabled: true,
+			Type:    TypeProjectArtifacts,
+			Paths:   append([]string(nil), projectRoots...),
+			MaxSize: "20G",
+			MinIdle: "30d",
+			Rust:    &on,
+			Node:    &on,
+			Python:  &off,
 		},
 	}
 }

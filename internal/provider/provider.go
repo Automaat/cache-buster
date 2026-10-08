@@ -45,6 +45,21 @@ type DiskSizer interface {
 	DiskImageSize(ctx context.Context) (int64, error)
 }
 
+// Recoverer is implemented by providers that can tell how many bytes a clean
+// would free right now, which is less than their size when part of it is in
+// use or too recent to remove.
+type Recoverer interface {
+	Recoverable(ctx context.Context) (int64, error)
+}
+
+// ProtectionAware is implemented by providers that scan for their own
+// targets below broad roots and so enforce the protected paths themselves.
+// The caller hands them the absolute protected paths, which add to the
+// built-in ones.
+type ProtectionAware interface {
+	SetProtected(paths []string)
+}
+
 // CleanOptions configures cleaning behavior.
 type CleanOptions struct {
 	DryRun bool
@@ -52,6 +67,10 @@ type CleanOptions struct {
 	// Timeout bounds Docker's prune command when positive. Other providers
 	// keep their own clean_timeout. Zero leaves Docker unbounded.
 	Timeout time.Duration
+	// Recovered is set under disk pressure. Providers that can free space in
+	// small steps call it with the bytes freed so far and stop once it
+	// reports true. Providers that cannot ignore it.
+	Recovered func(freed int64) bool
 }
 
 // CleanResult contains cleaning operation results.
@@ -59,7 +78,13 @@ type CleanResult struct {
 	Output string
 	// SkipReason is set when the provider declined to clean, for example
 	// because its tool is busy. A skip is not an error.
-	SkipReason   string
-	BytesCleaned int64
-	FilesDeleted int64
+	SkipReason string
+	// Entries lists what was removed, or what a dry-run would remove, so
+	// callers can summarize without parsing Output. Providers that act
+	// through an external command leave it empty.
+	Entries []Entry
+	// SkippedEntries counts candidates a provider examined and left alone.
+	SkippedEntries int
+	BytesCleaned   int64
+	FilesDeleted   int64
 }

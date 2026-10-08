@@ -84,6 +84,7 @@ func (p *CommandProvider) smartClean(ctx context.Context, opts CleanOptions) (Cl
 		BytesCleaned: trimResult.FreedBytes,
 		FilesDeleted: trimResult.DeletedCount,
 		Output:       trimResult.Output,
+		Entries:      entriesFromFiles(trimResult.Removed),
 	}, nil
 }
 

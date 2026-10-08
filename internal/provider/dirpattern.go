@@ -37,13 +37,8 @@ type DirPatternProvider struct {
 
 // NewDirPatternProvider creates a provider that removes stale directories matching cfg.Paths.
 func NewDirPatternProvider(name string, cfg config.Provider) (*DirPatternProvider, error) {
-	for _, path := range cfg.Paths {
-		if !strings.ContainsAny(path, "*?[") {
-			return nil, fmt.Errorf("path %q must contain a glob (*, ? or [)", path)
-		}
-		if !config.IsAbsPortable(path) && !strings.HasPrefix(path, "~/") && !strings.HasPrefix(path, `~\`) {
-			return nil, fmt.Errorf("path %q must be absolute or start with ~/", path)
-		}
+	if err := cfg.DirPatternError(); err != nil {
+		return nil, err
 	}
 
 	base, err := NewBaseProvider(name, cfg)
@@ -87,17 +82,40 @@ func NewDirPatternProvider(name string, cfg config.Provider) (*DirPatternProvide
 type dirScan struct {
 	newest  time.Time
 	gitPath string
-	size    int64
-	files   int64
+	// links holds the hard-linked files of the walk, kept out of size: an
+	// inode frees space only when every link to it is removed.
+	links map[osshim.FileID]linkInfo
+	size  int64
+	files int64
+}
+
+// linkInfo is one hard-linked inode: its size, its total link count on disk
+// and how many of those links the walk found.
+type linkInfo struct {
+	size        int64
+	nlink, seen uint64
+}
+
+// evaluated is one matched directory after the eligibility checks.
+type evaluated struct {
+	dir    string
+	reason string
+	sc     dirScan
 }
 
 // Clean implements Provider. Smart and full modes behave the same: only
 // whole stale directories are removed, never individual files.
+//
+// Every directory is evaluated before any is removed: removing one drops the
+// link count of files it shares with another, which would hide the shared
+// inode from the later scan.
 func (p *DirPatternProvider) Clean(ctx context.Context, opts CleanOptions) (CleanResult, error) {
 	var (
 		out    strings.Builder
 		result CleanResult
 		errs   []error
+		evals  = make([]evaluated, 0, len(p.paths))
+		seen   = make(map[string]bool, len(p.paths))
 	)
 
 	for _, dir := range p.paths {
@@ -105,18 +123,46 @@ func (p *DirPatternProvider) Clean(ctx context.Context, opts CleanOptions) (Clea
 			result.Output = out.String()
 			return result, err
 		}
-
+		if seen[dir] {
+			continue
+		}
+		seen[dir] = true
 		sc, reason := p.evaluate(ctx, dir)
+		evals = append(evals, evaluated{dir: dir, sc: sc, reason: reason})
+	}
+	freed := newFreedLinks(evals)
+	eligible := 0
+	for _, ev := range evals {
+		if ev.reason == "" {
+			eligible++
+		}
+	}
+
+	for _, ev := range evals {
+		if err := ctx.Err(); err != nil {
+			result.Output = out.String()
+			return result, err
+		}
+
+		dir, sc, reason := ev.dir, ev.sc, ev.reason
+		if reason == "" && !opts.DryRun && eligible > 1 {
+			// Other directories were evaluated since this one; confirm it
+			// is still idle and clean of .git before deleting.
+			sc, reason = p.recheck(ctx, dir, sc)
+		}
 		if reason != "" {
 			fmt.Fprintf(&out, "skip: %s (%s)\n", dir, reason)
+			result.SkippedEntries++
 			continue
 		}
 
+		sc.size = ev.sc.size + freed.bytesFor(ev.sc)
 		idle := p.now().Sub(sc.newest).Round(time.Second)
 		if opts.DryRun {
 			fmt.Fprintf(&out, "would remove: %s (%s, idle %s)\n", dir, size.FormatSize(sc.size), idle)
 			result.BytesCleaned += sc.size
 			result.FilesDeleted += sc.files
+			result.Entries = append(result.Entries, Entry{Path: dir, Size: sc.size})
 			continue
 		}
 
@@ -129,10 +175,44 @@ func (p *DirPatternProvider) Clean(ctx context.Context, opts CleanOptions) (Clea
 		fmt.Fprintf(&out, "removed: %s (%s, idle %s)\n", dir, size.FormatSize(sc.size), idle)
 		result.BytesCleaned += sc.size
 		result.FilesDeleted += sc.files
+		result.Entries = append(result.Entries, Entry{Path: dir, Size: sc.size})
 	}
 
 	result.Output = out.String()
 	return result, errors.Join(errs...)
+}
+
+// freedLinks tracks hard-linked inodes across the directories about to be
+// removed. An inode counts as freed once, in the first directory holding it,
+// and only when every link to it lies inside those directories.
+type freedLinks struct {
+	total   map[osshim.FileID]uint64
+	claimed map[osshim.FileID]bool
+}
+
+func newFreedLinks(evals []evaluated) *freedLinks {
+	f := &freedLinks{total: make(map[osshim.FileID]uint64), claimed: make(map[osshim.FileID]bool)}
+	for _, ev := range evals {
+		if ev.reason != "" {
+			continue
+		}
+		for id, li := range ev.sc.links {
+			f.total[id] += li.seen
+		}
+	}
+	return f
+}
+
+func (f *freedLinks) bytesFor(sc dirScan) int64 {
+	var n int64
+	for id, li := range sc.links {
+		if f.claimed[id] || f.total[id] < li.nlink {
+			continue
+		}
+		f.claimed[id] = true
+		n += li.size
+	}
+	return n
 }
 
 // evaluate decides whether dir may be removed. A non-empty reason means skip.
@@ -267,6 +347,21 @@ func scanDir(ctx context.Context, dir string, rootMod time.Time) (sc dirScan, sk
 			}
 			return err
 		}
+		var (
+			id     osshim.FileID
+			nlink  uint64
+			shared bool
+		)
+		if info.Mode().IsRegular() {
+			id, nlink, shared = osshim.SharedFileID(path, info)
+			if shared {
+				// Directory entries of hard-linked files can carry stale
+				// times on Windows; the open above refreshes them.
+				if fresh, statErr := os.Lstat(path); statErr == nil {
+					info = fresh
+				}
+			}
+		}
 		if info.ModTime().After(sc.newest) {
 			sc.newest = info.ModTime()
 		}
@@ -280,8 +375,18 @@ func scanDir(ctx context.Context, dir string, rootMod time.Time) (sc dirScan, sk
 		}
 
 		if info.Mode().IsRegular() {
-			sc.size += info.Size()
 			sc.files++
+			if shared {
+				if sc.links == nil {
+					sc.links = make(map[osshim.FileID]linkInfo)
+				}
+				li := sc.links[id]
+				li.size, li.nlink = info.Size(), nlink
+				li.seen++
+				sc.links[id] = li
+				return nil
+			}
+			sc.size += info.Size()
 		}
 		return nil
 	})

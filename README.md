@@ -145,8 +145,83 @@ Providers are auto-detected — only tools installed on your system appear in th
 | gh | 1G | file-based |
 | chrome-devtools-mcp (disabled by default; never evicts `chrome-profile-*`) | 2G | whole-entry |
 | vscode-shipit | 1G | file-based |
+| **Project artifacts** | | |
+| project-artifacts (Rust `target`, `node_modules`, Python venvs of idle projects) | 20G | whole-directory, oldest project first |
 | **Toolchains** | | |
 | rustup (disabled by default; once over the limit uninstalls every toolchain except `stable`, default, active and directory-override ones) | 10G | `rustup toolchain uninstall` |
+
+### Project artifacts
+
+`project-artifacts` removes the build output that dominates a developer disk: Rust `target/`
+directories (4 to 12 GB each, many in git worktrees) and idle `node_modules`. It scans
+project roots, finds artifact directories by marker, and removes whole directories of idle
+projects, oldest project first and only as far as needed. Every artifact regenerates with a
+build or install.
+
+An artifact counts only when its marker and the project file beside it both exist, so a
+directory that merely shares the name is never touched:
+
+| Kind | Artifact | Marker inside | Project file beside it | Default |
+|------|----------|---------------|------------------------|---------|
+| `rust` | `target/` | `CACHEDIR.TAG` whose first line is cargo's signature | `Cargo.toml` | on |
+| `node` | `node_modules/` | none | `package.json` | on |
+| `python` | `.venv/`, `venv/` | `pyvenv.cfg` | `pyproject.toml` or `requirements*.txt` | off |
+
+Roots default to whichever of `~/sideprojects`, `~/kong`, `~/work`, `~/src`, `~/code` and
+`~/projects` exist. Defaults are not written to the saved config, so one file works on every
+machine. The search goes `max_depth` levels below each root (default 4), never follows
+symlinks, never enters `.git`, `node_modules`, `target`, `.venv` or `venv`, and stops after
+`scan_budget` (default 10s) or on Ctrl-C. A nested project in a monorepo is found at its own
+level. A root that is home, a parent of home or the filesystem root is ignored.
+
+A project is idle when both of these are older than `min_idle` (default 30 days): the newest
+mtime among files outside the artifact directories and `.git` (a sample of the first 3000
+entries, breadth first), and the git `HEAD` and reflog time. A linked worktree is judged by its
+own `HEAD`. A directory-only removal never makes a project look active: the parent keeps its
+mtime.
+
+An artifact is skipped, with the reason in `--verbose` output, when:
+
+- its project or the artifact lies in a protected location, or under a `Downloads` or
+  `opencode` directory. A git worktree is not protected by being a worktree: an idle one is
+  cleaned, the worktree itself is never deleted
+- the project is not idle yet
+- the git tree is dirty (`git status --porcelain` is non-empty, or git is missing or fails).
+  Set `skip_if_dirty: false` to turn this off
+- a tool of that kind runs in the project: `cargo` or `rustc` for Rust, `node`, `npm`, `npx`,
+  `pnpm`, `yarn` or `bun` for Node, `python`, `pip`, `uv` or `poetry` for Python. A process
+  counts when its command line names the project or its working directory is inside it. A
+  process whose working directory cannot be read counts as busy when the lookup fails outright
+  (always on Windows, where only image names are visible)
+- a process has an open file in it (`lsof`; `skip_if_open: false` turns this off). Windows
+  cannot list handles, but refuses to rename a directory that has open files, so the rename is
+  the check there
+
+Removal renames the directory aside (`.bilgie-trash-*` in the same folder) and then deletes it,
+so a crash leaves either the intact artifact or a trash directory that no marker check accepts,
+never a half-deleted `target`. The next run sweeps leftover trash.
+
+`clean project-artifacts` removes every eligible artifact (full mode). `clean --smart` and
+`auto` remove only until the artifacts are under `max_size`; `auto` under low-space pressure
+instead stops as soon as free space is back above the floors. `--dry-run` lists what would go;
+by default the five largest, with kind, project and idle days, and `--verbose` lists all of them
+and every skip. `status` shows the size of all artifacts and how much of it is recoverable now
+(the clean checks except the slow open-file probe).
+
+```yaml
+providers:
+  project-artifacts:
+    paths: [~/sideprojects, ~/work]
+    max_size: 20G
+    min_idle: 30d
+    max_depth: 4
+    scan_budget: 10s
+    rust: true
+    node: true
+    python: false
+    skip_if_dirty: true
+    skip_if_open: true
+```
 
 ## Commands
 
@@ -178,29 +253,100 @@ bilgie clean --all         # All enabled
 bilgie clean --dry-run     # Preview only
 bilgie clean --force       # Skip confirmation
 bilgie clean --smart       # LRU-based trimming
+bilgie clean --dry-run --verbose  # List every entry
 ```
 
 **Clean modes:**
 - **Full** (default): Runs native tool commands (e.g., `go clean -cache`) or deletes files directly
 - **Smart** (`--smart`): Removes files older than `max_age`, then LRU-trims to `max_size`
 
-### auto
+### Output
+
+`clean`, `auto` and every dry-run print one block per provider: the action, the bytes, the
+number of entries and the five largest entries, then the providers that were skipped with their
+reason and a total. A provider that cleans through a tool (`go clean -cache`) has no entry list
+and shows the command it would run instead.
+
+```text
+$ bilgie auto --dry-run
+free 18 GiB of 460 GiB: tier low (dry-run, nothing is deleted)
+npm: would free 12 GiB (56012 entries)
+  largest:
+       212 MiB  /Users/me/.npm/_cacache/content-v2/sha512/4e/9a/f3c1d0
+       198 MiB  /Users/me/.npm/_cacache/content-v2/sha512/b1/07/22ae94
+       171 MiB  /Users/me/.npm/_cacache/content-v2/sha512/0c/d8/7745be
+       160 MiB  /Users/me/.npm/_cacache/content-v2/sha512/e9/31/a0c2d7
+       155 MiB  /Users/me/.npm/_cacache/content-v2/sha512/73/5f/918b06
+    ... and 56007 more (--verbose lists all)
+go-build: would free 3.1 GiB
+  would run: go clean -cache
+skipped (2):
+  docker: unavailable
+  gradle: within limit
+total: would free 15 GiB across 2 providers, 56012 entries; 2 skipped
+done: free 18 GiB
+```
+
+`--verbose` prints every entry (`would delete: <path> (<size>)`) instead of the summary.
+`--json` keeps its fields and adds a `summary` object to each provider (`action`, `entries`,
+`bytes`, `top` with `path` and `size_bytes`, and `skipped_entries` for directory-pattern providers)
+and to the document (`providers`, `skipped`, `errors`, `entries`, `bytes`).
+
+### tick, auto and the agent
 
 ```bash
-bilgie auto             # Trim by free-space tier
+bilgie tick             # Cheap free-space check; starts a pass only when one is needed
+bilgie auto             # Run one full pass now (tier from free space)
 bilgie auto --dry-run   # Preview only
-bilgie install-agent    # Run auto every auto.interval with the OS scheduler
+bilgie auto --verbose   # List every entry
+bilgie install-agent    # Run tick every auto.tick_interval with the OS scheduler
 bilgie uninstall-agent  # Unload and remove everything install-agent created
 ```
 
-`auto` reads the free space of the data volume (`statfs` of `/System/Volumes/Data`)
+The scheduled agent runs `bilgie tick` every `auto.tick_interval` (default 2m). A tick reads free
+space of the data volume with one `statfs` call and decides; it walks no directory, sizes nothing
+and starts no provider unless it decides to run a pass. A healthy tick prints nothing
+(`bilgie tick --verbose` explains the decision). A tick exits at once when another pass holds the run lock.
+
+| Free space | What a tick does |
+|------------|------------------|
+| healthy | nothing, except a routine pass every `auto.interval` (default 30m) that trims providers over their limit |
+| low | a full pass, at most every `auto.low_cooldown` (default 10m) |
+| critical | the same pass at the shorter `auto.critical_cooldown` (default 2m); cheapest-to-rebuild providers go first and the pass stops as soon as space recovers |
+| emergency | as critical, with the stale-directory sweeps (`dir-pattern` providers such as `sail-dirs`, even when disabled) first |
+| falling | a low-tier pass when the projected free space crosses the low threshold within `auto.forecast` (default 15m) |
+
+Thresholds:
+
+- Low is `max(min_free, min(min_free_pct of the volume, min_free_cap))`. With the defaults
+  (`30G`, `5`, `100G`) that is 46 GiB on a 926 GiB disk and never more than 100 GiB, so a large
+  disk is not permanently "low". An explicit `min_free` above the cap is kept.
+- Critical is below `critical_free` (default 10G) and emergency below `emergency_free` (default 5G);
+  neither exceeds the level above it.
+- Hysteresis: a tier worsens at once but eases only after free space is `hysteresis` (default 2G)
+  above its threshold, and a pass runs until space is that far above the low threshold. Moving
+  from low to a worse tier skips the cooldown (never faster than every 30 seconds).
+- Forecast: the last 10 readings (kept in `~/.local/state/bilgie/tick.json`, at most 30 minutes old and
+  restarted after a gap) give one rate per interval. A pass starts when there are at least 5 readings, the
+  median rate falls faster than 50 MiB per minute, and the projection over `auto.forecast` is under the
+  low threshold. The median means one sudden drop is never a trend. `forecast: 0` turns it off.
+- Notifications: at most one per tier per `auto.notify_cooldown` (default 3h), unless free space
+  dropped by more than 10 GiB since that tier's last notification. A tier not yet notified (a worse
+  one) is always sent.
+
+`auto` still works as before and is a full pass on demand (it also resets the routine-pass timer).
+An agent installed by v0.10.0 ran `auto` every 30 minutes; run `bilgie install-agent` once to
+replace it with the tick agent (`bilgie doctor` warns while no tick has been recorded).
+
+`auto` reads free space of the data volume (`statfs` of `/System/Volumes/Data` on macOS)
 and always trims in smart mode (files older than `max_age`, then LRU to `max_size`):
 
 | Tier | Free space | What runs |
 |------|------------|-----------|
-| ok | at or above `min_free` and `min_free_pct` | only enabled providers over their limit |
-| low | below `min_free` or `min_free_pct` | every enabled provider, cheapest to rebuild first; stops as soon as free space is back above the thresholds |
-| critical | under 5 GiB | the stale-directory sweeps first (`dir-pattern` providers such as `sail-dirs`, even when disabled), then the low-tier trim |
+| ok | at or above the low threshold | only enabled providers over their limit |
+| low | below the low threshold | every enabled provider, cheapest to rebuild first; stops once free space is back above the threshold plus the hysteresis |
+| critical | below `critical_free` | the low-tier trim, scheduled at the short cooldown |
+| emergency | below `emergency_free` | the stale-directory sweeps first (`dir-pattern` providers such as `sail-dirs`, even when disabled), then the low-tier trim |
 
 Safety rules:
 
@@ -211,9 +357,9 @@ Safety rules:
 - Docker prune commands are cancelled after 10 minutes; command providers keep their `clean_timeout`.
 - Providers whose tool is busy are skipped, as in `clean`.
 - Two runs never overlap; a second one exits immediately.
-- The first run after `install-agent` is a dry-run that deletes nothing. A marker in
+- The first run after `install-agent` is a dry-run that deletes nothing, and a tick never runs a real pass while it is pending. A marker in
   `~/.local/state/bilgie/` records it, so it survives restarts and only a completed
-  dry-run in the low or critical tier, where at least one provider ran, clears it, and only when no provider failed. Running `install-agent` again arms it again.
+  dry-run below the low threshold, where at least one provider ran, clears it, and only when no provider failed. Running `install-agent` again arms it again.
 
 `install-agent` picks the scheduler of the running OS. Install from a built or installed
 binary, not `go run`; the job records the binary path, so run `install-agent` again after
@@ -221,14 +367,13 @@ moving it. The first run after install is a dry-run on every OS.
 
 | OS | Scheduler | What is written | Output |
 |----|-----------|-----------------|--------|
-| macOS | launchd agent, loaded with `launchctl bootstrap` | `~/Library/LaunchAgents/dev.mskalski.bilgie.plist` (`StartInterval` from `auto.interval`, `RunAtLoad`, low priority, a `PATH` with Homebrew, mise, Go, Cargo and Docker) | `~/Library/Logs/bilgie/auto.log` |
-| Linux | systemd user timer | `$XDG_CONFIG_HOME/systemd/user` (default `~/.config/systemd/user`) `bilgie.service` and `bilgie.timer` (first run a minute after enabling, then `auto.interval` after each run), enabled with `systemctl --user enable` | `~/.local/state/bilgie/auto.log` |
-| Linux without a systemd user manager | cron | one crontab line tagged `# bilgie`; other entries are kept | `~/.local/state/bilgie/auto.log` |
-| Windows | Task Scheduler task `bilgie`, created with `schtasks /Create /XML` | `~/.local/state/bilgie/bilgie-task.xml` (repeats every `auto.interval`, below-normal priority, runs only while you are logged on) | none |
+| macOS | launchd agent, loaded with `launchctl bootstrap` (an existing agent is booted out first) | `~/Library/LaunchAgents/dev.mskalski.bilgie.plist` (runs `tick`, `StartInterval` from `auto.tick_interval`, `RunAtLoad`, low priority, a `PATH` with Homebrew, mise, Go, Cargo and Docker) | `~/Library/Logs/bilgie/auto.log` |
+| Linux | systemd user timer | `$XDG_CONFIG_HOME/systemd/user` (default `~/.config/systemd/user`) `bilgie.service` and `bilgie.timer` (runs `tick`; first run a minute after enabling, then `auto.tick_interval` after each run; existing units are rewritten and the timer restarted), enabled with `systemctl --user enable` | `~/.local/state/bilgie/auto.log` |
+| Linux without a systemd user manager | cron | one crontab line tagged `# bilgie` running `tick`; other entries are kept and an earlier line is replaced | `~/.local/state/bilgie/auto.log` |
+| Windows | Task Scheduler task `bilgie`, created with `schtasks /Create /XML` | `~/.local/state/bilgie/bilgie-task.xml` (runs `tick`, repeats every `auto.tick_interval`, below-normal priority, runs only while you are logged on) | none |
 
-Cron fires on fixed minute and hour marks, so the cron fallback only accepts an `auto.interval`
-that divides an hour or a day evenly (1m, 2m, 5m, 10m, 15m, 20m, 30m, 1h, 2h, 3h, 4h, 6h, 8h, 12h,
-24h) and refuses any other. Installing the systemd timer removes an earlier cron entry and the cron fallback removes earlier systemd units.
+Cron fires on fixed minute and hour marks, so the cron fallback only accepts an `auto.tick_interval`
+that divides an hour or a day evenly (1m, 2m, 5m, 10m, 15m, 20m, 30m, 1h) and refuses any other. Installing the systemd timer removes an earlier cron entry and the cron fallback removes earlier systemd units.
 The systemd user timer runs only while your user manager is up; on a headless box run
 `loginctl enable-linger $USER` so it survives logout, otherwise install falls back to cron.
 `uninstall-agent` removes the job, its definition
@@ -243,13 +388,61 @@ to `runs.jsonl.1` at 8 MiB.
 bilgie history           # Last 10 runs
 bilgie history -n 50     # More runs (0 shows all)
 bilgie history --json    # Full records, including per-provider detail
+bilgie history --providers -n 20   # Bytes freed per provider over the last 20 runs
+```
+
+```text
+$ bilgie history --providers -n 20
+Bytes freed per provider over the last 20 run(s); dry-runs count as WOULD FREE
+PROVIDER  RUNS  FREED     WOULD FREE  SKIPPED  ERRORS
+npm       18    41.2 GiB  12.0 GiB    11       0
+go-build  12    9.8 GiB   3.1 GiB     6        0
+docker    7     0 B       0 B         2        5
 ```
 
 `history` skips unreadable lines and reports how many. When a real run (not a dry-run) ends with
-free space still under `min_free` or `min_free_pct`, `auto` shows one desktop notification (`osascript` on macOS, `notify-send` on Linux, a PowerShell toast on
+free space still under the low threshold, the pass shows one desktop notification (rate limited as above) (`osascript` on macOS, `notify-send` on Linux, a PowerShell toast on
 Windows); a run that recovered enough space stays quiet. A notifier that is not installed is logged as a skipped
 notification. A failed notification or log write is reported but does not fail the run, and a notifier is
 cancelled after 10 seconds so it cannot hold the run lock.
+
+### doctor
+
+```bash
+bilgie doctor
+```
+
+Checks, without changing anything, that the agent works: it is installed and loaded in the
+scheduler of this OS (`launchctl print`, `systemctl --user is-active` or the crontab, `schtasks`),
+the cadence (tick and full-pass intervals), the last tick (it must be recent for `auto.tick_interval`; a missing tick
+means the installed agent is still the old 30-minute `auto` one) and the next expected full pass, the last run (time, tier, bytes freed, errors from `runs.jsonl`) is recent for `auto.interval`,
+free space is above the floors, the 7-day free-space trend from the run history, config problems
+(disabled providers, providers skipped on each of the last runs for a reason other than
+"within limit", providers on protected paths, providers whose config does not load) and whether the notifier program exists.
+It exits non-zero when a finding needs attention; each one carries a "what to do" line.
+
+```text
+$ bilgie doctor
+[ok  ] agent: installed and loaded (launchd)
+[ok  ] cadence: tick every 2m0s, full pass every 30m0s (low 10m0s, critical 2m0s)
+[ok  ] last tick: 1m ago (tier low, low: next pass in 7m0s)
+[ok  ] next full pass: in 21m while space is healthy, sooner if free space is low or falling
+[FAIL] last run: 9h ago (tier low, freed 4.1 GiB, 1 provider error(s)); failed: docker
+       what to do: see /Users/me/Library/Logs/bilgie/auto.log; run: bilgie auto --dry-run --verbose to see each error
+[FAIL] schedule: last run was 9h ago but the interval is 30m0s: the agent is not running
+       what to do: see /Users/me/Library/Logs/bilgie/auto.log; run: bilgie install-agent to reinstall it
+[ok  ] freed: 38 GiB freed by 21 deleting run(s) in the last 7 days
+[warn] free space: 24 GiB free of 460 GiB (5%), tier low
+       what to do: run: bilgie auto; run: bilgie status for large unmanaged directories
+[warn] trend: free space -41 GiB over 6d (65 GiB -> 24 GiB, 80 run(s)); min_free is reached in about 8 day(s) at this rate
+       what to do: find what grows: bilgie status shows large unmanaged directories
+[note] config: 3 provider(s) disabled: docker-volumes, sail-dirs, xcode-archives
+[warn] config: gradle was skipped on each of the last 5 runs: unavailable
+       what to do: install the tool gradle needs, or set providers.gradle.enabled: false
+[ok  ] notifier: osascript is available
+
+5 finding(s) need attention
+```
 
 ### config
 
@@ -291,20 +484,35 @@ providers:
 | `max_age` | File age threshold for smart clean (e.g., `30d`) |
 | `clean_cmd` | Command for full clean (empty = file-based deletion) |
 | `clean_timeout` | Max runtime of `clean_cmd` before it is cancelled and reported (default `2m`) |
-| `type` | `dir-pattern` removes whole stale directories matching a glob in `paths` |
-| `min_idle` | `dir-pattern`: minimum idle time, from the newest mtime in the tree (default `2h`) |
-| `skip_if_open` | `dir-pattern`: skip directories with open files via `lsof +D` (default `true`) |
+| `type` | `dir-pattern` removes whole stale directories matching a glob in `paths`; `project-artifacts` removes build artifacts of idle projects found below the roots in `paths` |
+| `min_idle` | `dir-pattern`: minimum idle time, from the newest mtime in the tree (default `2h`); `project-artifacts`: project idle time (default `30d`) |
+| `skip_if_open` | `dir-pattern`, `project-artifacts`: skip directories with open files via `lsof +D` (default `true`) |
 | `skip_if_git_worktree` | `dir-pattern`: skip directories containing a `.git` entry (default `true`) |
+| `max_depth` | `project-artifacts`: directory levels searched below each root (default `4`, at most 16) |
+| `scan_budget` | `project-artifacts`: time allowed for finding projects per pass (default `10s`) |
+| `rust`, `node`, `python` | `project-artifacts`: per-kind switches (default `true`, `true`, `false`) |
+| `skip_if_dirty` | `project-artifacts`: skip projects with uncommitted changes (default `true`) |
 | `skip_prefixes` | Whole-entry providers never evict entries whose name starts with one of these prefixes; user values add to the built-in ones |
 
-The optional top-level `auto` block configures `bilgie auto`:
+The optional top-level `auto` block configures `bilgie tick`, `bilgie auto` and the agent. Every key is optional; the values shown are the defaults:
 
 ```yaml
 auto:
-  interval: 30m      # scheduler interval, minimum 1m
-  min_free: 30G      # below this, trim every enabled provider
-  min_free_pct: 15   # or below this percentage of the volume (0 disables)
+  tick_interval: 2m         # how often the agent checks free space (whole minutes, minimum 1m)
+  interval: 30m             # routine full pass while space is healthy (minimum 1m)
+  min_free: 30G             # low threshold: absolute floor
+  min_free_pct: 5           # ... or this percentage of the volume (0 disables)
+  min_free_cap: 100G        # the percentage part never exceeds this
+  critical_free: 10G        # critical tier below this
+  emergency_free: 5G        # emergency tier below this (stale-directory sweeps)
+  hysteresis: 2G            # a tier eases only this far above its threshold
+  low_cooldown: 10m         # minimum gap between passes at the low tier
+  critical_cooldown: 2m     # ... at the critical and emergency tiers
+  forecast: 15m             # pass when the falling trend crosses the low threshold within this (0 disables)
+  notify_cooldown: 3h       # minimum gap between notifications of one tier
 ```
+
+A config that sets `min_free_pct: 15` keeps that value, but the percentage part is still limited by `min_free_cap` (100G by default): on a 2 TB volume the low threshold is 100G, not 300G. Raise `min_free_cap` to restore the old threshold.
 
 The optional top-level `protected` list names paths that `auto` never deletes from and that `status`
 reports under "needs a human":
@@ -318,6 +526,7 @@ Entries must be literal paths, absolute or starting with `~/`: globs, `.`/`..` e
 `~/.local/share/opencode`, `/var/lib/docker/volumes`); removing a built-in entry from the file has no
 effect. `auto` also skips any path that holds a `.git` entry (a git checkout or worktree), anything under a
 `worktrees` directory, and never prunes Docker volumes (Docker Desktop keeps them inside its VM image).
+`project-artifacts` is the one provider that works inside git checkouts and `worktrees` directories by design; it enforces the protected list, `Downloads` and `opencode` itself and cleans only the artifact directories.
 
 ### Whole-unit trees
 
@@ -353,14 +562,30 @@ failure. If the check itself fails, the provider is skipped too.
 
 Busy detection errs toward skipping: any process whose command line contains
 the tool name counts, including wrappers such as `sudo` or `sh -c`. The
-bilgie process and its wrapper ancestors are not counted, but an
-ancestor that is the tool itself, such as `cargo run -- clean cargo`, is. A hung
+bilgie process and its wrapper ancestors are not counted: a wrapper is
+recognized by parsing its command string with shell quoting rules (quotes,
+backslash escapes, repeated spaces, nested `sh -c`, `env VAR=x`, `sudo`) and
+finding bilgie's own executable and arguments in it. A string that does not
+parse stays busy. An ancestor that is the tool itself, such as
+`cargo run -- clean cargo`, is counted. A hung
 `clean_cmd` is killed with its whole process group, so it must not need a
 terminal.
 
 `clean --json` needs `--force` or `--dry-run` because it cannot prompt.
 
-`dir-pattern` paths must contain a glob character. The provider ignores
+`dir-pattern` paths must contain a glob character and be absolute or start with `~/`,
+and `min_idle` must parse. A provider whose config does not load is not hidden:
+`clean`, `status`, `auto` and `doctor` print `provider <name>: <reason>` (the same text goes into the
+`--json` output and the run log) and every other provider still runs. `auto` refuses a whole config that
+fails validation (a relative or glob-less path) and names the offending provider in that error.
+
+Sizes and freed bytes count each hard-linked file once, across all matched directories and in dry-run
+totals; a `dir-pattern` sweep reports a shared file as freed only when every link to it lies inside the removed directories, and duplicate patterns list a directory once. On Linux and macOS a file is identified by device and inode. On Windows by volume serial and file
+index (one extra open per file); if the identity cannot be read, every link counts in full, so the
+figure can only be too high. The age-based file trim lists each link on its own and still counts it
+separately.
+
+The provider ignores
 `max_age` and removes every stale match whole regardless of `max_size`, which is
 only used for `status`. `lsof` run as a non-root user cannot see other users'
 processes.

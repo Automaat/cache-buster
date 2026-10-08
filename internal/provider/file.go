@@ -54,6 +54,7 @@ func (p *FileProvider) smartClean(ctx context.Context, opts CleanOptions) (Clean
 		BytesCleaned: trimResult.FreedBytes,
 		FilesDeleted: trimResult.DeletedCount,
 		Output:       trimResult.Output,
+		Entries:      entriesFromFiles(trimResult.Removed),
 	}
 
 	if len(trimResult.Errors) > 0 {
@@ -91,6 +92,7 @@ func (p *FileProvider) fullClean(ctx context.Context, opts CleanOptions) (CleanR
 		filesDeleted  int64
 		deleteErrors  []cache.AccessError
 		output        strings.Builder
+		entries       []Entry
 	)
 
 	// Carry forward scan warnings
@@ -115,6 +117,7 @@ func (p *FileProvider) fullClean(ctx context.Context, opts CleanOptions) (CleanR
 			fmt.Fprintf(&output, "would delete: %s (%s)\n", f.Path, size.FormatSize(f.Size))
 			bytesDeleted += f.Size
 			filesDeleted++
+			entries = append(entries, Entry{Path: f.Path, Size: f.Size})
 			continue
 		}
 
@@ -125,6 +128,7 @@ func (p *FileProvider) fullClean(ctx context.Context, opts CleanOptions) (CleanR
 
 		bytesDeleted += f.Size
 		filesDeleted++
+		entries = append(entries, Entry{Path: f.Path, Size: f.Size})
 	}
 
 	if opts.DryRun {
@@ -132,6 +136,7 @@ func (p *FileProvider) fullClean(ctx context.Context, opts CleanOptions) (CleanR
 			BytesCleaned: bytesDeleted,
 			FilesDeleted: filesDeleted,
 			Output:       output.String(),
+			Entries:      entries,
 		}, nil
 	}
 
@@ -139,6 +144,7 @@ func (p *FileProvider) fullClean(ctx context.Context, opts CleanOptions) (CleanR
 		BytesCleaned: bytesDeleted,
 		FilesDeleted: filesDeleted,
 		Output:       fmt.Sprintf("deleted %d files", filesDeleted),
+		Entries:      entries,
 	}
 
 	if len(deleteErrors) > 0 {

@@ -15,6 +15,10 @@ import (
 	"github.com/smykla-skalski/bilgie/internal/appname"
 )
 
+// agentCommand is the subcommand the scheduler runs. Agents installed before
+// the tick existed run `auto` every 30 minutes; install-agent replaces them.
+const agentCommand = "tick"
+
 const (
 	agentName       = appname.Name
 	legacyAgentName = appname.Legacy
@@ -63,9 +67,9 @@ func binaryMissing(err error) bool {
 	return errors.Is(err, exec.ErrNotFound)
 }
 
-// Agent installs and removes the periodic `auto` job with the scheduler of
+// Agent installs and removes the periodic `tick` job with the scheduler of
 // its OS: launchd, a systemd user timer (cron as fallback) or Task Scheduler.
-// An empty OS means the running OS, a nil Now means time.Now and an empty
+// Interval is the tick interval. An empty OS means the running OS, a nil Now means time.Now and an empty
 // ConfigDir means Home/.config; systemd looks for user units in ConfigDir.
 type Agent struct {
 	Exec       Executor
@@ -201,6 +205,11 @@ func (a Agent) Uninstall(ctx context.Context) error {
 	removed = removed || legacyRemoved
 	if err := ClearFirstRun(a.StateDir); err != nil {
 		return err
+	}
+	for _, name := range []string{tickStateName, passStateName} {
+		if _, err := removeIfExists(filepath.Join(a.StateDir, name)); err != nil {
+			return fmt.Errorf("remove %s: %w", name, err)
+		}
 	}
 	if !removed {
 		fmt.Fprintln(a.Out, "agent was not installed")
