@@ -21,7 +21,7 @@ unattended `auto` mode that runs from the OS scheduler.
 ### Homebrew
 
 ```bash
-brew install Automaat/tap/bilgie
+brew install smykla-skalski/tap/bilgie
 ```
 
 ### Go Install
