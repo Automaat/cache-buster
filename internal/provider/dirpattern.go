@@ -206,10 +206,8 @@ func resolveParent(dir string) string {
 // the home directory, one of its ancestors, or a direct child of root or home.
 func (p *DirPatternProvider) isProtected(dir string) bool {
 	clean := filepath.Clean(dir)
-	if !filepath.IsAbs(clean) || clean == string(filepath.Separator) {
-		return true
-	}
-	if filepath.Dir(clean) == string(filepath.Separator) {
+	parent := filepath.Dir(clean)
+	if !filepath.IsAbs(clean) || parent == clean || filepath.Dir(parent) == parent {
 		return true
 	}
 	for _, prot := range p.protected {

@@ -3,6 +3,7 @@ package provider
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -23,20 +24,17 @@ func newTestDockerProvider(t *testing.T, paths []string) *DockerProvider {
 	return p
 }
 
-func fakeDockerBin(t *testing.T, script string) string {
+func fakeDockerBin(t *testing.T, spec fakeToolSpec) string {
 	t.Helper()
-	dir := t.TempDir()
-	bin := filepath.Join(dir, "docker")
-	require.NoError(t, os.WriteFile(bin, []byte("#!/bin/sh\n"+script), 0o755))
-	t.Setenv("PATH", dir+":"+os.Getenv("PATH"))
-	return dir
+	return installFakeTool(t, "docker", spec)
+}
+
+func dfRows(rows ...string) fakeToolSpec {
+	return fakeToolSpec{Default: fakeReply{Stdout: strings.Join(rows, "\n") + "\n"}}
 }
 
 func TestDockerDataSize_SumsRows(t *testing.T) {
-	skipOnWindows(t, "#206 docker fakes are POSIX shell scripts")
-	fakeDockerBin(t, `echo '{"Size":"1.5GB"}'
-echo '{"Size":"500MB"}'
-`)
+	fakeDockerBin(t, dfRows(`{"Size":"1.5GB"}`, `{"Size":"500MB"}`))
 
 	p := newTestDockerProvider(t, []string{t.TempDir()})
 	total, err := p.dockerDataSize(t.Context())
@@ -46,10 +44,9 @@ echo '{"Size":"500MB"}'
 }
 
 func TestDockerDataSize_IncludesVolumesAndBuildCacheRows(t *testing.T) {
-	skipOnWindows(t, "#206 docker fakes are POSIX shell scripts")
-	fakeDockerBin(t, `echo '{"Type":"Local Volumes","TotalCount":"2","Size":"2GB"}'
-echo '{"Type":"Build Cache","TotalCount":"8","Size":"750MB"}'
-`)
+	fakeDockerBin(t, dfRows(
+		`{"Type":"Local Volumes","TotalCount":"2","Size":"2GB"}`,
+		`{"Type":"Build Cache","TotalCount":"8","Size":"750MB"}`))
 
 	p := newTestDockerProvider(t, []string{t.TempDir()})
 	total, err := p.dockerDataSize(t.Context())
@@ -58,10 +55,7 @@ echo '{"Type":"Build Cache","TotalCount":"8","Size":"750MB"}'
 }
 
 func TestDockerDataSize_SkipsInvalidLines(t *testing.T) {
-	skipOnWindows(t, "#206 docker fakes are POSIX shell scripts")
-	fakeDockerBin(t, `echo 'not json'
-echo '{"Size":"1GB"}'
-`)
+	fakeDockerBin(t, dfRows("not json", `{"Size":"1GB"}`))
 
 	p := newTestDockerProvider(t, []string{t.TempDir()})
 	total, err := p.dockerDataSize(t.Context())
@@ -71,10 +65,7 @@ echo '{"Size":"1GB"}'
 }
 
 func TestDockerDataSize_AllInvalidLines_ReturnsError(t *testing.T) {
-	skipOnWindows(t, "#206 docker fakes are POSIX shell scripts")
-	fakeDockerBin(t, `echo 'not json'
-echo 'also not json'
-`)
+	fakeDockerBin(t, dfRows("not json", "also not json"))
 
 	p := newTestDockerProvider(t, []string{t.TempDir()})
 	_, err := p.dockerDataSize(t.Context())
@@ -82,8 +73,7 @@ echo 'also not json'
 }
 
 func TestDockerDataSize_EmptyOutput_ReturnsError(t *testing.T) {
-	skipOnWindows(t, "#206 docker fakes are POSIX shell scripts")
-	fakeDockerBin(t, `exit 0`)
+	fakeDockerBin(t, fakeToolSpec{})
 
 	p := newTestDockerProvider(t, []string{t.TempDir()})
 	_, err := p.dockerDataSize(t.Context())
@@ -92,8 +82,7 @@ func TestDockerDataSize_EmptyOutput_ReturnsError(t *testing.T) {
 }
 
 func TestDockerDataSize_CommandFails_IncludesStderr(t *testing.T) {
-	skipOnWindows(t, "#206 docker fakes are POSIX shell scripts")
-	fakeDockerBin(t, `echo "daemon not running" >&2; exit 1`)
+	fakeDockerBin(t, fakeToolSpec{Default: fakeReply{Stderr: "daemon not running\n", Exit: 1}})
 
 	p := newTestDockerProvider(t, []string{t.TempDir()})
 	_, err := p.dockerDataSize(t.Context())
@@ -102,9 +91,8 @@ func TestDockerDataSize_CommandFails_IncludesStderr(t *testing.T) {
 }
 
 func TestDockerCurrentSize_FallsBackToPathBased(t *testing.T) {
-	skipOnWindows(t, "#206 docker fakes are POSIX shell scripts")
 	// fake docker that exits non-zero
-	fakeDockerBin(t, `exit 1`)
+	fakeDockerBin(t, fakeToolSpec{Default: fakeReply{Exit: 1}})
 
 	tmpDir := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "data.bin"), []byte("hello"), 0o600))
@@ -116,7 +104,7 @@ func TestDockerCurrentSize_FallsBackToPathBased(t *testing.T) {
 }
 
 func TestDockerSmartCleanDryRun_NeverIncludesVolumes(t *testing.T) {
-	fakeDockerBin(t, `exit 0`)
+	fakeDockerBin(t, fakeToolSpec{})
 
 	p := newTestDockerProvider(t, []string{t.TempDir()})
 	result, err := p.Clean(t.Context(), CleanOptions{
@@ -128,12 +116,8 @@ func TestDockerSmartCleanDryRun_NeverIncludesVolumes(t *testing.T) {
 }
 
 func TestDockerSmartClean_DaemonUnavailable(t *testing.T) {
-	skipOnWindows(t, "#206 docker fakes are POSIX shell scripts")
 	// docker ps fails => daemon down => Clean returns without pruning.
-	fakeDockerBin(t, `case "$1 $2" in
-"ps --quiet") exit 1 ;;
-esac
-exit 1`)
+	fakeDockerBin(t, fakeToolSpec{Default: fakeReply{Exit: 1}})
 
 	p := newTestDockerProvider(t, []string{t.TempDir()})
 	result, err := p.Clean(t.Context(), CleanOptions{Mode: CleanModeSmart})
@@ -143,11 +127,10 @@ exit 1`)
 
 func TestDockerSmartClean_NothingToPrune(t *testing.T) {
 	// Size unchanged before/after prune => zero bytes cleaned.
-	fakeDockerBin(t, `case "$1 $2" in
-"ps --quiet") exit 0 ;;
-"system df") echo '{"Size":"2GB"}'; exit 0 ;;
-"system prune") echo "Total reclaimed space: 0B"; exit 0 ;;
-esac`)
+	fakeDockerBin(t, fakeToolSpec{Replies: map[string]fakeReply{
+		"system df":    {Stdout: `{"Size":"2GB"}` + "\n"},
+		"system prune": {Stdout: "Total reclaimed space: 0B\n"},
+	}})
 
 	p := newTestDockerProvider(t, []string{t.TempDir()})
 	result, err := p.Clean(t.Context(), CleanOptions{Mode: CleanModeSmart})
@@ -157,20 +140,17 @@ esac`)
 }
 
 func TestDockerSmartClean_FreesSpace(t *testing.T) {
-	skipOnWindows(t, "#206 docker fakes are POSIX shell scripts")
 	// docker system df reports 5GB before the prune and 1GB after it,
 	// keyed off a marker file the fake prune drops.
 	marker := filepath.Join(t.TempDir(), "pruned")
-	fakeDockerBin(t, `case "$1 $2" in
-"ps --quiet") exit 0 ;;
-"system df")
-  if [ -f "`+marker+`" ]; then echo '{"Size":"1GB"}'; else echo '{"Size":"5GB"}'; fi
-  exit 0 ;;
-"system prune")
-  touch "`+marker+`"
-  echo "Total reclaimed space: 4GB"
-  exit 0 ;;
-esac`)
+	fakeDockerBin(t, fakeToolSpec{Replies: map[string]fakeReply{
+		"system df": {
+			Stdout:   `{"Size":"5GB"}` + "\n",
+			IfExists: marker,
+			Then:     &fakeReply{Stdout: `{"Size":"1GB"}` + "\n"},
+		},
+		"system prune": {Stdout: "Total reclaimed space: 4GB\n", Touch: marker},
+	}})
 
 	p := newTestDockerProvider(t, []string{t.TempDir()})
 	result, err := p.Clean(t.Context(), CleanOptions{Mode: CleanModeSmart})
@@ -180,12 +160,10 @@ esac`)
 }
 
 func TestDockerSmartClean_PruneFails(t *testing.T) {
-	skipOnWindows(t, "#206 docker fakes are POSIX shell scripts")
-	fakeDockerBin(t, `case "$1 $2" in
-"ps --quiet") exit 0 ;;
-"system df") echo '{"Size":"2GB"}'; exit 0 ;;
-"system prune") echo "Error response from daemon: prune failed" >&2; exit 1 ;;
-esac`)
+	fakeDockerBin(t, fakeToolSpec{Replies: map[string]fakeReply{
+		"system df":    {Stdout: `{"Size":"2GB"}` + "\n"},
+		"system prune": {Stderr: "Error response from daemon: prune failed\n", Exit: 1},
+	}})
 
 	p := newTestDockerProvider(t, []string{t.TempDir()})
 	result, err := p.Clean(t.Context(), CleanOptions{Mode: CleanModeSmart})
@@ -194,7 +172,7 @@ esac`)
 }
 
 func TestDockerFullCleanDryRun_DefaultNeverIncludesVolumes(t *testing.T) {
-	fakeDockerBin(t, `exit 0`)
+	fakeDockerBin(t, fakeToolSpec{})
 
 	cfg, ok := config.DefaultConfig().GetProvider("docker")
 	require.True(t, ok)
@@ -209,7 +187,7 @@ func TestDockerFullCleanDryRun_DefaultNeverIncludesVolumes(t *testing.T) {
 }
 
 func TestDockerVolumesDefault_DisabledAndPrunesVolumes(t *testing.T) {
-	fakeDockerBin(t, `exit 0`)
+	fakeDockerBin(t, fakeToolSpec{})
 
 	cfg, ok := config.DefaultConfig().GetProvider("docker-volumes")
 	require.True(t, ok)
@@ -227,11 +205,10 @@ func TestDockerVolumesDefault_DisabledAndPrunesVolumes(t *testing.T) {
 }
 
 func TestDockerVolumesSize_OnlyCountsVolumesRow(t *testing.T) {
-	skipOnWindows(t, "#206 docker fakes are POSIX shell scripts")
-	fakeDockerBin(t, `echo '{"Type":"Images","Size":"9GB"}'
-echo '{"Type":"Local Volumes","Size":"2GB"}'
-echo '{"Type":"Build Cache","Size":"750MB"}'
-`)
+	fakeDockerBin(t, dfRows(
+		`{"Type":"Images","Size":"9GB"}`,
+		`{"Type":"Local Volumes","Size":"2GB"}`,
+		`{"Type":"Build Cache","Size":"750MB"}`))
 
 	p, err := NewDockerVolumesProvider("docker-volumes", config.Provider{
 		Paths:    []string{t.TempDir()},
@@ -246,7 +223,7 @@ echo '{"Type":"Build Cache","Size":"750MB"}'
 }
 
 func TestDockerLegacyConfigVolumesFlagStripped(t *testing.T) {
-	fakeDockerBin(t, `exit 0`)
+	fakeDockerBin(t, fakeToolSpec{})
 
 	p, err := NewProvider("docker", config.Provider{
 		Paths:    []string{t.TempDir()},
@@ -261,9 +238,7 @@ func TestDockerLegacyConfigVolumesFlagStripped(t *testing.T) {
 }
 
 func TestDockerVolumesSize_NoVolumesRow_NoPathFallback(t *testing.T) {
-	skipOnWindows(t, "#206 docker fakes are POSIX shell scripts")
-	fakeDockerBin(t, `echo '{"Type":"Images","Size":"9GB"}'
-`)
+	fakeDockerBin(t, dfRows(`{"Type":"Images","Size":"9GB"}`))
 	dir := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "Docker.raw"), []byte("hello"), 0o600))
 
@@ -318,16 +293,12 @@ func TestStripVolumesFlag_Wrapped(t *testing.T) {
 	}
 }
 
-const hangingPruneDocker = `case "$1" in
-ps) exit 0 ;;
-system)
-  if [ "$2" = df ]; then echo '{"Size":"1GB"}'; exit 0; fi
-  sleep 30 ;;
-esac
-`
+var hangingPruneDocker = fakeToolSpec{Replies: map[string]fakeReply{
+	"system df":    {Stdout: `{"Size":"1GB"}` + "\n"},
+	"system prune": {SleepMS: 30000},
+}}
 
 func TestDockerClean_TimeoutBoundsHungPrune(t *testing.T) {
-	skipOnWindows(t, "#206 docker fakes are POSIX shell scripts")
 	fakeDockerBin(t, hangingPruneDocker)
 	p, err := NewDockerProvider("docker", config.Provider{
 		Paths:    []string{t.TempDir()},
@@ -347,13 +318,10 @@ func TestDockerClean_TimeoutBoundsHungPrune(t *testing.T) {
 }
 
 func TestDockerClean_ZeroTimeoutStaysUnbounded(t *testing.T) {
-	fakeDockerBin(t, `case "$1" in
-ps) exit 0 ;;
-system)
-  if [ "$2" = df ]; then echo '{"Size":"1GB"}'; exit 0; fi
-  sleep 1 ;;
-esac
-`)
+	fakeDockerBin(t, fakeToolSpec{Replies: map[string]fakeReply{
+		"system df":    {Stdout: `{"Size":"1GB"}` + "\n"},
+		"system prune": {SleepMS: 1000},
+	}})
 	p := newTestDockerProvider(t, []string{t.TempDir()})
 
 	_, err := p.Clean(t.Context(), CleanOptions{Mode: CleanModeSmart})

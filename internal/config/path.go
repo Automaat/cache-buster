@@ -27,8 +27,8 @@ func ExpandTilde(path string) (string, error) {
 		return home, nil
 	}
 
-	if strings.HasPrefix(path, "~/") {
-		return filepath.Join(home, path[2:]), nil
+	if strings.HasPrefix(path, "~/") || strings.HasPrefix(path, `~\`) {
+		return filepath.Join(home, filepath.FromSlash(strings.ReplaceAll(path[2:], `\`, "/"))), nil
 	}
 
 	return path, nil

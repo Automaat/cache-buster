@@ -258,6 +258,10 @@ func TestOutputTable_Empty(t *testing.T) {
 
 func TestRunStatus_NoConfig_UsesDefaults(t *testing.T) {
 	tmpDir := t.TempDir()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	require.NoError(t, os.MkdirAll(filepath.Join(home, "go", "pkg", "mod"), 0o750))
 	cfgPath := filepath.Join(tmpDir, "nonexistent.yaml")
 	loader := config.NewLoader()
 	loader.SetConfigPath(cfgPath)
@@ -271,7 +275,7 @@ func TestRunStatus_NoConfig_UsesDefaults(t *testing.T) {
 	// Config file should NOT be auto-created
 	_, statErr := os.Stat(cfgPath)
 	assert.True(t, os.IsNotExist(statErr), "config file should not be auto-created")
-	// But should show default providers (go-mod exists on CI runners)
+	// But should show default providers (go-mod exists in the sandbox home)
 	assert.Contains(t, output, "go-mod")
 }
 
@@ -391,4 +395,47 @@ func TestScanProvider_InvalidGlobPattern(t *testing.T) {
 
 	assert.Contains(t, status.Error, "load provider")
 	assert.Contains(t, status.Error, "expand paths")
+}
+
+func TestStatus_ListsOnlyProvidersThatApplyOnInjectedOS(t *testing.T) {
+	macOnlyDirs := []string{
+		"Library/Developer/Xcode/DerivedData",
+		"Library/Developer/Xcode/Archives",
+		"Library/Developer/CoreSimulator/Caches",
+		"Library/Caches/Homebrew",
+	}
+	tests := []struct {
+		os      string
+		goBuild string
+		want    []string
+	}{
+		{config.OSDarwin, "Library/Caches/go-build", []string{"go-build", "homebrew", "ios-simulator", "xcode-archives", "xcode-deriveddata"}},
+		{config.OSLinux, ".cache/go-build", []string{"go-build"}},
+		{config.OSWindows, "AppData/Local/go-build", []string{"go-build"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.os, func(t *testing.T) {
+			home := t.TempDir()
+			t.Setenv("HOME", home)
+			t.Setenv("USERPROFILE", home)
+			for _, rel := range append([]string{tt.goBuild}, macOnlyDirs...) {
+				require.NoError(t, os.MkdirAll(filepath.Join(home, filepath.FromSlash(rel)), 0o750))
+			}
+			loader := config.NewLoader()
+			loader.SetConfigPath(filepath.Join(t.TempDir(), "config.yaml"))
+			loader.SetPlatform(config.Platform{OS: tt.os, Home: home})
+
+			var err error
+			out := captureStdout(t, func() { err = runStatusWithLoader(loader, true, nil, nil) })
+			require.NoError(t, err)
+
+			var got StatusOutput
+			require.NoError(t, json.Unmarshal([]byte(out), &got))
+			var names []string
+			for _, p := range got.Providers {
+				names = append(names, p.Name)
+			}
+			assert.Equal(t, tt.want, names)
+		})
+	}
 }

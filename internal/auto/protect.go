@@ -41,11 +41,12 @@ func isProtected(path, home string, scanTree bool) bool {
 func ProtectedPaths(cfg *config.Config, home string) []string {
 	var out []string
 	for _, entry := range config.MergeProtected(cfg.Protected) {
+		entry = strings.ReplaceAll(entry, `\`, "/")
 		if rest, ok := strings.CutPrefix(entry, "~/"); ok {
 			if home == "" {
 				continue
 			}
-			entry = filepath.Join(home, rest)
+			entry = filepath.Join(home, filepath.FromSlash(rest))
 		}
 		if !filepath.IsAbs(entry) {
 			continue

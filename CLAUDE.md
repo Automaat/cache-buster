@@ -1,6 +1,6 @@
 # cache-buster
 
-macOS developer cache manager with configurable size limits. Monitors and cleans caches for Go, npm, Docker, Homebrew, and other dev tools.
+Developer cache manager for macOS, Linux and Windows with configurable size limits. Monitors and cleans caches for Go, npm, Docker, Homebrew, and other dev tools.
 
 ## Project Structure
 
@@ -38,7 +38,7 @@ pkg/size/             - Human-readable size parsing/formatting
 
 ### Adding New Provider
 
-1. Add default config in `internal/config/defaults.go`
+1. Add default config in `internal/config/defaults.go`; spell cache-root paths with `Platform` helpers (`p.cache`, `p.data`) and list OS-specific providers in `providerOSes` (`internal/config/platform.go`)
 2. For command-based providers: set `clean_cmd` field
 3. For file-based providers (no CLI): add to `fileBasedProviders` in `registry.go`
 4. Test size calculation and clean operation
@@ -49,7 +49,7 @@ Command-based provider pattern (most common):
 // In defaults.go
 "tool-name": {
     Enabled:  true,
-    Paths:    []string{"~/Library/Caches/tool-name"},
+    Paths:    []string{p.cache("tool-name")},
     MaxSize:  "5G",
     CleanCmd: "tool-name clean-cache",
 },

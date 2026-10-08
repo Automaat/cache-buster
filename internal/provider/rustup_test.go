@@ -208,13 +208,12 @@ func TestRustupProvider_UninstallFailure(t *testing.T) {
 }
 
 func TestRustupProvider_Available(t *testing.T) {
-	skipOnWindows(t, "#206 per-OS paths and permissions")
 	binDir := t.TempDir()
 	t.Setenv("PATH", binDir)
 	p := newFakeRustupProvider(t, &fakeRustup{})
 	assert.False(t, p.Available())
 
-	require.NoError(t, os.WriteFile(filepath.Join(binDir, "rustup"), []byte("#!/bin/sh\n"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(binDir, executableName("rustup")), []byte("#!/bin/sh\n"), 0o755))
 	assert.True(t, p.Available())
 }
 

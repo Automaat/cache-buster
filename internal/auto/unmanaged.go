@@ -52,9 +52,12 @@ func UnmanagedRoots(home string) []string {
 	roots := []string{os.TempDir()}
 	if home != "" {
 		roots = append(roots, filepath.Join(home, ".local", "share"))
-		if runtime.GOOS == "darwin" {
+		switch runtime.GOOS {
+		case "darwin":
 			roots = append(roots, filepath.Join(home, "Library", "Caches"))
-		} else {
+		case "windows":
+			roots = append(roots, localAppData(home))
+		default:
 			roots = append(roots, filepath.Join(home, ".cache"))
 		}
 	}
@@ -251,4 +254,11 @@ func overlapsAny(dir string, covered []string) bool {
 		}
 	}
 	return false
+}
+
+func localAppData(home string) string {
+	if dir := os.Getenv("LOCALAPPDATA"); dir != "" {
+		return dir
+	}
+	return filepath.Join(home, "AppData", "Local")
 }

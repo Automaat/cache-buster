@@ -14,11 +14,17 @@ type Loader struct {
 	v            *viper.Viper
 	configPath   string // override for testing, empty uses Path()
 	skipDefaults bool   // skip merging with defaults (for test isolation)
+	platform     Platform
 }
 
 // NewLoader creates a new config loader.
 func NewLoader() *Loader {
-	return &Loader{v: viper.New()}
+	return &Loader{v: viper.New(), platform: CurrentPlatform()}
+}
+
+// SetPlatform overrides the OS and environment the defaults are built for.
+func (l *Loader) SetPlatform(p Platform) {
+	l.platform = p
 }
 
 // SetConfigPath overrides config path (for testing).
@@ -42,9 +48,12 @@ func (l *Loader) path() (string, error) {
 func (l *Loader) Load() (*Config, error) {
 	var cfg *Config
 	if l.skipDefaults {
-		cfg = &Config{Version: "1", Providers: make(map[string]Provider), Auto: DefaultAuto(), Protected: DefaultProtected()}
+		cfg = &Config{
+			Version: "1", Providers: make(map[string]Provider), Auto: DefaultAuto(),
+			Protected: DefaultProtected(), goos: l.platform.OS,
+		}
 	} else {
-		cfg = DefaultConfig()
+		cfg = DefaultConfigFor(l.platform)
 	}
 
 	configPath, err := l.path()
@@ -96,7 +105,7 @@ func (l *Loader) Load() (*Config, error) {
 		if l.v.IsSet("providers." + name + ".clean_timeout") {
 			merged.CleanTimeout = userP.CleanTimeout
 		}
-		if l.v.IsSet("providers." + name + ".paths") {
+		if l.v.IsSet("providers."+name+".paths") && !l.isForeignDefault(name, userP.Paths) {
 			merged.Paths = userP.Paths
 		}
 		if l.v.IsSet("providers." + name + ".enabled") {
@@ -194,7 +203,7 @@ func (l *Loader) InitDefault() (bool, error) {
 		return false, nil
 	}
 
-	if err := l.Save(DefaultConfig()); err != nil {
+	if err := l.Save(DefaultConfigFor(l.platform)); err != nil {
 		return false, err
 	}
 
@@ -216,4 +225,24 @@ func (l *Loader) Exists() (bool, error) {
 		return false, nil
 	}
 	return false, err
+}
+
+// isForeignDefault reports whether paths are the built-in paths of another
+// OS, as a config saved there and synced here holds. The current OS's own
+// defaults win then, so one config file works on every machine.
+func (l *Loader) isForeignDefault(name string, paths []string) bool {
+	for _, goos := range []string{OSDarwin, OSLinux, OSWindows} {
+		if goos == l.platform.OS {
+			continue
+		}
+		bare := Platform{OS: goos, Home: l.platform.Home, TempDir: l.platform.TempDir}
+		withEnv := l.platform
+		withEnv.OS = goos
+		for _, p := range []Platform{bare, withEnv} {
+			if def, ok := DefaultProvidersFor(p)[name]; ok && slices.Equal(def.Paths, paths) {
+				return true
+			}
+		}
+	}
+	return false
 }

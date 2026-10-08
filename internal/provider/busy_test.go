@@ -178,12 +178,11 @@ func TestCommandProvider_SkipsWhenToolRunning(t *testing.T) {
 }
 
 func TestNewBusyGuard(t *testing.T) {
-	skipOnWindows(t, "#206 per-OS paths and permissions")
 	assert.Nil(t, newBusyGuard("npm", []string{"/x"}))
 
 	uv := newBusyGuard("uv", []string{"/a", "/b"})
 	require.NotNil(t, uv)
-	assert.Equal(t, []string{"/a/.lock", "/b/.lock"}, uv.locks)
+	assert.Equal(t, []string{filepath.Join("/a", ".lock"), filepath.Join("/b", ".lock")}, uv.locks)
 	assert.Equal(t, []string{"uv"}, uv.processes)
 
 	cargo := newBusyGuard("cargo", nil)

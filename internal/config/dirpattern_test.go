@@ -22,13 +22,15 @@ providers:
 
 	loader := NewLoader()
 	loader.SetConfigPath(configPath)
+	tempDir := t.TempDir()
+	loader.SetPlatform(Platform{OS: OSLinux, TempDir: tempDir})
 	cfg, err := loader.Load()
 	require.NoError(t, err)
 
 	sail := cfg.Providers["sail-dirs"]
 	assert.True(t, sail.Enabled)
 	assert.Equal(t, TypeDirPattern, sail.Type, "type is inherited from defaults")
-	assert.Equal(t, []string{"/private/tmp/sail*"}, sail.Paths)
+	assert.Equal(t, []string{filepath.Join(tempDir, "sail*")}, sail.Paths)
 	assert.Equal(t, "6h", sail.MinIdle)
 	require.NotNil(t, sail.SkipIfOpen)
 	assert.False(t, *sail.SkipIfOpen)

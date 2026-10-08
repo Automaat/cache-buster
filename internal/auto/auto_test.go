@@ -820,7 +820,6 @@ func TestIsProtected_XcodeArchivesAndAncestors(t *testing.T) {
 }
 
 func TestIsProtected_FilesystemRootAndDataAlias(t *testing.T) {
-	skipOnWindows(t, "#206 per-OS paths and permissions")
 	home := "/Users/me"
 	for _, scan := range []bool{true, false} {
 		if !scan {
@@ -851,7 +850,6 @@ func TestRun_SkipsUncleanXcodeArchivesPathOutsideHome(t *testing.T) {
 }
 
 func TestIsProtected_RootWithoutHome(t *testing.T) {
-	skipOnWindows(t, "#206 per-OS paths and permissions")
 	for _, scan := range []bool{true, false} {
 		assert.True(t, isProtected("/", "", scan))
 		assert.True(t, isProtected("/System/Volumes/Data", "", scan))
@@ -884,7 +882,6 @@ func TestAgentUninstall_UnrecognisedBootoutAndPrintFailureKeepsState(t *testing.
 }
 
 func TestWithoutDataAlias_CaseInsensitive(t *testing.T) {
-	skipOnWindows(t, "#206 per-OS paths and permissions")
 	got := withoutDataAlias([]string{"/system/volumes/data/Users/me", "/System/Volumes/DataX/y"})
 	assert.Contains(t, got, "/Users/me")
 	assert.NotContains(t, got, "X/y")
