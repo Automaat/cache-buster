@@ -31,11 +31,12 @@ func parsePS(out string) []Process {
 			if errPID == nil && errPPID == nil {
 				rest := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(line), fields[0]))
 				rest = strings.TrimSpace(strings.TrimPrefix(rest, fields[1]))
-				procs = append(procs, Process{PID: pid, PPID: ppid, CommandLine: rest})
+				procs = append(procs, Process{PID: pid, PPID: ppid, CommandLine: rest, Args: rest})
 				continue
 			}
 		}
-		procs = append(procs, Process{CommandLine: strings.TrimSpace(line)})
+		text := strings.TrimSpace(line)
+		procs = append(procs, Process{CommandLine: text, Args: text})
 	}
 	return procs
 }

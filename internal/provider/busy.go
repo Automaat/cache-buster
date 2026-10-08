@@ -87,7 +87,11 @@ func excludeSelf(procs []osshim.Process, self int, wanted []string) []string {
 
 	var selfArgs string
 	if p, ok := byPID[self]; ok {
-		_, selfArgs, _ = strings.Cut(strings.TrimSpace(p.CommandLine), " ")
+		args := p.Args
+		if args == "" {
+			args = p.CommandLine
+		}
+		_, selfArgs, _ = strings.Cut(strings.TrimSpace(args), " ")
 		selfArgs = strings.TrimSpace(selfArgs)
 	}
 

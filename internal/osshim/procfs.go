@@ -112,6 +112,7 @@ func processTableFromProc(ctx context.Context, root string) ([]Process, error) {
 			PID:         num,
 			PPID:        parentPID(filepath.Join(root, pid)),
 			CommandLine: strings.TrimSpace(args + " " + name),
+			Args:        args,
 		})
 	}
 	return lines, nil

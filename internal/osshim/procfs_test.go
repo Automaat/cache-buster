@@ -215,5 +215,6 @@ func TestProcessTableFromProcParentPID(t *testing.T) {
 		byPID[p.PID] = p
 	}
 	assert.Equal(t, 42, byPID[100].PPID)
+	assert.Equal(t, "/usr/bin/go build", byPID[100].Args)
 	assert.Zero(t, byPID[101].PPID, "missing stat is an unknown parent")
 }

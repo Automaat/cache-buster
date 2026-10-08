@@ -7,6 +7,8 @@ type Process struct {
 	PID         int
 	PPID        int
 	CommandLine string
+	// Args is the command line without any appended kernel process name.
+	Args string
 }
 
 // ProcessCommandLines returns the command line of every running process.

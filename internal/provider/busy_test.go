@@ -88,6 +88,14 @@ func TestExcludeSelf(t *testing.T) {
 		assert.Equal(t, "cargo is running", g.busyReason(context.Background()))
 	})
 
+	t.Run("linux comm suffix does not defeat the wrapper check", func(t *testing.T) {
+		linux := []osshim.Process{
+			{PID: 50, PPID: 1, CommandLine: "sh -c cache-buster clean cargo sh", Args: "sh -c cache-buster clean cargo"},
+			{PID: 60, PPID: 50, CommandLine: "cache-buster clean cargo cache-buster", Args: "cache-buster clean cargo"},
+		}
+		assert.Empty(t, excludeSelf(linux, 60, wanted))
+	})
+
 	t.Run("tool named later in the ancestor line stays visible", func(t *testing.T) {
 		brew := []osshim.Process{
 			{PID: 1, PPID: 0, CommandLine: "/sbin/launchd"},
@@ -110,8 +118,8 @@ func TestExcludeSelf(t *testing.T) {
 	t.Run("cycle among kept ancestors terminates", func(t *testing.T) {
 		cyc := []osshim.Process{
 			{PID: 60, PPID: 5, CommandLine: "cache-buster clean cargo"},
-			{PID: 5, PPID: 6, CommandLine: "cargo.exe"},
-			{PID: 6, PPID: 5, CommandLine: "cargo.exe"},
+			{PID: 5, PPID: 6, CommandLine: "cargo"},
+			{PID: 6, PPID: 5, CommandLine: "cargo"},
 		}
 		assert.Len(t, excludeSelf(cyc, 60, wanted), 2)
 	})

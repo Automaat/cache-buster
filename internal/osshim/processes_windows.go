@@ -59,7 +59,7 @@ func ProcessTable(ctx context.Context) ([]Process, error) {
 	}
 	procs := make([]Process, 0, len(entries))
 	for i := range entries {
-		procs = append(procs, Process{PID: int(entries[i].pid), PPID: int(entries[i].ppid), CommandLine: entries[i].exe})
+		procs = append(procs, Process{PID: int(entries[i].pid), PPID: int(entries[i].ppid), CommandLine: entries[i].exe, Args: entries[i].exe})
 	}
 	return procs, nil
 }
