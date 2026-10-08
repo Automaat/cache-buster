@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -75,9 +76,27 @@ func CoveredPaths(cfg *config.Config) []string {
 		}
 		paths, err := config.ExpandPaths(pc.Paths)
 		if err != nil {
-			continue
+			paths = literalPrefixes(pc.Paths)
 		}
 		out = append(out, paths...)
+	}
+	return out
+}
+
+// literalPrefixes is the fallback when a pattern cannot be expanded: the
+// directory part before the first glob character still marks what the
+// provider covers, so its directories are not reported as unmanaged.
+func literalPrefixes(patterns []string) []string {
+	var out []string
+	for _, pattern := range patterns {
+		expanded, err := config.ExpandTilde(pattern)
+		if err != nil {
+			continue
+		}
+		if i := strings.IndexAny(expanded, "*?["); i >= 0 {
+			expanded = filepath.Dir(expanded[:i] + "x")
+		}
+		out = append(out, expanded)
 	}
 	return out
 }
@@ -102,6 +121,9 @@ func ScanUnmanaged(ctx context.Context, opts ScanOptions) UnmanagedReport {
 			continue
 		}
 		for _, e := range entries {
+			if ctx.Err() != nil {
+				return UnmanagedReport{Incomplete: true}
+			}
 			if !e.IsDir() {
 				continue
 			}
@@ -140,7 +162,9 @@ feed:
 		select {
 		case work <- path:
 		case <-ctx.Done():
+			mu.Lock()
 			report.Incomplete = true
+			mu.Unlock()
 			break feed
 		}
 	}

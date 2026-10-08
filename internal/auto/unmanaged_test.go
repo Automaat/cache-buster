@@ -125,3 +125,27 @@ func TestUnmanagedRoots_CoversSharedCachesAndTemp(t *testing.T) {
 	assert.Contains(t, roots, filepath.Join(home, ".local", "share"))
 	assert.Contains(t, roots, os.TempDir())
 }
+
+func TestCoveredPaths_BadGlobFallsBackToLiteralPrefix(t *testing.T) {
+	dir := t.TempDir()
+	cfg := &config.Config{Providers: map[string]config.Provider{
+		"bad": {Enabled: true, Paths: []string{filepath.Join(dir, "sail[")}},
+	}}
+
+	assert.Equal(t, []string{dir}, CoveredPaths(cfg))
+}
+
+func TestScanUnmanaged_CancelWhileWorkersRunHasNoRace(t *testing.T) {
+	root := t.TempDir()
+	for i := range 40 {
+		for j := range 20 {
+			mkdirFile(t, filepath.Join(root, string(rune('a'+i%26))+string(rune('A'+i/26)), string(rune('a'+j)), "f"), 10)
+		}
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Millisecond)
+	defer cancel()
+
+	report := ScanUnmanaged(ctx, ScanOptions{Roots: []string{root}, Budget: 3 * time.Millisecond})
+
+	assert.NotNil(t, report)
+}
