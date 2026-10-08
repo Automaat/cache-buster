@@ -12,6 +12,7 @@ import (
 
 	"github.com/smykla-skalski/bilgie/internal/config"
 	"github.com/smykla-skalski/bilgie/internal/provider"
+	"github.com/smykla-skalski/bilgie/internal/report"
 	"github.com/smykla-skalski/bilgie/pkg/size"
 )
 
@@ -40,6 +41,9 @@ type Deps struct {
 	NewProvider func(name string, cfg config.Provider) (provider.Provider, error)
 	Out         io.Writer
 	Home        string
+	// Verbose prints every entry a provider would remove instead of the
+	// concise per-provider summary.
+	Verbose bool
 }
 
 // Result is one provider's outcome.
@@ -49,7 +53,25 @@ type Result struct {
 	Status string
 	Reason string
 	Output string
-	Freed  int64
+	// Entries are the paths removed, or that a dry-run would remove.
+	Entries        []provider.Entry
+	SkippedEntries int
+	Freed          int64
+}
+
+// Block converts the result to the renderer's form.
+func (r Result) Block() report.Block {
+	b := report.Block{
+		Name:    r.Name,
+		Status:  r.Status,
+		Reason:  r.Reason,
+		Output:  r.Output,
+		Summary: report.Summarize(r.Status, r.Freed, r.Entries, r.SkippedEntries),
+	}
+	if r.Err != nil {
+		b.Err = r.Err.Error()
+	}
+	return b
 }
 
 // Report is the outcome of a run.
@@ -105,22 +127,32 @@ func Run(ctx context.Context, cfg *config.Config, dryRun bool, deps Deps) (Repor
 		return Report{}, err
 	}
 
-	report := Report{Start: start, End: start, Tier: tier, DryRun: dryRun}
+	rep := Report{Start: start, End: start, Tier: tier, DryRun: dryRun}
 	fmt.Fprintf(deps.Out, "free %s of %s: tier %s%s\n",
 		size.FormatSize(start.Free), size.FormatSize(start.Total), tier, dryRunSuffix(dryRun))
+
+	var skippedBlocks []report.Block
+	finish := func() {
+		if deps.Verbose {
+			return
+		}
+		report.WriteSkipped(deps.Out, skippedBlocks)
+		report.WriteTotal(deps.Out, report.Totals(blocksOf(rep.Results), dryRun))
+	}
 
 	list := candidates(cfg, tier)
 	protected := ProtectedPaths(cfg, deps.Home)
 	for i := range list {
 		c := &list[i]
 		if err := ctx.Err(); err != nil {
-			return report, err
+			finish()
+			return rep, err
 		}
 
-		current := currentTier(cfg, tier, deps, &report)
+		current := currentTier(cfg, tier, deps, &rep)
 		if tier != TierOK && current == TierOK {
-			report.Recovered = true
-			fmt.Fprintf(deps.Out, "free space recovered: %s free, stopping\n", size.FormatSize(report.End.Free))
+			rep.Recovered = true
+			fmt.Fprintf(deps.Out, "free space recovered: %s free, stopping\n", size.FormatSize(rep.End.Free))
 			break
 		}
 		if c.sweep && current != TierCritical {
@@ -128,26 +160,43 @@ func Run(ctx context.Context, cfg *config.Config, dryRun bool, deps Deps) (Repor
 		}
 
 		res := runCandidate(ctx, c, tier, dryRun, deps, protected)
-		report.Results = append(report.Results, res)
-		printResult(deps.Out, res)
+		rep.Results = append(rep.Results, res)
+		switch {
+		case deps.Verbose:
+			printResult(deps.Out, res)
+		case res.Status == StatusSkipped:
+			skippedBlocks = append(skippedBlocks, res.Block())
+		default:
+			report.WriteBlock(deps.Out, res.Block())
+		}
 	}
 
 	if err := ctx.Err(); err != nil {
-		return report, err
+		finish()
+		return rep, err
 	}
 
+	finish()
 	if end, freeErr := deps.Free(); freeErr == nil {
-		report.End = end
+		rep.End = end
 	} else {
-		report.EndStale = true
+		rep.EndStale = true
 	}
-	fmt.Fprintf(deps.Out, "done: free %s\n", size.FormatSize(report.End.Free))
-	return report, nil
+	fmt.Fprintf(deps.Out, "done: free %s\n", size.FormatSize(rep.End.Free))
+	return rep, nil
+}
+
+func blocksOf(results []Result) []report.Block {
+	blocks := make([]report.Block, len(results))
+	for i, r := range results {
+		blocks[i] = r.Block()
+	}
+	return blocks
 }
 
 // currentTier rereads free space so a run stops once enough was freed. An
 // unreadable value keeps the starting tier.
-func currentTier(cfg *config.Config, start Tier, deps Deps, report *Report) Tier {
+func currentTier(cfg *config.Config, start Tier, deps Deps, rep *Report) Tier {
 	if start == TierOK {
 		return start
 	}
@@ -155,7 +204,7 @@ func currentTier(cfg *config.Config, start Tier, deps Deps, report *Report) Tier
 	if err != nil {
 		return start
 	}
-	report.End = now
+	rep.End = now
 	tier, err := ChooseTier(now, cfg.Auto)
 	if err != nil {
 		return start
@@ -269,6 +318,8 @@ func runCandidate(ctx context.Context, c *candidate, tier Tier, dryRun bool, dep
 	})
 	res.Output = strings.TrimSpace(out.Output)
 	res.Freed = out.BytesCleaned
+	res.Entries = out.Entries
+	res.SkippedEntries = out.SkippedEntries
 	switch {
 	case err != nil:
 		res.Status, res.Err = StatusError, err

@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"cmp"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -31,14 +32,19 @@ tier, free space before and after, bytes freed and what was skipped. Unreadable 
 func init() {
 	HistoryCmd.Flags().IntP("limit", "n", defaultHistoryLimit, "Number of runs to show (0 shows all)")
 	HistoryCmd.Flags().Bool("json", false, "Output in JSON format")
+	HistoryCmd.Flags().Bool("providers", false, "Show bytes freed per provider over the last N runs")
 }
 
 func runHistory(cmd *cobra.Command, _ []string) error {
 	limit, _ := cmd.Flags().GetInt("limit")
 	jsonFlag, _ := cmd.Flags().GetBool("json")
+	providers, _ := cmd.Flags().GetBool("providers")
 	stateDir, err := auto.StateDir()
 	if err != nil {
 		return err
+	}
+	if providers {
+		return runHistoryProvidersIn(os.Stdout, stateDir, limit, jsonFlag)
 	}
 	return runHistoryIn(os.Stdout, stateDir, limit, jsonFlag)
 }
@@ -110,4 +116,87 @@ func historyNotes(r auto.RunRecord) string {
 		notes = append(notes, "run error")
 	}
 	return strings.Join(notes, ", ")
+}
+
+// ProviderHistory is one provider's totals over a window of runs. Freed
+// counts deleting runs only; WouldFree counts what dry-runs reported.
+type ProviderHistory struct {
+	Name      string `json:"name"`
+	Runs      int    `json:"runs"`
+	Cleaned   int    `json:"cleaned"`
+	Skipped   int    `json:"skipped"`
+	Errors    int    `json:"errors"`
+	Freed     int64  `json:"freed_bytes"`
+	WouldFree int64  `json:"would_free_bytes"`
+}
+
+func aggregateProviders(runs []auto.RunRecord) []ProviderHistory {
+	byName := make(map[string]*ProviderHistory)
+	for _, r := range runs {
+		for _, p := range r.Providers {
+			h := byName[p.Name]
+			if h == nil {
+				h = &ProviderHistory{Name: p.Name}
+				byName[p.Name] = h
+			}
+			h.Runs++
+			switch p.Status {
+			case auto.StatusSkipped:
+				h.Skipped++
+			case auto.StatusError:
+				h.Errors++
+			default:
+				h.Cleaned++
+			}
+			if r.DryRun {
+				h.WouldFree += p.FreedBytes
+			} else {
+				h.Freed += p.FreedBytes
+			}
+		}
+	}
+	out := make([]ProviderHistory, 0, len(byName))
+	for _, h := range byName {
+		out = append(out, *h)
+	}
+	slices.SortFunc(out, func(a, b ProviderHistory) int {
+		return cmp.Or(cmp.Compare(b.Freed, a.Freed), cmp.Compare(b.WouldFree, a.WouldFree), strings.Compare(a.Name, b.Name))
+	})
+	return out
+}
+
+func runHistoryProvidersIn(out io.Writer, stateDir string, limit int, jsonOutput bool) error {
+	if limit < 0 {
+		return fmt.Errorf("--limit must not be negative, got %d", limit)
+	}
+	runs, corrupt, err := auto.ReadRuns(stateDir, limit)
+	if err != nil {
+		return err
+	}
+	stats := aggregateProviders(runs)
+
+	if jsonOutput {
+		enc := json.NewEncoder(out)
+		enc.SetIndent("", "  ")
+		return enc.Encode(struct {
+			Providers []ProviderHistory `json:"providers"`
+			Runs      int               `json:"runs"`
+		}{Providers: stats, Runs: len(runs)})
+	}
+
+	if len(runs) == 0 {
+		fmt.Fprintln(out, "No auto runs recorded")
+	} else {
+		fmt.Fprintf(out, "Bytes freed per provider over the last %d run(s); dry-runs count as WOULD FREE\n", len(runs))
+		w := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
+		fmt.Fprintln(w, "PROVIDER\tRUNS\tFREED\tWOULD FREE\tSKIPPED\tERRORS")
+		for _, h := range stats {
+			fmt.Fprintf(w, "%s\t%d\t%s\t%s\t%d\t%d\n", h.Name, h.Runs, size.FormatSize(h.Freed), size.FormatSize(h.WouldFree), h.Skipped, h.Errors)
+		}
+		_ = w.Flush()
+	}
+	if corrupt > 0 {
+		fmt.Fprintf(out, "%d unreadable log line(s) skipped\n", corrupt)
+	}
+	return nil
 }

@@ -158,6 +158,11 @@ func (h *harness) add(name string, enabled, over bool, mutate ...func(*fakeProvi
 
 func (h *harness) run(dryRun bool, free ...int64) (Report, error) {
 	h.t.Helper()
+	return h.runWith(false, dryRun, free...)
+}
+
+func (h *harness) runWith(verbose, dryRun bool, free ...int64) (Report, error) {
+	h.t.Helper()
 	i := 0
 	deps := Deps{
 		Free: func() (FreeSpace, error) {
@@ -172,8 +177,9 @@ func (h *harness) run(dryRun bool, free ...int64) (Report, error) {
 			}
 			return f, nil
 		},
-		Out:  &h.out,
-		Home: h.home,
+		Out:     &h.out,
+		Home:    h.home,
+		Verbose: verbose,
 	}
 	return Run(h.t.Context(), h.cfg, dryRun, deps)
 }
@@ -189,7 +195,8 @@ func TestRun_OKTierTrimsOnlyOverLimitProviders(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, TierOK, report.Tier)
 	assert.Equal(t, []string{"npm", "go-build"}, h.calls)
-	assert.Contains(t, h.out.String(), "pip: skipped (within limit)")
+	assert.Contains(t, h.out.String(), "skipped (1):\n  pip: within limit")
+	assert.Contains(t, h.out.String(), "total: freed 2.0 GiB across 2 providers; 1 skipped")
 	for _, o := range h.opts {
 		assert.Equal(t, provider.CleanModeSmart, o.Mode)
 		assert.False(t, o.DryRun)
@@ -382,8 +389,9 @@ func TestRun_ReportsSkipsAndErrorsWithoutAborting(t *testing.T) {
 	assert.Equal(t, []string{"npm", "pip", "yarn"}, h.calls)
 	require.Error(t, report.Err())
 	assert.Contains(t, report.Err().Error(), "pip: boom")
-	assert.Contains(t, h.out.String(), "npm: skipped (npm is running)")
-	assert.Contains(t, h.out.String(), "gone: skipped (unavailable)")
+	assert.Contains(t, h.out.String(), "skipped (2):\n  npm: npm is running\n  gone: unavailable")
+	assert.Contains(t, h.out.String(), "pip: error: boom")
+	assert.Contains(t, h.out.String(), "total: freed 2.0 GiB across 1 provider; 2 skipped; 1 failed")
 }
 
 func TestRun_FreeSpaceErrorDeletesNothing(t *testing.T) {
@@ -944,4 +952,17 @@ func TestRun_InterruptDoesNotWaitForHungProbe(t *testing.T) {
 
 	require.Error(t, err)
 	assert.Less(t, time.Since(start), 5*time.Second)
+}
+
+func TestRun_VerbosePrintsEveryResultLikeBefore(t *testing.T) {
+	h := newHarness(t)
+	h.add("npm", true, true)
+	h.add("pip", true, false)
+
+	_, err := h.runWith(true, false, 400*gib)
+
+	require.NoError(t, err)
+	assert.Contains(t, h.out.String(), "pip: skipped (within limit)")
+	assert.Contains(t, h.out.String(), "npm: freed 1.0 GiB")
+	assert.NotContains(t, h.out.String(), "total:")
 }
