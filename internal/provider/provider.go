@@ -59,7 +59,13 @@ type CleanResult struct {
 	Output string
 	// SkipReason is set when the provider declined to clean, for example
 	// because its tool is busy. A skip is not an error.
-	SkipReason   string
-	BytesCleaned int64
-	FilesDeleted int64
+	SkipReason string
+	// Entries lists what was removed, or what a dry-run would remove, so
+	// callers can summarize without parsing Output. Providers that act
+	// through an external command leave it empty.
+	Entries []Entry
+	// SkippedEntries counts candidates a provider examined and left alone.
+	SkippedEntries int
+	BytesCleaned   int64
+	FilesDeleted   int64
 }

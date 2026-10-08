@@ -238,3 +238,19 @@ func TestTrim_CarriesForwardScanWarnings(t *testing.T) {
 	// Should have warning from scan
 	assert.NotEmpty(t, result.Errors)
 }
+
+func TestTrim_ReportsRemovedFiles(t *testing.T) {
+	for _, dryRun := range []bool{true, false} {
+		dir := t.TempDir()
+		oldFile := filepath.Join(dir, "old.txt")
+		createTestFile(t, oldFile, 700, 40*24*time.Hour)
+		createTestFile(t, filepath.Join(dir, "new.txt"), 100, time.Hour)
+
+		result, err := Trim(context.Background(), []string{dir}, TrimOptions{MaxSize: 1 << 20, MaxAge: 30 * 24 * time.Hour, DryRun: dryRun})
+		require.NoError(t, err)
+
+		require.Len(t, result.Removed, 1)
+		assert.Equal(t, oldFile, result.Removed[0].Path)
+		assert.Equal(t, int64(700), result.Removed[0].Size)
+	}
+}

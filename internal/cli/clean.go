@@ -13,6 +13,7 @@ import (
 
 	"github.com/smykla-skalski/bilgie/internal/config"
 	"github.com/smykla-skalski/bilgie/internal/provider"
+	"github.com/smykla-skalski/bilgie/internal/report"
 	"github.com/smykla-skalski/bilgie/pkg/size"
 	"github.com/spf13/cobra"
 )
@@ -34,6 +35,7 @@ func init() {
 	CleanCmd.Flags().Bool("force", false, "Skip confirmation prompt")
 	CleanCmd.Flags().Bool("quiet", false, "Minimal output")
 	CleanCmd.Flags().Bool("json", false, "Output results in JSON format (requires --force or --dry-run)")
+	CleanCmd.Flags().Bool("verbose", false, "List every entry instead of a per-provider summary")
 	CleanCmd.Flags().Bool("smart", false, "Smart clean: removes files older than max_age, then LRU-trims to stay under max_size")
 }
 
@@ -44,14 +46,15 @@ func runClean(cmd *cobra.Command, args []string) error {
 	quiet, _ := cmd.Flags().GetBool("quiet")
 	smart, _ := cmd.Flags().GetBool("smart")
 	jsonOut, _ := cmd.Flags().GetBool("json")
+	verbose, _ := cmd.Flags().GetBool("verbose")
 
 	return runCleanWithOptions(config.NewLoader(), args, cleanOptions{
-		all: allFlag, dryRun: dryRun, force: force, quiet: quiet, smart: smart, json: jsonOut,
+		all: allFlag, dryRun: dryRun, force: force, quiet: quiet, smart: smart, json: jsonOut, verbose: verbose,
 	}, os.Stdin)
 }
 
 type cleanOptions struct {
-	all, dryRun, force, quiet, smart, json bool
+	all, dryRun, force, quiet, smart, json, verbose bool
 }
 
 func runCleanWithLoader(loader *config.Loader, args []string, allFlag, dryRun, force, quiet, smart bool, stdin *os.File) error {
@@ -228,12 +231,15 @@ type ProviderCleanResult struct {
 	Output     string `json:"output,omitempty"`
 	Freed      string `json:"freed,omitempty"`
 	FreedBytes int64  `json:"freed_bytes"`
+	// Summary is the structured outcome; entries are not parsed from Output.
+	Summary *report.Summary `json:"summary,omitempty"`
 }
 
 // CleanOutput holds the full clean outcome for JSON serialization.
 type CleanOutput struct {
 	Total      string                `json:"total"`
 	Providers  []ProviderCleanResult `json:"providers"`
+	Summary    report.Overall        `json:"summary"`
 	TotalBytes int64                 `json:"total_bytes"`
 	DryRun     bool                  `json:"dry_run"`
 	Cancelled  bool                  `json:"cancelled,omitempty"`
@@ -258,6 +264,8 @@ func executeClean(
 ) error {
 	dryRun, quiet, jsonOut := opts.dryRun, opts.quiet, opts.json
 	text := !jsonOut
+	concise := !opts.verbose
+	var skippedBlocks []report.Block
 	var totalCleaned int64
 	var errors []string
 	results := make([]ProviderCleanResult, 0, len(providers)+len(unavailable))
@@ -290,6 +298,7 @@ func executeClean(
 				Output:     strings.TrimSpace(result.Output),
 				Freed:      size.FormatSize(result.BytesCleaned),
 				FreedBytes: result.BytesCleaned,
+				Summary:    summaryOf(statusCancelled, result),
 			})
 			if !quiet && text {
 				fmt.Println("error")
@@ -318,24 +327,72 @@ func executeClean(
 		case result.SkipReason != "":
 			entry.Status = statusSkipped
 			entry.Reason = result.SkipReason
-			if text {
+			if text && concise && dryRun && !quiet {
+				skippedBlocks = append(skippedBlocks, report.Block{Name: p.Name(), Status: statusSkipped, Reason: result.SkipReason})
+			} else if text {
 				printSkipped(p.Name(), result.SkipReason, dryRun, quiet)
 			}
 		case dryRun:
 			entry.Status = statusDryRun
-			if !quiet && text {
+			switch {
+			case !quiet && text && concise:
+				report.WriteBlock(os.Stdout, blockOf(p.Name(), statusDryRun, result))
+			case !quiet && text:
 				fmt.Printf("[dry-run] %s: %s\n", p.Name(), result.Output)
 			}
 		default:
 			entry.Status = statusCleaned
 			if !quiet && text {
-				fmt.Printf("done (freed %s)\n", size.FormatSize(result.BytesCleaned))
+				printDone(result, concise)
 			}
 		}
+		entry.Summary = summaryOf(entry.Status, result)
 		results = append(results, entry)
 	}
 
+	if concise && dryRun && !quiet && text {
+		for _, u := range unavailable {
+			skippedBlocks = append(skippedBlocks, report.Block{Name: u.Name, Status: statusUnavailable, Reason: u.Reason})
+		}
+		report.WriteSkipped(os.Stdout, skippedBlocks)
+	}
 	return finishClean(results, totalCleaned, opts, errors, false)
+}
+
+func printDone(result provider.CleanResult, concise bool) {
+	if !concise {
+		fmt.Printf("done (freed %s)\n", size.FormatSize(result.BytesCleaned))
+		return
+	}
+	fmt.Printf("done (freed %s%s)\n", size.FormatSize(result.BytesCleaned), entryCount(result))
+	report.WriteTop(os.Stdout, report.Summarize(statusCleaned, result.BytesCleaned, result.Entries, 0))
+}
+
+func summaryOf(status string, result provider.CleanResult) *report.Summary {
+	s := report.Summarize(status, result.BytesCleaned, result.Entries, result.SkippedEntries)
+	return &s
+}
+
+func blockOf(name, status string, result provider.CleanResult) report.Block {
+	return report.Block{
+		Name:    name,
+		Status:  status,
+		Reason:  result.SkipReason,
+		Output:  strings.TrimSpace(result.Output),
+		Summary: report.Summarize(status, result.BytesCleaned, result.Entries, result.SkippedEntries),
+	}
+}
+
+// entryCount is the ", N entries" suffix of a finished provider line.
+func entryCount(result provider.CleanResult) string {
+	switch n := len(result.Entries); n {
+	case 0:
+		return ""
+	case 1:
+		return ", 1 entry"
+	default:
+		return fmt.Sprintf(", %d entries", n)
+	}
 }
 
 // printSkipped reports a skipped provider. Skips go to stderr in quiet mode so
@@ -358,6 +415,7 @@ func finishClean(results []ProviderCleanResult, totalCleaned int64, opts cleanOp
 		enc.SetIndent("", "  ")
 		if err := enc.Encode(CleanOutput{
 			Providers:  results,
+			Summary:    overallOf(results, opts.dryRun),
 			TotalBytes: totalCleaned,
 			Total:      size.FormatSize(totalCleaned),
 			DryRun:     opts.dryRun,
@@ -367,6 +425,8 @@ func finishClean(results []ProviderCleanResult, totalCleaned int64, opts cleanOp
 		}
 	case cancelled:
 		return nil
+	case !opts.quiet && opts.dryRun && !opts.verbose:
+		report.WriteTotal(os.Stdout, overallOf(results, true))
 	case !opts.quiet && !opts.dryRun:
 		fmt.Printf("\nTotal: %s freed\n", size.FormatSize(totalCleaned))
 	case opts.quiet && !opts.dryRun:
@@ -378,4 +438,17 @@ func finishClean(results []ProviderCleanResult, totalCleaned int64, opts cleanOp
 	}
 
 	return nil
+}
+
+// overallOf folds provider results into the run summary for JSON and the
+// closing total line.
+func overallOf(results []ProviderCleanResult, dryRun bool) report.Overall {
+	blocks := make([]report.Block, len(results))
+	for i, r := range results {
+		blocks[i] = report.Block{Status: r.Status, Err: r.Error}
+		if r.Summary != nil {
+			blocks[i].Summary = *r.Summary
+		}
+	}
+	return report.Totals(blocks, dryRun)
 }

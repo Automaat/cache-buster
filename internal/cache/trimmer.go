@@ -20,8 +20,10 @@ type TrimOptions struct {
 
 // TrimResult contains trimming operation results.
 type TrimResult struct {
-	Output       string
-	Errors       []AccessError
+	Output string
+	Errors []AccessError
+	// Removed lists the files deleted, or that a dry-run would delete.
+	Removed      []FileInfo
 	DeletedCount int64
 	FreedBytes   int64
 }
@@ -108,6 +110,7 @@ func Trim(ctx context.Context, paths []string, opts TrimOptions) (TrimResult, er
 			fmt.Fprintf(&output, "would delete: %s (%s, age: %s)\n", f.Path, size.FormatSize(f.Size), age)
 			result.FreedBytes += f.Size
 			result.DeletedCount++
+			result.Removed = append(result.Removed, f)
 			continue
 		}
 
@@ -118,6 +121,7 @@ func Trim(ctx context.Context, paths []string, opts TrimOptions) (TrimResult, er
 
 		result.FreedBytes += f.Size
 		result.DeletedCount++
+		result.Removed = append(result.Removed, f)
 	}
 
 	if opts.DryRun {

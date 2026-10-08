@@ -25,12 +25,6 @@ func withMarkerLimits(t *testing.T, lim scanLimits) {
 	t.Cleanup(func() { markerLimits = old })
 }
 
-func touch(t *testing.T, path string) {
-	t.Helper()
-	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o750))
-	require.NoError(t, os.WriteFile(path, nil, 0o600))
-}
-
 func TestRun_MiseShapedCacheIsNotSkipped(t *testing.T) {
 	h := newHarness(t)
 	root := h.dir(".local", "share", "mise")
@@ -328,7 +322,7 @@ func TestRun_TooLargeToVerifyIsSkippedAndReported(t *testing.T) {
 	require.Len(t, report.Results, 1)
 	assert.Equal(t, StatusSkipped, report.Results[0].Status)
 	assert.Equal(t, "too large to verify: "+root, report.Results[0].Reason)
-	assert.Contains(t, h.out.String(), "big: skipped (too large to verify: "+root+")")
+	assert.Contains(t, h.out.String(), "  big: too large to verify: "+root+"\n")
 	assert.Contains(t, h.out.String(), "nothing to clean")
 }
 
@@ -425,4 +419,22 @@ func TestRun_SweepSymlinkIntoProtectedNameIsSkipped(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.FileExists(t, filepath.Join(target, "a.bin"))
+}
+
+func TestRun_VerboseShowsTooLargeAndCannotVerifyReasons(t *testing.T) {
+	withMarkerLimits(t, scanLimits{timeout: time.Minute, depth: 3, dirs: 2, entries: 1000})
+	h := newHarness(t)
+	root := h.dir("big")
+	for i := range 5 {
+		touch(t, filepath.Join(root, fmt.Sprintf("d%d", i), "a"))
+	}
+	h.add("big", true, true, func(f *fakeProvider, pc *config.Provider) {
+		pc.Paths = []string{root}
+		f.paths = []string{root}
+	})
+
+	_, err := h.runWith(true, false, 1*gib)
+
+	require.NoError(t, err)
+	assert.Contains(t, h.out.String(), "big: skipped (too large to verify: "+root+")")
 }

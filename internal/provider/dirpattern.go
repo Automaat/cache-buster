@@ -109,6 +109,7 @@ func (p *DirPatternProvider) Clean(ctx context.Context, opts CleanOptions) (Clea
 		sc, reason := p.evaluate(ctx, dir)
 		if reason != "" {
 			fmt.Fprintf(&out, "skip: %s (%s)\n", dir, reason)
+			result.SkippedEntries++
 			continue
 		}
 
@@ -117,6 +118,7 @@ func (p *DirPatternProvider) Clean(ctx context.Context, opts CleanOptions) (Clea
 			fmt.Fprintf(&out, "would remove: %s (%s, idle %s)\n", dir, size.FormatSize(sc.size), idle)
 			result.BytesCleaned += sc.size
 			result.FilesDeleted += sc.files
+			result.Entries = append(result.Entries, Entry{Path: dir, Size: sc.size})
 			continue
 		}
 
@@ -129,6 +131,7 @@ func (p *DirPatternProvider) Clean(ctx context.Context, opts CleanOptions) (Clea
 		fmt.Fprintf(&out, "removed: %s (%s, idle %s)\n", dir, size.FormatSize(sc.size), idle)
 		result.BytesCleaned += sc.size
 		result.FilesDeleted += sc.files
+		result.Entries = append(result.Entries, Entry{Path: dir, Size: sc.size})
 	}
 
 	result.Output = out.String()

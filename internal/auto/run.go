@@ -12,6 +12,7 @@ import (
 
 	"github.com/smykla-skalski/bilgie/internal/config"
 	"github.com/smykla-skalski/bilgie/internal/provider"
+	"github.com/smykla-skalski/bilgie/internal/report"
 	"github.com/smykla-skalski/bilgie/pkg/size"
 )
 
@@ -40,6 +41,17 @@ type Deps struct {
 	NewProvider func(name string, cfg config.Provider) (provider.Provider, error)
 	Out         io.Writer
 	Home        string
+	// Verbose prints every entry a provider would remove instead of the
+	// concise per-provider summary.
+	Verbose bool
+	// MinTier raises the pass to at least this tier; the tick sets it to its
+	// hysteresis-settled tier so a pass does not ease off earlier than the
+	// tick decided.
+	MinTier Tier
+	// Predicted marks a pass started by the falling-trend forecast: it runs
+	// as the low tier even though space is still above the threshold, and
+	// does not stop for "recovered" before any provider ran.
+	Predicted bool
 }
 
 // Result is one provider's outcome.
@@ -49,7 +61,25 @@ type Result struct {
 	Status string
 	Reason string
 	Output string
-	Freed  int64
+	// Entries are the paths removed, or that a dry-run would remove.
+	Entries        []provider.Entry
+	SkippedEntries int
+	Freed          int64
+}
+
+// Block converts the result to the renderer's form.
+func (r Result) Block() report.Block {
+	b := report.Block{
+		Name:    r.Name,
+		Status:  r.Status,
+		Reason:  r.Reason,
+		Output:  r.Output,
+		Summary: report.Summarize(r.Status, r.Freed, r.Entries, r.SkippedEntries),
+	}
+	if r.Err != nil {
+		b.Err = r.Err.Error()
+	}
+	return b
 }
 
 // Report is the outcome of a run.
@@ -86,7 +116,7 @@ func (r Report) Err() error {
 }
 
 // candidate is a provider auto may run. A sweep is a disabled
-// directory-pattern provider that runs only at the critical tier.
+// directory-pattern provider that runs only at the emergency tier.
 type candidate struct {
 	cfg   config.Provider
 	name  string
@@ -100,57 +130,89 @@ func Run(ctx context.Context, cfg *config.Config, dryRun bool, deps Deps) (Repor
 	if err != nil {
 		return Report{}, fmt.Errorf("read free space: %w", err)
 	}
-	tier, err := ChooseTier(start, cfg.Auto)
+	limits, err := cfg.Auto.Limits()
 	if err != nil {
 		return Report{}, err
 	}
+	th := ThresholdsFor(start.Total, limits)
+	tier := max(th.Raw(start.Free), deps.MinTier)
+	if deps.Predicted {
+		tier = max(tier, TierLow)
+	}
 
-	report := Report{Start: start, End: start, Tier: tier, DryRun: dryRun}
+	rep := Report{Start: start, End: start, Tier: tier, DryRun: dryRun}
 	fmt.Fprintf(deps.Out, "free %s of %s: tier %s%s\n",
 		size.FormatSize(start.Free), size.FormatSize(start.Total), tier, dryRunSuffix(dryRun))
+
+	var skippedBlocks []report.Block
+	finish := func() {
+		if deps.Verbose {
+			return
+		}
+		report.WriteSkipped(deps.Out, skippedBlocks)
+		report.WriteTotal(deps.Out, report.Totals(blocksOf(rep.Results), dryRun))
+	}
 
 	list := candidates(cfg, tier)
 	protected := ProtectedPaths(cfg, deps.Home)
 	for i := range list {
 		c := &list[i]
 		if err := ctx.Err(); err != nil {
-			return report, err
+			finish()
+			return rep, err
 		}
 
-		current := currentTier(cfg, tier, deps, &report)
-		if tier != TierOK && current == TierOK {
-			report.Recovered = true
-			fmt.Fprintf(deps.Out, "free space recovered: %s free, stopping\n", size.FormatSize(report.End.Free))
+		current := currentTier(th, tier, deps, &rep)
+		if tier != TierOK && current == TierOK && !deps.Predicted {
+			rep.Recovered = true
+			fmt.Fprintf(deps.Out, "free space recovered: %s free, stopping\n", size.FormatSize(rep.End.Free))
 			break
 		}
-		if c.sweep && current != TierCritical {
+		if c.sweep && current != TierEmergency {
 			continue
 		}
 
 		res := runCandidate(ctx, c, tier, dryRun, deps, protected)
-		report.Results = append(report.Results, res)
-		printResult(deps.Out, res)
+		rep.Results = append(rep.Results, res)
+		switch {
+		case deps.Verbose:
+			printResult(deps.Out, res)
+		case res.Status == StatusSkipped:
+			skippedBlocks = append(skippedBlocks, res.Block())
+		default:
+			report.WriteBlock(deps.Out, res.Block())
+		}
 	}
 
 	if err := ctx.Err(); err != nil {
-		return report, err
+		finish()
+		return rep, err
 	}
 
+	finish()
 	if end, freeErr := deps.Free(); freeErr == nil {
-		report.End = end
+		rep.End = end
 	} else {
-		report.EndStale = true
+		rep.EndStale = true
 	}
-	if tier != TierOK && len(report.Results) > 0 && !slices.ContainsFunc(report.Results, func(r Result) bool { return r.Status != StatusSkipped }) {
+	if tier != TierOK && len(rep.Results) > 0 && !slices.ContainsFunc(rep.Results, func(r Result) bool { return r.Status != StatusSkipped }) {
 		fmt.Fprintln(deps.Out, "nothing to clean: every provider was skipped, see the reasons above")
 	}
-	fmt.Fprintf(deps.Out, "done: free %s\n", size.FormatSize(report.End.Free))
-	return report, nil
+	fmt.Fprintf(deps.Out, "done: free %s\n", size.FormatSize(rep.End.Free))
+	return rep, nil
+}
+
+func blocksOf(results []Result) []report.Block {
+	blocks := make([]report.Block, len(results))
+	for i, r := range results {
+		blocks[i] = r.Block()
+	}
+	return blocks
 }
 
 // currentTier rereads free space so a run stops once enough was freed. An
 // unreadable value keeps the starting tier.
-func currentTier(cfg *config.Config, start Tier, deps Deps, report *Report) Tier {
+func currentTier(th Thresholds, start Tier, deps Deps, rep *Report) Tier {
 	if start == TierOK {
 		return start
 	}
@@ -158,12 +220,8 @@ func currentTier(cfg *config.Config, start Tier, deps Deps, report *Report) Tier
 	if err != nil {
 		return start
 	}
-	report.End = now
-	tier, err := ChooseTier(now, cfg.Auto)
-	if err != nil {
-		return start
-	}
-	return tier
+	rep.End = now
+	return th.Settle(start, now.Free)
 }
 
 func dryRunSuffix(dryRun bool) string {
@@ -174,7 +232,7 @@ func dryRunSuffix(dryRun bool) string {
 }
 
 // candidates lists the providers for a tier, cheapest to rebuild first.
-// At the critical tier the stale-directory sweeps go first because they free
+// At the emergency tier the stale-directory sweeps go first because they free
 // the most. docker-volumes is never listed.
 func candidates(cfg *config.Config, tier Tier) []candidate {
 	var sweeps, regular []string
@@ -189,7 +247,7 @@ func candidates(cfg *config.Config, tier Tier) []candidate {
 		case pc.Enabled:
 			byName[name] = candidate{name: name, cfg: pc}
 			regular = append(regular, name)
-		case pc.Type == config.TypeDirPattern && tier == TierCritical:
+		case pc.Type == config.TypeDirPattern && tier == TierEmergency:
 			byName[name] = candidate{name: name, cfg: pc, sweep: true}
 			sweeps = append(sweeps, name)
 		}
@@ -277,6 +335,8 @@ func runCandidate(ctx context.Context, c *candidate, tier Tier, dryRun bool, dep
 	})
 	res.Output = strings.TrimSpace(out.Output)
 	res.Freed = out.BytesCleaned
+	res.Entries = out.Entries
+	res.SkippedEntries = out.SkippedEntries
 	switch {
 	case err != nil:
 		res.Status, res.Err = StatusError, err

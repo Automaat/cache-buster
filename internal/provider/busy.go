@@ -6,8 +6,10 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 
+	"github.com/kballard/go-shellquote"
 	"github.com/smykla-skalski/bilgie/internal/osshim"
 )
 
@@ -73,11 +75,15 @@ func processLister(wanted []string) func(context.Context) ([]string, error) {
 
 // excludeSelf drops the process with pid self and its ancestors, except an
 // ancestor that is a wanted tool: its executable is the tool, or its command
-// line names the tool without embedding bilgie's own arguments
+// line names the tool without wrapping bilgie's own invocation
 // ("cargo run -- clean", "ruby brew.rb bundle"). A wrapper such as
-// "sh -c bilgie clean cargo" embeds them and is dropped. A zero pid is
-// unknown and never matches.
+// "sh -c 'bilgie clean cargo'" holds that invocation and is dropped. A zero
+// pid is unknown and never matches.
 func excludeSelf(procs []osshim.Process, self int, wanted []string) []string {
+	return excludeSelfFor(procs, self, wanted, runtime.GOOS == "windows")
+}
+
+func excludeSelfFor(procs []osshim.Process, self int, wanted []string, windows bool) []string {
 	byPID := make(map[int]*osshim.Process, len(procs))
 	for i := range procs {
 		if procs[i].PID != 0 {
@@ -85,14 +91,9 @@ func excludeSelf(procs []osshim.Process, self int, wanted []string) []string {
 		}
 	}
 
-	var selfArgs string
+	var inv invocation
 	if p, ok := byPID[self]; ok {
-		args := p.Args
-		if args == "" {
-			args = p.CommandLine
-		}
-		_, selfArgs, _ = strings.Cut(strings.TrimSpace(args), " ")
-		selfArgs = strings.TrimSpace(selfArgs)
+		inv = newInvocation(commandText(p), windows)
 	}
 
 	skip := map[int]bool{}
@@ -103,7 +104,7 @@ func excludeSelf(procs []osshim.Process, self int, wanted []string) []string {
 		if !ok {
 			break
 		}
-		if pid == self || !keepAncestor(p.CommandLine, selfArgs, wanted) {
+		if pid == self || !keepAncestor(p, inv, wanted, windows) {
 			skip[pid] = true
 		}
 		pid = p.PPID
@@ -119,12 +120,108 @@ func excludeSelf(procs []osshim.Process, self int, wanted []string) []string {
 	return lines
 }
 
-func keepAncestor(commandLine, selfArgs string, wanted []string) bool {
-	if matchProcess(firstToken(commandLine), wanted) != "" {
+// commandText is the command line without any appended kernel process name.
+func commandText(p *osshim.Process) string {
+	if p.Args != "" {
+		return p.Args
+	}
+	return p.CommandLine
+}
+
+// invocation is how bilgie itself was started: the executable base name and
+// the whitespace-separated arguments after it.
+type invocation struct {
+	exe  string
+	args []string
+}
+
+func newInvocation(text string, windows bool) invocation {
+	norm := normalizeSeparators(text, windows)
+	fields := strings.Fields(norm)
+	if windows {
+		if flat, ok := flattenCommand(norm, 0); ok {
+			fields = flat
+		}
+	}
+	if len(fields) < 2 {
+		return invocation{}
+	}
+	return invocation{exe: exeName(fields[0], windows), args: fields[1:]}
+}
+
+func keepAncestor(p *osshim.Process, inv invocation, wanted []string, windows bool) bool {
+	if matchProcess(firstToken(p.CommandLine), wanted) != "" {
 		return true
 	}
-	embedsSelf := selfArgs != "" && strings.Contains(commandLine, selfArgs)
-	return !embedsSelf && matchProcess(commandLine, wanted) != ""
+	return !wrapsInvocation(commandText(p), inv, wanted, windows) && matchProcess(p.CommandLine, wanted) != ""
+}
+
+// wrapsInvocation reports whether a command line launches bilgie with its own
+// arguments, directly or through any depth of shell -c strings, with no wanted
+// tool before it ("sudo cargo run -- bilgie clean"). A string that
+// does not parse reports false, which keeps the ancestor and so errs busy.
+func wrapsInvocation(text string, inv invocation, wanted []string, windows bool) bool {
+	if inv.exe == "" {
+		return false
+	}
+	tokens, ok := flattenCommand(normalizeSeparators(text, windows), 0)
+	if !ok {
+		return false
+	}
+	for i := 1; i+len(inv.args) <= len(tokens); i++ {
+		if slices.Equal(tokens[i:i+len(inv.args)], inv.args) && exeName(tokens[i-1], windows) == inv.exe {
+			return matchProcess(strings.Join(tokens[:i-1], " "), wanted) == ""
+		}
+	}
+	return false
+}
+
+const maxWrapperDepth = 8
+
+// flattenCommand splits text with shell quoting rules and splits every token
+// that still holds whitespace again, so nested "sh -c" strings and quoted
+// paths with spaces reduce to the whitespace-separated words a process listing
+// shows, with shell operators glued to a word trimmed off. It reports false when any level does not parse.
+func flattenCommand(text string, depth int) ([]string, bool) {
+	if depth > maxWrapperDepth {
+		return nil, false
+	}
+	words, err := shellquote.Split(text)
+	if err != nil {
+		return nil, false
+	}
+	out := make([]string, 0, len(words))
+	for _, w := range words {
+		if len(strings.Fields(w)) <= 1 {
+			if t := strings.Trim(w, " \t\n;&|()"); t != "" {
+				out = append(out, t)
+			}
+			continue
+		}
+		inner, ok := flattenCommand(w, depth+1)
+		if !ok {
+			return nil, false
+		}
+		out = append(out, inner...)
+	}
+	return out, true
+}
+
+// normalizeSeparators turns Windows backslashes into slashes, which shell
+// quoting would read as escapes.
+func normalizeSeparators(s string, windows bool) string {
+	if windows {
+		return strings.ReplaceAll(s, `\`, "/")
+	}
+	return s
+}
+
+func exeName(token string, windows bool) string {
+	base := filepath.Base(token)
+	if windows {
+		base = strings.TrimSuffix(strings.ToLower(base), ".exe")
+	}
+	return base
 }
 
 func firstToken(commandLine string) string {

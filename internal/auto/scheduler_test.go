@@ -109,7 +109,7 @@ func TestRenderSystemd_EscapesSpecialCharacters(t *testing.T) {
 	require.NoError(t, err)
 
 	text := string(service)
-	assert.Contains(t, text, `ExecStart="/opt/my \"tools\"/100%%/$$x/bilgie" auto`)
+	assert.Contains(t, text, `ExecStart="/opt/my \"tools\"/100%%/$$x/bilgie" tick`)
 	assert.Contains(t, text, "StandardOutput=append:/home/me/100%%/auto.log")
 }
 
@@ -225,7 +225,7 @@ func TestSystemdInstall_WritesUnitsAndEnablesTimer(t *testing.T) {
 	assert.Equal(t, filepath.Join(a.Home, ".config", "systemd", "user", "bilgie.timer"), a.TimerPath())
 	service, err := os.ReadFile(a.ServicePath())
 	require.NoError(t, err)
-	assert.Contains(t, string(service), `ExecStart="`+posixExe+`" auto`)
+	assert.Contains(t, string(service), `ExecStart="`+posixExe+`" tick`)
 	timer, err := os.ReadFile(a.TimerPath())
 	require.NoError(t, err)
 	assert.Contains(t, string(timer), "OnUnitInactiveSec=2700s")

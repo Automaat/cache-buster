@@ -147,7 +147,7 @@ func plistString(s string) string {
 	return "<string>" + esc.String() + "</string>"
 }
 
-// RenderPlist builds the launchd property list that runs `exe auto` every interval.
+// RenderPlist builds the launchd property list that runs `exe tick` every interval.
 func RenderPlist(exe, home, logPath string, interval time.Duration) ([]byte, error) {
 	seconds := int64(interval / time.Second)
 	if seconds < 1 {
@@ -156,7 +156,7 @@ func RenderPlist(exe, home, logPath string, interval time.Duration) ([]byte, err
 
 	entries := []struct{ key, value string }{
 		{"Label", plistString(AgentLabel)},
-		{"ProgramArguments", "<array>\n\t\t" + plistString(exe) + "\n\t\t" + plistString("auto") + "\n\t</array>"},
+		{"ProgramArguments", "<array>\n\t\t" + plistString(exe) + "\n\t\t" + plistString(agentCommand) + "\n\t</array>"},
 		{"StartInterval", fmt.Sprintf("<integer>%d</integer>", seconds)},
 		{"RunAtLoad", "<true/>"},
 		{"ProcessType", plistString("Background")},

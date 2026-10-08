@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"time"
 
@@ -25,10 +26,12 @@ var AutoCmd = &cobra.Command{
 	Short: "Trim caches based on free disk space (for unattended runs)",
 	Long: `Reads free space of the data volume and picks a pressure tier:
 
-  ok        free space above min_free and min_free_pct: smart-trim only providers over their limit
-  low       below either floor: smart-trim every enabled provider, cheapest to rebuild first,
-            stopping once free space recovers
-  critical  under 5 GiB free: also sweep stale directories (dir-pattern providers, even when disabled)
+  ok         free space at or above the low threshold: smart-trim only providers over their limit
+  low        below max(min_free, min(min_free_pct of the volume, min_free_cap)): smart-trim every
+             enabled provider, cheapest to rebuild first, stopping once free space recovers
+  critical   below critical_free (default 10G): the same trim, scheduled at the short cooldown
+  emergency  below emergency_free (default 5G): also sweep stale directories (dir-pattern
+             providers, even when disabled)
 
 The docker-volumes and xcode-archives providers never run. Providers pointing at Downloads, opencode
 or worktrees are skipped. The first run after install-agent is a dry-run.`,
@@ -40,9 +43,10 @@ or worktrees are skipped. The first run after install-agent is a dry-run.`,
 // InstallAgentCmd installs the scheduled job that runs auto.
 var InstallAgentCmd = &cobra.Command{
 	Use:   "install-agent",
-	Short: "Install the scheduled job that runs auto periodically",
-	Long: `Registers auto with the scheduler of this OS: a launchd agent on macOS, a systemd user timer
+	Short: "Install the scheduled job that runs tick periodically",
+	Long: `Registers tick (every auto.tick_interval) with the scheduler of this OS: a launchd agent on macOS, a systemd user timer
 on Linux (a crontab entry when no systemd user manager is running) and a Task Scheduler task on Windows.
+An agent installed by an earlier version, which ran auto every 30 minutes, is replaced.
 The first run after install is a dry-run.`,
 	Args:         cobra.NoArgs,
 	SilenceUsage: true,
@@ -60,6 +64,7 @@ var UninstallAgentCmd = &cobra.Command{
 
 func init() {
 	AutoCmd.Flags().Bool("dry-run", false, "Preview without deleting")
+	AutoCmd.Flags().Bool("verbose", false, "List every entry instead of a per-provider summary")
 	AutoCmd.Flags().String("assume-free", "", "Pretend this much space is free (e.g. 3G) to exercise the tiers; implies --dry-run")
 	_ = AutoCmd.Flags().MarkHidden("assume-free")
 }
@@ -79,6 +84,8 @@ type autoEnv struct {
 	uid         int
 	goos        string
 	configDir   string
+	verbose     bool
+	lookPath    func(string) (string, error)
 }
 
 func defaultAutoEnv() (autoEnv, error) {
@@ -100,6 +107,7 @@ func defaultAutoEnv() (autoEnv, error) {
 		exec:        auto.ExecCommand,
 		notify:      auto.DefaultNotifier(auto.ExecCommand),
 		now:         time.Now,
+		lookPath:    exec.LookPath,
 		out:         os.Stdout,
 		stateDir:    stateDir,
 		home:        home,
@@ -121,11 +129,13 @@ func userConfigDir(home string) string {
 func runAuto(cmd *cobra.Command, _ []string) error {
 	dryRun, _ := cmd.Flags().GetBool("dry-run")
 	assume, _ := cmd.Flags().GetString("assume-free")
+	verbose, _ := cmd.Flags().GetBool("verbose")
 
 	env, err := defaultAutoEnv()
 	if err != nil {
 		return err
 	}
+	env.verbose = verbose
 	if assume != "" {
 		free, err := assumedFree(assume, env.free)
 		if err != nil {
@@ -156,12 +166,9 @@ func assumedFree(value string, statfs auto.FreeFunc) (auto.FreeFunc, error) {
 }
 
 func runAutoWithLoader(ctx context.Context, loader *config.Loader, env autoEnv, dryRun bool) error {
-	cfg, err := loader.Load()
+	cfg, err := loadValidConfig(loader)
 	if err != nil {
-		return fmt.Errorf("load config: %w", err)
-	}
-	if err := cfg.Validate(); err != nil {
-		return fmt.Errorf("validate config: %w", err)
+		return err
 	}
 
 	lock, ok, err := auto.AcquireRunLock(env.stateDir)
@@ -174,9 +181,21 @@ func runAutoWithLoader(ctx context.Context, loader *config.Loader, env autoEnv, 
 	}
 	defer lock.Release()
 
-	forced := auto.FirstRunPending(env.stateDir) && !dryRun
+	return env.pass(ctx, cfg, dryRun, passOptions{preview: dryRun})
+}
+
+// passOptions carries what a tick knows about why it started a pass.
+type passOptions struct {
+	preview   bool
+	minTier   auto.Tier
+	predicted bool
+}
+
+// pass runs one full pass. The caller holds the run lock.
+func (e autoEnv) pass(ctx context.Context, cfg *config.Config, dryRun bool, opts passOptions) error {
+	forced := auto.FirstRunPending(e.stateDir) && !dryRun
 	if forced {
-		fmt.Fprintln(env.out, "first run after install-agent: dry-run, nothing is deleted")
+		fmt.Fprintln(e.out, "first run after install-agent: dry-run, nothing is deleted")
 		dryRun = true
 	}
 
@@ -184,34 +203,47 @@ func runAutoWithLoader(ctx context.Context, loader *config.Loader, env autoEnv, 
 	defer cancel()
 
 	report, err := auto.Run(ctx, cfg, dryRun, auto.Deps{
-		Free:        env.free,
-		NewProvider: env.newProvider,
-		Out:         env.out,
-		Home:        env.home,
+		Free:        e.free,
+		NewProvider: e.newProvider,
+		Out:         e.out,
+		Home:        e.home,
+		Verbose:     e.verbose,
+		MinTier:     opts.minTier,
+		Predicted:   opts.predicted,
 	})
-	env.recordRun(ctx, cfg.Auto, report, err)
+	e.recordRun(ctx, cfg.Auto, report, err, opts.preview)
 	if err != nil {
 		return err
 	}
 
 	if forced && report.Previewed() && report.Err() == nil {
-		if clearErr := auto.ClearFirstRun(env.stateDir); clearErr != nil {
+		if clearErr := auto.ClearFirstRun(e.stateDir); clearErr != nil {
 			return clearErr
 		}
 	}
 	return report.Err()
 }
 
-// recordRun notifies when space is still low and appends the run record.
-// Neither failure changes the run's outcome: they are reported and the run
-// keeps its own result.
-func (e autoEnv) recordRun(ctx context.Context, cfg config.Auto, report auto.Report, runErr error) {
+func (e autoEnv) clock() time.Time {
+	if e.now == nil {
+		return time.Now()
+	}
+	return e.now()
+}
+
+// recordRun notifies when space is still low, appends the run record and
+// stores the pass state the tick schedules from. None of these failures
+// changes the run's outcome: they are reported and the run keeps its own result.
+func (e autoEnv) recordRun(ctx context.Context, cfg config.Auto, report auto.Report, runErr error, preview bool) {
+	pass, err := auto.ReadPassState(e.stateDir)
+	if err != nil {
+		fmt.Fprintf(e.out, "warning: %v\n", err)
+	}
 	notified := false
 	if runErr == nil {
-		var err error
 		notifyCtx, cancel := context.WithTimeout(ctx, auto.NotifyTimeout)
 		defer cancel()
-		notified, err = auto.NotifyIfStillLow(notifyCtx, e.notify, report, cfg)
+		notified, err = auto.NotifyLimited(notifyCtx, e.notify, report, cfg, &pass, e.clock())
 		switch {
 		case errors.Is(err, auto.ErrNotifierUnavailable):
 			fmt.Fprintf(e.out, "notification skipped: %v\n", err)
@@ -219,12 +251,16 @@ func (e autoEnv) recordRun(ctx context.Context, cfg config.Auto, report auto.Rep
 			fmt.Fprintf(e.out, "warning: %v\n", err)
 		}
 	}
-	now := e.now
-	if now == nil {
-		now = time.Now
-	}
-	if err := auto.AppendRun(e.stateDir, auto.NewRunRecord(report, now(), runErr, notified)); err != nil {
+	now := e.clock()
+	if err := auto.AppendRun(e.stateDir, auto.NewRunRecord(report, now, runErr, notified)); err != nil {
 		fmt.Fprintf(e.out, "warning: record run: %v\n", err)
+	}
+	if preview {
+		return
+	}
+	pass.Time, pass.Tier, pass.DryRun = now.UTC(), report.Tier.String(), report.DryRun
+	if err := auto.WritePassState(e.stateDir, pass); err != nil {
+		fmt.Fprintf(e.out, "warning: record pass: %v\n", err)
 	}
 }
 
@@ -246,7 +282,7 @@ func runInstallAgentWithLoader(ctx context.Context, loader *config.Loader, env a
 	if err := cfg.Validate(); err != nil {
 		return fmt.Errorf("validate config: %w", err)
 	}
-	interval, err := cfg.Auto.IntervalDuration()
+	interval, err := cfg.Auto.TickIntervalDuration()
 	if err != nil {
 		return err
 	}
