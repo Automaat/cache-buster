@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"slices"
 	"strconv"
@@ -66,10 +67,6 @@ func lookupToolProcesses(ctx context.Context) ([]toolProcess, error) {
 	if err != nil {
 		return nil, err
 	}
-	var all []string
-	for _, tools := range kindTools {
-		all = append(all, tools...)
-	}
 	self := os.Getpid()
 	var procs []toolProcess
 	var pids []int
@@ -77,7 +74,7 @@ func lookupToolProcesses(ctx context.Context) ([]toolProcess, error) {
 		if table[i].PID == self {
 			continue
 		}
-		if tool := matchProcess(table[i].CommandLine, all); tool != "" {
+		if tool := matchAnyKind(table[i].CommandLine); tool != "" {
 			procs = append(procs, toolProcess{Tool: tool, pid: table[i].PID, CommandLine: table[i].CommandLine})
 			pids = append(pids, table[i].PID)
 		}
@@ -252,7 +249,7 @@ func (ps *pass) busyReason(c *candidate) string {
 	for _, proc := range ps.procs {
 		tool := proc.Tool
 		if !slices.Contains(tools, tool) {
-			tool = matchProcess(proc.CommandLine, tools)
+			tool = matchKind(proc.CommandLine, c.art.Kind)
 		}
 		if tool == "" {
 			continue
@@ -389,4 +386,34 @@ func pathWithin(path, root string) bool {
 		root += string(filepath.Separator)
 	}
 	return strings.HasPrefix(path, root)
+}
+
+var versionedTool = regexp.MustCompile(`^(python|pythonw|pip)[0-9.]*$`)
+
+// matchKind names the build tool of kind that a command line involves.
+// Versioned interpreters such as python3.12 or pip3.12 count for Python.
+func matchKind(commandLine string, kind artifactKind) string {
+	if tool := matchProcess(commandLine, kindTools[kind]); tool != "" {
+		return tool
+	}
+	if kind != kindPython {
+		return ""
+	}
+	for field := range strings.FieldsSeq(commandLine) {
+		base := strings.ToLower(filepath.Base(strings.Trim(field, `"';&|()`)))
+		base = strings.TrimSuffix(base, ".exe")
+		if versionedTool.MatchString(base) {
+			return base
+		}
+	}
+	return ""
+}
+
+func matchAnyKind(commandLine string) string {
+	for _, kind := range []artifactKind{kindRust, kindNode, kindPython} {
+		if tool := matchKind(commandLine, kind); tool != "" {
+			return tool
+		}
+	}
+	return ""
 }

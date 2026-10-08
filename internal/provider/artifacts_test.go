@@ -1232,3 +1232,38 @@ func TestProjectArtifacts_ToolStartedDuringChecksBlocksRemoval(t *testing.T) {
 	assert.DirExists(t, h.path("web", "node_modules"))
 	assert.Contains(t, res.Output, "node is running")
 }
+
+func TestMatchKind_VersionedPython(t *testing.T) {
+	tests := []struct {
+		cmd  string
+		kind artifactKind
+		want string
+	}{
+		{"/proj/.venv/bin/python3.12 serve.py", kindPython, "python3.12"},
+		{"pip3.12 install x", kindPython, "pip3.12"},
+		{`C:\py\pythonw.exe app.py`, kindPython, "pythonw"},
+		{"python3.12 serve.py", kindNode, ""},
+		{"cargo build", kindPython, ""},
+		{"/usr/bin/pythonista", kindPython, ""},
+	}
+	for _, tt := range tests {
+		assert.Equal(t, tt.want, matchKind(tt.cmd, tt.kind), tt.cmd)
+	}
+	assert.Equal(t, "python3.12", matchAnyKind("python3.12 -m http.server"))
+	assert.Empty(t, matchAnyKind("vim notes.txt"))
+}
+
+func TestProjectArtifacts_VersionedPythonDaemonBlocksVenv(t *testing.T) {
+	on := true
+	h := newArtifactHarness(t, func(c *config.Provider) { c.Python = &on })
+	pythonProject(t, h.path("svc"), 100, 90*day)
+	project := evalDir(t, h.path("svc"))
+	h.p.processes = func(context.Context) ([]toolProcess, error) {
+		return []toolProcess{{Tool: "python3.12", CommandLine: project + "/.venv/bin/python3.12 serve.py", Cwd: "/"}}, nil
+	}
+
+	res := h.clean(CleanOptions{Mode: CleanModeFull})
+
+	assert.DirExists(t, h.path("svc", ".venv"))
+	assert.Contains(t, res.Output, "python3.12 is running")
+}
