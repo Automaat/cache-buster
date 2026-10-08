@@ -190,7 +190,7 @@ func flattenCommand(text string, depth int) ([]string, bool) {
 	if err != nil {
 		return nil, false
 	}
-	var out []string
+	out := make([]string, 0, len(words))
 	for _, w := range words {
 		if len(strings.Fields(w)) <= 1 {
 			if t := strings.Trim(w, " \t\n;&|()"); t != "" {
