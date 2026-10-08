@@ -14,21 +14,10 @@ import (
 
 const cleanWaitDelay = 5 * time.Second
 
-// runMeasuredClean runs args as a command, measuring cache size before and
-// after via sizeFn to report freed bytes. name is used for warnings. It is the
-// shared scaffold behind the command-based fullClean and Docker smartClean.
-func runMeasuredClean(
-	ctx context.Context,
-	name string,
-	args []string,
-	sizeFn func(context.Context) (int64, error),
-) (CleanResult, error) {
-	return runMeasuredCleanTimeout(ctx, name, args, sizeFn, 0)
-}
-
-// runMeasuredCleanTimeout is runMeasuredClean with the command alone bounded
-// by timeout (zero means unbounded); the size scans stay outside the budget.
-// A timeout kills the command's whole process group.
+// runMeasuredCleanTimeout runs args as a command, measuring cache size before
+// and after via sizeFn to report freed bytes; name is used for warnings. The
+// command alone is bounded by timeout (zero means unbounded); the size scans
+// stay outside the budget. A timeout kills the command's whole process group.
 func runMeasuredCleanTimeout(
 	ctx context.Context,
 	name string,

@@ -169,6 +169,7 @@ func DefaultConfig() *Config {
 	return &Config{
 		Version:   currentVersion,
 		Providers: DefaultProviders(),
+		Auto:      DefaultAuto(),
 	}
 }
 

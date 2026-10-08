@@ -129,6 +129,41 @@ cache-buster clean --smart       # LRU-based trimming
 - **Full** (default): Runs native tool commands (e.g., `go clean -cache`) or deletes files directly
 - **Smart** (`--smart`): Removes files older than `max_age`, then LRU-trims to `max_size`
 
+### auto
+
+```bash
+cache-buster auto             # Trim by free-space tier
+cache-buster auto --dry-run   # Preview only
+cache-buster install-agent    # Run auto from launchd every auto.interval
+cache-buster uninstall-agent  # Unload and remove the agent
+```
+
+`auto` reads the free space of the data volume (`statfs` of `/System/Volumes/Data`)
+and always trims in smart mode (files older than `max_age`, then LRU to `max_size`):
+
+| Tier | Free space | What runs |
+|------|------------|-----------|
+| ok | at or above `min_free` and `min_free_pct` | only enabled providers over their limit |
+| low | below `min_free` or `min_free_pct` | every enabled provider, cheapest to rebuild first; stops as soon as free space is back above the thresholds |
+| critical | under 5 GiB | the stale-directory sweeps first (`dir-pattern` providers such as `sail-dirs`, even when disabled), then the low-tier trim |
+
+Safety rules:
+
+- `docker-volumes` never runs in `auto`, enabled or not.
+- A provider with a path inside or containing `Downloads`, `opencode` or a `worktrees` directory is skipped.
+- Docker prune commands are cancelled after 10 minutes; command providers keep their `clean_timeout`.
+- Providers whose tool is busy are skipped, as in `clean`.
+- Two runs never overlap; a second one exits immediately.
+- The first run after `install-agent` is a dry-run that deletes nothing. A marker in
+  `~/.local/state/cache-buster/` records it, so it survives restarts and only a completed
+  dry-run clears it. Running `install-agent` again arms it again.
+
+`install-agent` writes `~/Library/LaunchAgents/dev.mskalski.cache-buster.plist`
+(`StartInterval` from `auto.interval`, `RunAtLoad`, low priority, a `PATH` with Homebrew,
+mise, Go, Cargo and Docker) and loads it with `launchctl bootstrap`. Output goes to
+`~/Library/Logs/cache-buster/auto.log`. Install from a built or installed binary, not
+`go run`. The plist records the binary path, so run `install-agent` again after moving it.
+
 ### config
 
 ```bash
@@ -167,6 +202,15 @@ providers:
 | `min_idle` | `dir-pattern`: minimum idle time, from the newest mtime in the tree (default `2h`) |
 | `skip_if_open` | `dir-pattern`: skip directories with open files via `lsof +D` (default `true`) |
 | `skip_if_git_worktree` | `dir-pattern`: skip directories containing a `.git` entry (default `true`) |
+
+The optional top-level `auto` block configures `cache-buster auto`:
+
+```yaml
+auto:
+  interval: 30m      # launchd StartInterval, minimum 1m
+  min_free: 30G      # below this, trim every enabled provider
+  min_free_pct: 15   # or below this percentage of the volume (0 disables)
+```
 
 ### Busy tools
 

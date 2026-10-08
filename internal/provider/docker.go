@@ -208,7 +208,7 @@ func (p *DockerProvider) smartClean(ctx context.Context, opts CleanOptions) (Cle
 		}, nil
 	}
 
-	return runMeasuredClean(ctx, p.name, args, p.CurrentSize)
+	return runMeasuredCleanTimeout(ctx, p.name, args, p.CurrentSize, opts.Timeout)
 }
 
 func (p *DockerProvider) fullClean(ctx context.Context, opts CleanOptions) (CleanResult, error) {
@@ -223,5 +223,5 @@ func (p *DockerProvider) fullClean(ctx context.Context, opts CleanOptions) (Clea
 		return CleanResult{}, fmt.Errorf("invalid command: %w", err)
 	}
 
-	return runMeasuredClean(ctx, p.name, parts, p.CurrentSize)
+	return runMeasuredCleanTimeout(ctx, p.name, parts, p.CurrentSize, opts.Timeout)
 }

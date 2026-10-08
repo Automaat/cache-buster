@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/Automaat/cache-buster/internal/config"
 	"github.com/kballard/go-shellquote"
@@ -303,4 +304,46 @@ func TestStripVolumesFlag_Wrapped(t *testing.T) {
 		require.Len(t, parts, 3, in)
 		assert.Equal(t, want, parts[2], in)
 	}
+}
+
+const hangingPruneDocker = `case "$1" in
+ps) exit 0 ;;
+system)
+  if [ "$2" = df ]; then echo '{"Size":"1GB"}'; exit 0; fi
+  sleep 30 ;;
+esac
+`
+
+func TestDockerClean_TimeoutBoundsHungPrune(t *testing.T) {
+	fakeDockerBin(t, hangingPruneDocker)
+	p, err := NewDockerProvider("docker", config.Provider{
+		Paths:    []string{t.TempDir()},
+		MaxSize:  "10G",
+		CleanCmd: "docker system prune -af",
+	})
+	require.NoError(t, err)
+
+	for _, mode := range []CleanMode{CleanModeSmart, CleanModeFull} {
+		start := time.Now()
+		_, err = p.Clean(t.Context(), CleanOptions{Mode: mode, Timeout: 300 * time.Millisecond})
+
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "timed out after 300ms")
+		assert.Less(t, time.Since(start), 10*time.Second)
+	}
+}
+
+func TestDockerClean_ZeroTimeoutStaysUnbounded(t *testing.T) {
+	fakeDockerBin(t, `case "$1" in
+ps) exit 0 ;;
+system)
+  if [ "$2" = df ]; then echo '{"Size":"1GB"}'; exit 0; fi
+  sleep 1 ;;
+esac
+`)
+	p := newTestDockerProvider(t, []string{t.TempDir()})
+
+	_, err := p.Clean(t.Context(), CleanOptions{Mode: CleanModeSmart})
+
+	require.NoError(t, err)
 }
