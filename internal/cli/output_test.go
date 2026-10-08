@@ -143,3 +143,24 @@ func TestCleanDryRun_JSONKeepsFieldsAndAddsSummary(t *testing.T) {
 	assert.Equal(t, 300, parsed.Summary.Entries)
 	assert.Positive(t, parsed.Summary.Bytes)
 }
+
+func TestRealClean_ShowsLargestEntriesAndVerboseKeepsOldLine(t *testing.T) {
+	_, loader := bigCacheFixture(t, 40)
+	var err error
+	concise := captureStdout(t, func() {
+		err = runCleanWithOptions(loader, []string{"big"}, cleanOptions{force: true, smart: true}, os.Stdin)
+	})
+	require.NoError(t, err)
+	assert.Contains(t, concise, "done (freed ")
+	assert.Contains(t, concise, "40 entries)")
+	assert.Contains(t, concise, "largest:")
+	assert.Contains(t, concise, "and 35 more")
+
+	_, loader = bigCacheFixture(t, 40)
+	verbose := captureStdout(t, func() {
+		err = runCleanWithOptions(loader, []string{"big"}, cleanOptions{force: true, smart: true, verbose: true}, os.Stdin)
+	})
+	require.NoError(t, err)
+	assert.Regexp(t, `done \(freed [^,)]+\)\n`, verbose)
+	assert.NotContains(t, verbose, "largest:")
+}

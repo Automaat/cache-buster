@@ -131,6 +131,20 @@ func Totals(blocks []Block, dryRun bool) Overall {
 	return o
 }
 
+// WriteTop prints the largest entries of a summary.
+func WriteTop(w io.Writer, s Summary) {
+	if len(s.Top) == 0 {
+		return
+	}
+	fmt.Fprintln(w, "  largest:")
+	for _, e := range s.Top {
+		fmt.Fprintf(w, "    %10s  %s\n", size.FormatSize(e.Size), e.Path)
+	}
+	if more := s.Entries - len(s.Top); more > 0 {
+		fmt.Fprintf(w, "    ... and %d more (--verbose lists all)\n", more)
+	}
+}
+
 // WriteBlock prints one provider that ran: action, size, entry count and the
 // largest entries. Without entries (command-based providers) it falls back to
 // the first lines of the provider's own output on a dry-run.
@@ -159,13 +173,7 @@ func WriteBlock(w io.Writer, b Block) {
 	fmt.Fprintln(w, line)
 
 	if len(s.Top) > 0 {
-		fmt.Fprintln(w, "  largest:")
-		for _, e := range s.Top {
-			fmt.Fprintf(w, "    %10s  %s\n", size.FormatSize(e.Size), e.Path)
-		}
-		if more := s.Entries - len(s.Top); more > 0 {
-			fmt.Fprintf(w, "    ... and %d more (--verbose lists all)\n", more)
-		}
+		WriteTop(w, s)
 		return
 	}
 	if b.Status == StatusDryRun {
@@ -184,8 +192,8 @@ func writeNote(w io.Writer, output string) {
 		if shown >= maxNoteLines {
 			continue
 		}
-		if len(line) > maxNoteWidth {
-			line = line[:maxNoteWidth] + "..."
+		if r := []rune(line); len(r) > maxNoteWidth {
+			line = string(r[:maxNoteWidth]) + "..."
 		}
 		fmt.Fprintf(w, "  %s\n", line)
 		shown++

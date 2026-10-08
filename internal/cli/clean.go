@@ -343,7 +343,7 @@ func executeClean(
 		default:
 			entry.Status = statusCleaned
 			if !quiet && text {
-				fmt.Printf("done (freed %s%s)\n", size.FormatSize(result.BytesCleaned), entryCount(result))
+				printDone(result, concise)
 			}
 		}
 		entry.Summary = summaryOf(entry.Status, result)
@@ -354,6 +354,15 @@ func executeClean(
 		report.WriteSkipped(os.Stdout, skippedBlocks)
 	}
 	return finishClean(results, totalCleaned, opts, errors, false)
+}
+
+func printDone(result provider.CleanResult, concise bool) {
+	if !concise {
+		fmt.Printf("done (freed %s)\n", size.FormatSize(result.BytesCleaned))
+		return
+	}
+	fmt.Printf("done (freed %s%s)\n", size.FormatSize(result.BytesCleaned), entryCount(result))
+	report.WriteTop(os.Stdout, report.Summarize(statusCleaned, result.BytesCleaned, result.Entries, 0))
 }
 
 func summaryOf(status string, result provider.CleanResult) *report.Summary {

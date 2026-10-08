@@ -49,6 +49,8 @@ const staleFactor = 3
 // skipRuns recent runs must all skip a provider for it to count as always skipped.
 const skipRuns = 5
 
+const minSkipRuns = 3
+
 // runwayDays warns when the trend reaches min_free sooner than this.
 const runwayDays = 14
 
@@ -183,11 +185,20 @@ func lastRunFindings(in Input) []Finding {
 	}
 
 	out := []Finding{main}
-	if f, ok := staleFinding(in, last); ok {
+	if f, ok := staleFinding(in, newestRun(in.Runs)); ok {
 		out = append(out, f)
 	}
 	out = append(out, freedFinding(in))
 	return append(out, extraRunNotes(in)...)
+}
+
+func newestRun(runs []auto.RunRecord) auto.RunRecord {
+	for _, r := range slices.Backward(runs) {
+		if !r.DryRun {
+			return r
+		}
+	}
+	return runs[len(runs)-1]
 }
 
 func hintLog(logPath, fallback string) string {
@@ -225,12 +236,14 @@ func freedFinding(in Input) Finding {
 		if r.DryRun || r.Time.Before(cutoff) {
 			continue
 		}
-		freed += r.FreedBytes
-		runs++
+		if r.FreedBytes > 0 {
+			freed += r.FreedBytes
+			runs++
+		}
 	}
 	return Finding{
 		Area:    "freed",
-		Message: fmt.Sprintf("%s freed by %d deleting run(s) in the last 7 days", size.FormatSize(freed), runs),
+		Message: fmt.Sprintf("%s freed by %d run(s) in the last 7 days", size.FormatSize(freed), runs),
 	}
 }
 
@@ -296,7 +309,7 @@ func trendFinding(in Input) (Finding, bool) {
 	cutoff := in.Now.Add(-TrendWindow)
 	var window []auto.RunRecord
 	for _, r := range in.Runs {
-		if !r.Time.Before(cutoff) {
+		if !r.DryRun && !r.Time.Before(cutoff) {
 			window = append(window, r)
 		}
 	}
@@ -391,7 +404,7 @@ func alwaysSkipped(in Input, conflicted map[string]bool) []Finding {
 	if len(recent) > skipRuns {
 		recent = recent[len(recent)-skipRuns:]
 	}
-	if len(recent) < 2 {
+	if len(recent) < minSkipRuns {
 		return nil
 	}
 
@@ -421,8 +434,12 @@ func alwaysSkipped(in Input, conflicted map[string]bool) []Finding {
 
 	out := make([]Finding, 0, len(names))
 	for _, name := range names {
+		level := Warn
+		if reasons[name] == "unavailable" {
+			level = Note
+		}
 		out = append(out, Finding{
-			Area: "config", Level: Warn,
+			Area: "config", Level: level,
 			Message: fmt.Sprintf("%s was skipped on each of the last %d runs: %s", name, len(recent), reasons[name]),
 			Hint:    skipHint(name, reasons[name]),
 		})

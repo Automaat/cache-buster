@@ -126,6 +126,17 @@ func TestAgentStatus_Windows(t *testing.T) {
 		assert.False(t, st.Installed)
 	})
 
+	t.Run("task disabled", func(t *testing.T) {
+		s := &scriptedExec{respond: func(string, []string) ([]byte, error) {
+			return []byte("\"\\" + TaskName + "\",\"N/A\",\"Disabled\"\r\n"), nil
+		}}
+		st, err := newOSAgent(t, "windows", `C:\bilgie.exe`, s).Status(t.Context())
+		require.NoError(t, err)
+		assert.True(t, st.Installed)
+		assert.False(t, st.Loaded)
+		assert.Equal(t, "task is disabled", st.Detail)
+	})
+
 	t.Run("query fails", func(t *testing.T) {
 		s := &scriptedExec{respond: func(string, []string) ([]byte, error) { return nil, errors.New("access denied") }}
 		_, err := newOSAgent(t, "windows", `C:\bilgie.exe`, s).Status(t.Context())

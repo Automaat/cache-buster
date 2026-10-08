@@ -3,6 +3,8 @@ package doctor
 import (
 	"bytes"
 	"errors"
+	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -143,9 +145,25 @@ func TestDiagnose_AlwaysSkippedProvider(t *testing.T) {
 		return auto.RunRecord{Time: fixedNow.Add(-age), Tier: "low", FreeBefore: 200 * gib, Providers: providers}
 	}
 
-	t.Run("unavailable on every run", func(t *testing.T) {
+	t.Run("unavailable tool is only a note", func(t *testing.T) {
 		in := healthy()
 		in.Runs = []auto.RunRecord{run(2*time.Hour, skip("unavailable")), run(time.Hour, skip("unavailable")), run(20*time.Minute, skip("unavailable"))}
+		r := Diagnose(in)
+		assert.Zero(t, r.Attention())
+		assert.True(t, slices.ContainsFunc(r.Findings, func(f Finding) bool {
+			return f.Level == Note && strings.Contains(f.Message, "gradle was skipped on each of the last 3 runs: unavailable")
+		}))
+	})
+
+	t.Run("two runs are too few", func(t *testing.T) {
+		in := healthy()
+		in.Runs = []auto.RunRecord{run(time.Hour, skip("cannot measure size: x")), run(20*time.Minute, skip("cannot measure size: x"))}
+		assert.Zero(t, Diagnose(in).Attention())
+	})
+
+	t.Run("same odd reason on every run", func(t *testing.T) {
+		in := healthy()
+		in.Runs = []auto.RunRecord{run(2*time.Hour, skip("cannot measure size: x")), run(time.Hour, skip("cannot measure size: x")), run(20*time.Minute, skip("cannot measure size: x"))}
 		r := Diagnose(in)
 		require.Equal(t, 1, r.Attention())
 		var f Finding
@@ -154,8 +172,8 @@ func TestDiagnose_AlwaysSkippedProvider(t *testing.T) {
 				f = c
 			}
 		}
-		assert.Equal(t, "gradle was skipped on each of the last 3 runs: unavailable", f.Message)
-		assert.Contains(t, f.Hint, "enabled: false")
+		assert.Equal(t, "gradle was skipped on each of the last 3 runs: cannot measure size: x", f.Message)
+		assert.Contains(t, f.Hint, "bilgie auto --dry-run --verbose")
 	})
 
 	t.Run("recovered since", func(t *testing.T) {
@@ -173,7 +191,7 @@ func TestDiagnose_AlwaysSkippedProvider(t *testing.T) {
 	t.Run("a protected conflict is not reported twice", func(t *testing.T) {
 		in := healthy()
 		reason := "protected path /x/Downloads"
-		in.Runs = []auto.RunRecord{run(time.Hour, skip(reason)), run(20*time.Minute, skip(reason))}
+		in.Runs = []auto.RunRecord{run(2*time.Hour, skip(reason)), run(time.Hour, skip(reason)), run(20*time.Minute, skip(reason))}
 		in.Conflicts = []auto.Conflict{{Provider: "gradle", Reason: reason}}
 		assert.Equal(t, 1, Diagnose(in).Attention())
 	})
@@ -197,7 +215,34 @@ func TestFreedCountsOnlyDeletingRunsInTheWindow(t *testing.T) {
 		{Time: fixedNow.Add(-2 * time.Hour), FreedBytes: 2 * gib},
 		{Time: fixedNow.Add(-20 * time.Minute), FreedBytes: gib},
 	}
-	assert.Contains(t, find(t, Diagnose(in), "freed").Message, "3.0 GiB freed by 2 deleting run(s)")
+	assert.Contains(t, find(t, Diagnose(in), "freed").Message, "3.0 GiB freed by 2 run(s)")
+}
+
+func TestStalenessIgnoresManualDryRuns(t *testing.T) {
+	in := healthy()
+	in.Runs = []auto.RunRecord{
+		{Time: fixedNow.Add(-48 * time.Hour), Tier: "ok"},
+		{Time: fixedNow.Add(-time.Hour), Tier: "ok", DryRun: true},
+	}
+	assert.Equal(t, Fail, find(t, Diagnose(in), "schedule").Level)
+}
+
+func TestTrendIgnoresDryRunsWithAssumedFreeSpace(t *testing.T) {
+	in := healthy()
+	in.Runs = []auto.RunRecord{{Time: fixedNow.Add(-time.Minute), Tier: "critical", DryRun: true, FreeBefore: 3 * gib}}
+	for _, f := range Diagnose(in).Findings {
+		assert.NotEqual(t, "trend", f.Area)
+	}
+}
+
+func TestZeroByteRunsAreNotCounted(t *testing.T) {
+	in := healthy()
+	in.Runs = []auto.RunRecord{
+		{Time: fixedNow.Add(-3 * time.Hour), FreedBytes: gib},
+		{Time: fixedNow.Add(-2 * time.Hour)},
+		{Time: fixedNow.Add(-time.Hour), Error: "x"},
+	}
+	assert.Contains(t, find(t, Diagnose(in), "freed").Message, "1.0 GiB freed by 1 run(s)")
 }
 
 func TestAge(t *testing.T) {

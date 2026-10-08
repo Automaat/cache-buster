@@ -2,6 +2,7 @@ package auto
 
 import (
 	"context"
+	"encoding/csv"
 	"fmt"
 	"slices"
 	"strings"
@@ -83,11 +84,29 @@ func (a Agent) statusLinux(ctx context.Context) (AgentState, error) {
 }
 
 func (a Agent) statusTask(ctx context.Context) (AgentState, error) {
-	exists, err := a.taskExists(ctx)
+	out, err := a.Exec(ctx, "schtasks", "/Query", "/FO", "CSV", "/NH")
 	if err != nil {
-		return AgentState{Backend: BackendTask}, err
+		return AgentState{Backend: BackendTask}, fmt.Errorf("schtasks query: %w: %s", err, strings.TrimSpace(string(out)))
 	}
-	return AgentState{Backend: BackendTask, Installed: exists, Loaded: exists}, nil
+	reader := csv.NewReader(strings.NewReader(string(out)))
+	reader.FieldsPerRecord = -1
+	reader.LazyQuotes = true
+	records, err := reader.ReadAll()
+	if err != nil {
+		return AgentState{Backend: BackendTask}, fmt.Errorf("parse schtasks query: %w", err)
+	}
+	for _, rec := range records {
+		if len(rec) == 0 || !strings.EqualFold(strings.TrimPrefix(rec[0], `\`), a.id().task) {
+			continue
+		}
+		st := AgentState{Backend: BackendTask, Installed: true, Loaded: true}
+		if len(rec) > 2 && strings.EqualFold(strings.TrimSpace(rec[2]), "Disabled") {
+			st.Loaded = false
+			st.Detail = "task is disabled"
+		}
+		return st, nil
+	}
+	return AgentState{Backend: BackendTask}, nil
 }
 
 func cmpOr(s, fallback string) string {

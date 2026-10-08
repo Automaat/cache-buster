@@ -3,7 +3,9 @@ package report
 import (
 	"bytes"
 	"fmt"
+	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/smykla-skalski/bilgie/internal/provider"
 	"github.com/stretchr/testify/assert"
@@ -90,4 +92,12 @@ func TestSkippedAndTotal(t *testing.T) {
 
 	assert.Equal(t, "skipped (1):\n  b: within limit\n"+
 		"total: would free 100 B across 1 provider, 2 entries; 1 skipped; 1 failed\n", buf.String())
+}
+
+func TestWriteBlockTruncatesNotesOnRuneBoundary(t *testing.T) {
+	note := strings.Repeat("é", 200)
+	var buf bytes.Buffer
+	WriteBlock(&buf, Block{Name: "x", Status: StatusDryRun, Output: note, Summary: Summarize(StatusDryRun, 0, nil, 0)})
+	assert.True(t, utf8.ValidString(buf.String()))
+	assert.Contains(t, buf.String(), strings.Repeat("é", maxNoteWidth)+"...")
 }
