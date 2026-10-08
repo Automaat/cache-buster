@@ -565,12 +565,13 @@ Dot entries are ignored. In full mode providers with a `clean_cmd` run it.
 4. Lists each version with its size (`would prune: node@20.0.0 (1.2 GB)`); a dry-run stops here.
    A real run calls `mise prune --yes` once, then reports `pruned:` or, when mise kept a version,
    `kept:`.
-5. Trims `<mise dir>/downloads` and the cache directory (`~/Library/Caches/mise`, `~/.cache/mise`)
-   by `max_age`, then oldest first while over `max_size`.
+5. Trims `<first path>/downloads` and every further path (the cache directory, `~/Library/Caches/mise`
+   or `~/.cache/mise`) by `max_age`, then oldest first while over `max_size`.
 
 `mise prune` removes only versions that no tracked config (`~/.local/state/mise/tracked-configs`)
 references. A version used only by an untracked project directory, by `MISE_<TOOL>_VERSION` or by
-`mise exec` may be removed; mise reinstalls it on demand. `clean_cmd` defaults to `mise prune` and
+`mise exec` may be removed; mise reinstalls it on demand. The real `mise prune --yes` removes what is
+unused at that moment, which can differ from the earlier listing if a config changed in between. `clean_cmd` defaults to `mise prune` and
 must be a `mise prune` command without `--dry-run` or `--yes`; `clean_timeout` bounds each call.
 
 ### Busy tools

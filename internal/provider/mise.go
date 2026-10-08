@@ -135,20 +135,11 @@ func (p *MiseProvider) Clean(ctx context.Context, opts CleanOptions) (CleanResul
 		if reason := p.busyNow(ctx); reason != "" {
 			return skipResult(reason), nil
 		}
-		if err := p.runPrune(ctx); err != nil {
+		pruneErr := p.runPrune(ctx)
+		p.account(list, &res, &out)
+		if pruneErr != nil {
 			res.Output = strings.TrimSpace(out.String())
-			return res, err
-		}
-		for _, v := range list {
-			if _, err := os.Lstat(v.path); err == nil {
-				fmt.Fprintf(&out, "kept: %s (still in use)\n", v.label)
-				res.SkippedEntries++
-				continue
-			}
-			fmt.Fprintf(&out, "pruned: %s (%s)\n", v.label, sizeText(v.size))
-			res.BytesCleaned += v.size
-			res.FilesDeleted++
-			res.Entries = append(res.Entries, Entry{Path: v.path, Size: v.size, Detail: v.label})
+			return res, pruneErr
 		}
 	}
 	if len(list) == 0 {
@@ -173,6 +164,26 @@ func (p *MiseProvider) Clean(ctx context.Context, opts CleanOptions) (CleanResul
 	res.Entries = append(res.Entries, entriesFromFiles(trim.Removed)...)
 	res.Output = strings.TrimSpace(out.String())
 	return res, nil
+}
+
+// account reports which listed versions are gone after a prune run. A
+// version without a known path cannot be verified and is not counted.
+func (p *MiseProvider) account(list []prunable, res *CleanResult, out *strings.Builder) {
+	for _, v := range list {
+		if v.path == "" {
+			fmt.Fprintf(out, "unverified: %s (not found below installs)\n", v.label)
+			continue
+		}
+		if _, err := os.Lstat(v.path); err == nil {
+			fmt.Fprintf(out, "kept: %s (still in use)\n", v.label)
+			res.SkippedEntries++
+			continue
+		}
+		fmt.Fprintf(out, "pruned: %s (%s)\n", v.label, sizeText(v.size))
+		res.BytesCleaned += v.size
+		res.FilesDeleted++
+		res.Entries = append(res.Entries, Entry{Path: v.path, Size: v.size, Detail: v.label})
+	}
 }
 
 func skipResult(reason string) CleanResult {
@@ -303,6 +314,9 @@ func (p *MiseProvider) listPrunable(ctx context.Context) (list []prunable, skipR
 		return nil, reason
 	}
 	list, bad := p.parsePrunable(ctx, stdout)
+	if bad == "" && len(list) == 0 {
+		list, _ = p.parsePrunable(ctx, stderr)
+	}
 	if bad != "" {
 		return nil, fmt.Sprintf("cannot parse %s --dry-run output: %q", p.cleanCmd, bad)
 	}
@@ -363,10 +377,13 @@ func (p *MiseProvider) parseLine(line string) (prunable, bool) {
 	if m == nil {
 		return prunable{}, false
 	}
+	if m[1] == "." || m[1] == ".." || m[2] == "." || m[2] == ".." || strings.ContainsAny(m[2], `/\`) {
+		return prunable{}, false
+	}
 	v := prunable{label: m[1] + "@" + m[2]}
 	for _, root := range p.installRoots() {
 		cand := filepath.Join(root, m[1], m[2])
-		if _, err := os.Lstat(cand); err == nil {
+		if _, err := os.Lstat(cand); err == nil && pathWithin(cand, root) {
 			v.path = cand
 			break
 		}
@@ -374,28 +391,19 @@ func (p *MiseProvider) parseLine(line string) (prunable, bool) {
 	return v, true
 }
 
-// trimDirs lists where files are trimmed by age: the downloads directory of a
-// mise data directory, or a cache directory as a whole. Installs and plugins
-// are never trimmed by file.
+// trimDirs lists where files are trimmed by age: the downloads directory of
+// the first path (mise's data directory), and every further path (cache
+// directories) as a whole. Installs, plugins and state are never trimmed by file.
 func (p *MiseProvider) trimDirs() []string {
 	var dirs []string
-	for _, path := range p.paths {
-		if isMiseDataDir(path) {
+	for i, path := range p.paths {
+		if i == 0 {
 			dirs = append(dirs, filepath.Join(path, "downloads"))
 		} else {
 			dirs = append(dirs, path)
 		}
 	}
 	return dirs
-}
-
-func isMiseDataDir(path string) bool {
-	for _, sub := range []string{miseInstallsDir, "downloads", "plugins", "shims"} {
-		if info, err := os.Lstat(filepath.Join(path, sub)); err == nil && info.IsDir() {
-			return true
-		}
-	}
-	return false
 }
 
 func (p *MiseProvider) trimFiles(ctx context.Context, dryRun bool) (cache.TrimResult, error) {

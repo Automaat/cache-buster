@@ -426,3 +426,74 @@ func TestMise_TildeListingExpandsToHome(t *testing.T) {
 	assert.Empty(t, res.SkipReason)
 	assert.Equal(t, int64(700), res.BytesCleaned)
 }
+
+func TestMise_AtListingCannotEscapeInstalls(t *testing.T) {
+	f := newMiseFixture(t)
+	installFakeTool(t, "mise", fakeToolSpec{
+		Replies: map[string]fakeReply{"prune --dry-run": {Stdout: "node@../../..\n"}},
+	})
+	p := newMise(t, f.root, config.Provider{})
+
+	res, err := p.Clean(context.Background(), CleanOptions{DryRun: true})
+
+	require.NoError(t, err)
+	assert.Contains(t, res.SkipReason, "cannot parse")
+}
+
+func TestMise_UnknownVersionIsNotCountedAsPruned(t *testing.T) {
+	f := newMiseFixture(t)
+	installFakeTool(t, "mise", fakeToolSpec{
+		Replies: map[string]fakeReply{"prune --dry-run": {Stdout: "ghost@1.0\n"}, "prune --yes": {}},
+	})
+	p := newMise(t, f.root, config.Provider{})
+
+	res, err := p.Clean(context.Background(), CleanOptions{})
+
+	require.NoError(t, err)
+	assert.Contains(t, res.Output, "unverified: ghost@1.0")
+	assert.Empty(t, res.Entries)
+	assert.Zero(t, res.FilesDeleted)
+}
+
+func TestMise_FailedPruneStillAccountsRemovedVersions(t *testing.T) {
+	f := newMiseFixture(t)
+	installFakeTool(t, "mise", fakeToolSpec{
+		Replies: map[string]fakeReply{
+			"prune --dry-run": {Stdout: f.listing()},
+			"prune --yes":     {Remove: []string{f.node}, Stderr: "half done", Exit: 1},
+		},
+	})
+	p := newMise(t, f.root, config.Provider{})
+
+	res, err := p.Clean(context.Background(), CleanOptions{})
+
+	require.Error(t, err)
+	assert.Equal(t, int64(3000), res.BytesCleaned)
+	assert.Contains(t, res.Output, "pruned: node@20.0.0")
+}
+
+func TestMise_ListingOnStderrIsRead(t *testing.T) {
+	f := newMiseFixture(t)
+	installFakeTool(t, "mise", fakeToolSpec{
+		Replies: map[string]fakeReply{"prune --dry-run": {Stderr: f.listing()}},
+	})
+	p := newMise(t, f.root, config.Provider{})
+
+	res, err := p.Clean(context.Background(), CleanOptions{DryRun: true})
+
+	require.NoError(t, err)
+	assert.Len(t, res.Entries, 2)
+}
+
+func TestMise_DataDirWithoutDownloadsIsNeverTrimmedWhole(t *testing.T) {
+	root := t.TempDir()
+	state := filepath.Join(root, "tracked-configs", "abc")
+	writeAged(t, state, 10, 90*24*time.Hour)
+	installFakeTool(t, "mise", fakeToolSpec{})
+	p := newMise(t, root, config.Provider{})
+
+	_, err := p.Clean(context.Background(), CleanOptions{})
+
+	require.NoError(t, err)
+	assert.FileExists(t, state)
+}
