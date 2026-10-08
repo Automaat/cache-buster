@@ -14,11 +14,13 @@ type Config struct {
 
 // Provider defines a cache provider's settings.
 type Provider struct {
-	MaxSize  string   `mapstructure:"max_size" yaml:"max_size"`
-	MaxAge   string   `mapstructure:"max_age" yaml:"max_age,omitempty"`
-	CleanCmd string   `mapstructure:"clean_cmd" yaml:"clean_cmd,omitempty"`
-	Paths    []string `mapstructure:"paths" yaml:"paths"`
-	Enabled  bool     `mapstructure:"enabled" yaml:"enabled"`
+	MaxSize  string `mapstructure:"max_size" yaml:"max_size"`
+	MaxAge   string `mapstructure:"max_age" yaml:"max_age,omitempty"`
+	CleanCmd string `mapstructure:"clean_cmd" yaml:"clean_cmd,omitempty"`
+	// CleanTimeout bounds the clean command (default 2m); a hung command is cancelled.
+	CleanTimeout string   `mapstructure:"clean_timeout" yaml:"clean_timeout,omitempty"`
+	Paths        []string `mapstructure:"paths" yaml:"paths"`
+	Enabled      bool     `mapstructure:"enabled" yaml:"enabled"`
 
 	// Type selects a special provider implementation (see TypeDirPattern).
 	Type string `mapstructure:"type" yaml:"type,omitempty"`
@@ -53,6 +55,21 @@ func (c *Config) Validate() error {
 					return fmt.Errorf("provider %q: %s paths must be absolute or start with ~/, got %q",
 						name, TypeDirPattern, path)
 				}
+			}
+		}
+		if p.CleanTimeout != "" {
+			if strings.TrimSpace(p.CleanTimeout) == "" {
+				return fmt.Errorf("provider %q: clean_timeout must not be blank", name)
+			}
+			if p.CleanCmd == "" {
+				return fmt.Errorf("provider %q: clean_timeout requires clean_cmd", name)
+			}
+			d, err := ParseDuration(p.CleanTimeout)
+			if err != nil {
+				return fmt.Errorf("provider %q: clean_timeout: %w", name, err)
+			}
+			if d <= 0 {
+				return fmt.Errorf("provider %q: clean_timeout must be positive, got %q", name, p.CleanTimeout)
 			}
 		}
 		if len(p.Paths) == 0 {

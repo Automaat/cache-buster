@@ -85,6 +85,9 @@ func (l *Loader) Load() (*Config, error) {
 		if l.v.IsSet("providers." + name + ".clean_cmd") {
 			merged.CleanCmd = userP.CleanCmd
 		}
+		if l.v.IsSet("providers." + name + ".clean_timeout") {
+			merged.CleanTimeout = userP.CleanTimeout
+		}
 		if l.v.IsSet("providers." + name + ".paths") {
 			merged.Paths = userP.Paths
 		}
