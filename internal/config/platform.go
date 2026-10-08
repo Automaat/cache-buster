@@ -128,7 +128,7 @@ func (p Platform) tempGlobs(pattern string) []string {
 	if !IsAbsPortable(dir) {
 		dir = "/tmp"
 	}
-	var globs, seen []string
+	globs, seen := make([]string, 0, 2), make([]string, 0, 2)
 	for _, d := range []string{dir, p.SystemTempDir} {
 		if d == "" {
 			continue

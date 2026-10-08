@@ -120,11 +120,11 @@ func TestDefaultProvidersFor_SailDirsCoversOSAndSystemTempDirs(t *testing.T) {
 		p    Platform
 		want []string
 	}{
-		"mac":     {mac, []string{"/var/folders/ab/cd/T/sail*", "/private/tmp/sail*"}},
-		"linux":   {lin, []string{"/run/user/1000/tmp/sail*", "/tmp/sail*"}},
+		"mac":     {mac, sailGlobs("/var/folders/ab/cd/T", "/private/tmp")},
+		"linux":   {lin, sailGlobs("/run/user/1000/tmp", "/tmp")},
 		"windows": {win, []string{filepath.Join(win.TempDir, "sail*")}},
 		"same dir once": {
-			Platform{OS: OSLinux, TempDir: "/tmp", SystemTempDir: "/tmp"}, []string{"/tmp/sail*"},
+			Platform{OS: OSLinux, TempDir: "/tmp", SystemTempDir: "/tmp"}, sailGlobs("/tmp"),
 		},
 	}
 	for name, tt := range tests {
@@ -181,7 +181,7 @@ func TestLoader_SavedConfigDoesNotFreezeTempDirs(t *testing.T) {
 	loader.pathsExist = func([]string) bool { return false }
 	loaded, err := loader.Load()
 	require.NoError(t, err)
-	assert.Equal(t, []string{"/run/t/sail*", "/tmp/sail*"}, loaded.Providers["sail-dirs"].Paths)
+	assert.Equal(t, sailGlobs("/run/t", "/tmp"), loaded.Providers["sail-dirs"].Paths)
 	assert.True(t, loaded.Providers["sail-dirs"].Enabled)
 }
 
@@ -514,7 +514,7 @@ providers:
 	cfg, err := loader.Load()
 	require.NoError(t, err)
 
-	assert.Equal(t, []string{"/var/folders/ab/cd/T/sail*", "/private/tmp/sail*"}, cfg.Providers["sail-dirs"].Paths)
+	assert.Equal(t, sailGlobs("/var/folders/ab/cd/T", "/private/tmp"), cfg.Providers["sail-dirs"].Paths)
 }
 
 func TestLoader_NarrowedSystemTempPathIsKeptOnLinux(t *testing.T) {
@@ -567,7 +567,7 @@ providers:
 	cfg, err := loader.Load()
 	require.NoError(t, err)
 
-	assert.Equal(t, []string{"/var/folders/ab/cd/T/sail*", "/private/tmp/sail*"}, cfg.Providers["sail-dirs"].Paths)
+	assert.Equal(t, sailGlobs("/var/folders/ab/cd/T", "/private/tmp"), cfg.Providers["sail-dirs"].Paths)
 }
 
 func TestLoader_ExistingPathEqualToForeignDefaultIsKept(t *testing.T) {
@@ -608,4 +608,13 @@ func TestDefaultProvidersFor_MacOSIgnoresXDGDataHome(t *testing.T) {
 	p.XDGDataHome = "/Users/u/xdg-data"
 
 	assert.Equal(t, []string{"~/.local/share/mise"}, DefaultProvidersFor(p)["mise"].Paths)
+}
+
+// sailGlobs spells the expected sail* globs below dirs with the host separator.
+func sailGlobs(dirs ...string) []string {
+	out := make([]string, 0, len(dirs))
+	for _, d := range dirs {
+		out = append(out, filepath.Join(d, "sail*"))
+	}
+	return out
 }
