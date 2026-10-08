@@ -301,6 +301,29 @@ type Provider struct {
 // TypeDirPattern is the provider type that removes whole stale directories matching a glob.
 const TypeDirPattern = "dir-pattern"
 
+// DirPatternError reports why a dir-pattern provider's own settings are
+// unusable: a path without a glob, a relative path or a bad min_idle. It
+// returns nil for other provider types.
+func (p Provider) DirPatternError() error {
+	if p.Type != TypeDirPattern {
+		return nil
+	}
+	for _, path := range p.Paths {
+		if !strings.ContainsAny(path, "*?[") {
+			return fmt.Errorf("path %q must contain a glob (*, ? or [)", path)
+		}
+		if !IsAbsPortable(path) && !strings.HasPrefix(path, "~/") && !strings.HasPrefix(path, `~\`) {
+			return fmt.Errorf("path %q must be absolute or start with ~/", path)
+		}
+	}
+	if p.MinIdle != "" {
+		if _, err := ParseDuration(p.MinIdle); err != nil {
+			return fmt.Errorf("parse min_idle: %w", err)
+		}
+	}
+	return nil
+}
+
 // TypeProjectArtifacts is the provider type that removes whole build artifact
 // directories (Rust target, node_modules, Python venvs) of idle projects found
 // below the roots in paths.
@@ -409,7 +432,9 @@ func (c *Config) EnabledProviders() []string {
 	var enabled []string
 	for name := range c.Providers {
 		p := c.Providers[name]
-		if p.Enabled && c.Applies(name) && PathsExist(p.Paths) {
+		// A misconfigured dir-pattern provider stays listed so its load
+		// error is reported instead of the provider silently vanishing.
+		if p.Enabled && c.Applies(name) && (PathsExist(p.Paths) || p.DirPatternError() != nil) {
 			enabled = append(enabled, name)
 		}
 	}

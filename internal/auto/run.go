@@ -108,7 +108,11 @@ func (r Report) Previewed() bool {
 func (r Report) Err() error {
 	var errs []error
 	for _, res := range r.Results {
-		if res.Err != nil {
+		switch {
+		case res.Err == nil:
+		case report.IsLoadFailure(res.Name, res.Err.Error()):
+			errs = append(errs, res.Err)
+		default:
 			errs = append(errs, fmt.Errorf("%s: %w", res.Name, res.Err))
 		}
 	}
@@ -237,7 +241,7 @@ func candidates(cfg *config.Config, tier Tier) []candidate {
 
 	for name := range cfg.Providers {
 		pc := cfg.Providers[name]
-		if !cfg.Applies(name) || neverRun(name, pc) || (name != "docker" && pruneVolumes(pc.CleanCmd)) || !config.PathsExist(pc.Paths) {
+		if !cfg.Applies(name) || neverRun(name, pc) || (name != "docker" && pruneVolumes(pc.CleanCmd)) || !hasTargets(pc) {
 			continue
 		}
 		switch {
@@ -258,6 +262,13 @@ func candidates(cfg *config.Config, tier Tier) []candidate {
 		out = append(out, byName[name])
 	}
 	return out
+}
+
+// hasTargets reports whether a provider has paths on disk. An enabled
+// dir-pattern provider with a broken config counts, so its load error is
+// reported rather than the provider silently vanishing.
+func hasTargets(pc config.Provider) bool {
+	return config.PathsExist(pc.Paths) || pc.Enabled && pc.DirPatternError() != nil
 }
 
 // neverRun lists the providers auto must not touch, whatever they are named.
@@ -291,7 +302,7 @@ func runCandidate(ctx context.Context, cfg *config.Config, c *candidate, tier Ti
 
 	p, err := deps.NewProvider(c.name, c.cfg)
 	if err != nil {
-		res.Status, res.Err = StatusError, fmt.Errorf("load provider: %w", err)
+		res.Status, res.Err = StatusError, err
 		return res
 	}
 
@@ -384,13 +395,21 @@ func printResult(out io.Writer, res Result) {
 	case StatusSkipped:
 		fmt.Fprintf(out, "%s: skipped (%s)\n", res.Name, res.Reason)
 	case StatusError:
-		fmt.Fprintf(out, "%s: error: %v\n", res.Name, res.Err)
+		printError(out, res)
 	case StatusDryRun:
 		fmt.Fprintf(out, "%s: dry-run, would free %s\n", res.Name, size.FormatSize(res.Freed))
 		printPreview(out, res.Output)
 	default:
 		fmt.Fprintf(out, "%s: freed %s\n", res.Name, size.FormatSize(res.Freed))
 	}
+}
+
+func printError(out io.Writer, res Result) {
+	if report.IsLoadFailure(res.Name, res.Err.Error()) {
+		fmt.Fprintln(out, res.Err)
+		return
+	}
+	fmt.Fprintf(out, "%s: error: %v\n", res.Name, res.Err)
 }
 
 // printPreview lists what a dry-run would remove and counts the skip lines,

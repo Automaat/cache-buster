@@ -10,6 +10,7 @@ import (
 
 	"github.com/smykla-skalski/bilgie/internal/auto"
 	"github.com/smykla-skalski/bilgie/internal/config"
+	"github.com/smykla-skalski/bilgie/internal/provider"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -311,4 +312,15 @@ func TestAge(t *testing.T) {
 	assert.Equal(t, "47h", Age(47*time.Hour))
 	assert.Equal(t, "3d", Age(72*time.Hour))
 	assert.Equal(t, "under a minute", Age(-time.Hour))
+}
+
+func TestDiagnose_ProviderLoadErrorIsNamed(t *testing.T) {
+	in := healthy()
+	in.LoadErrors = []error{&provider.LoadError{Name: "sail-dirs", Err: errors.New(`path "sail/*" must be absolute or start with ~/`)}}
+	r := Diagnose(in)
+	f := find(t, r, "config")
+	assert.Equal(t, Fail, f.Level)
+	assert.Contains(t, f.Message, `provider sail-dirs: path "sail/*" must be absolute`)
+	assert.Contains(t, f.Hint, "providers.sail-dirs")
+	assert.Positive(t, r.Attention())
 }
