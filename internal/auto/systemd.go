@@ -15,7 +15,11 @@ import (
 const systemdNotFoundState = "not-found"
 
 func (a Agent) unitDir() string {
-	return filepath.Join(a.Home, ".config", "systemd", "user")
+	configDir := a.ConfigDir
+	if configDir == "" {
+		configDir = filepath.Join(a.Home, ".config")
+	}
+	return filepath.Join(configDir, "systemd", "user")
 }
 
 // ServicePath is where the systemd user service definition lives.

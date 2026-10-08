@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/Automaat/cache-buster/internal/auto"
@@ -77,6 +78,7 @@ type autoEnv struct {
 	exe         string
 	uid         int
 	goos        string
+	configDir   string
 }
 
 func defaultAutoEnv() (autoEnv, error) {
@@ -103,7 +105,17 @@ func defaultAutoEnv() (autoEnv, error) {
 		home:        home,
 		exe:         exe,
 		uid:         os.Getuid(),
+		configDir:   userConfigDir(home),
 	}, nil
+}
+
+// userConfigDir is where systemd looks for user units: XDG_CONFIG_HOME when
+// it is an absolute path (the XDG rule), else ~/.config.
+func userConfigDir(home string) string {
+	if dir := os.Getenv("XDG_CONFIG_HOME"); filepath.IsAbs(dir) {
+		return dir
+	}
+	return filepath.Join(home, ".config")
 }
 
 func runAuto(cmd *cobra.Command, _ []string) error {
@@ -253,13 +265,14 @@ func runUninstallAgent(_ *cobra.Command, _ []string) error {
 
 func (e autoEnv) agent(interval time.Duration) auto.Agent {
 	return auto.Agent{
-		Exec:     e.exec,
-		Out:      e.out,
-		Home:     e.home,
-		Exe:      e.exe,
-		StateDir: e.stateDir,
-		UID:      e.uid,
-		Interval: interval,
-		OS:       e.goos,
+		Exec:      e.exec,
+		Out:       e.out,
+		Home:      e.home,
+		Exe:       e.exe,
+		StateDir:  e.stateDir,
+		UID:       e.uid,
+		Interval:  interval,
+		OS:        e.goos,
+		ConfigDir: e.configDir,
 	}
 }

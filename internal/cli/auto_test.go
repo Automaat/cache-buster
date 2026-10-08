@@ -368,3 +368,29 @@ func TestAuto_MissingNotifierIsALoggedSkip(t *testing.T) {
 	assert.Contains(t, f.out.String(), "notification skipped")
 	assert.NotContains(t, f.out.String(), "warning:")
 }
+
+func TestUserConfigDir_HonoursAbsoluteXDGConfigHome(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "home")
+	custom := filepath.Join(t.TempDir(), "cfg")
+
+	t.Setenv("XDG_CONFIG_HOME", custom)
+	assert.Equal(t, custom, userConfigDir(home))
+
+	t.Setenv("XDG_CONFIG_HOME", "relative/cfg")
+	assert.Equal(t, filepath.Join(home, ".config"), userConfigDir(home))
+
+	t.Setenv("XDG_CONFIG_HOME", "")
+	assert.Equal(t, filepath.Join(home, ".config"), userConfigDir(home))
+}
+
+func TestInstallAgent_WritesSystemdUnitsUnderTheConfigDir(t *testing.T) {
+	f := newAutoFixture(t, 100*autoGiB, "")
+	f.env.goos = "linux"
+	f.env.exe = "/usr/local/bin/cache-buster"
+	f.env.configDir = filepath.Join(f.home, "xdg")
+
+	require.NoError(t, runInstallAgentWithLoader(t.Context(), f.loader, f.env))
+
+	assert.FileExists(t, filepath.Join(f.home, "xdg", "systemd", "user", auto.SystemdUnit+".timer"))
+	assert.NoDirExists(t, filepath.Join(f.home, ".config"))
+}

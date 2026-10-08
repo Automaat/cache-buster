@@ -719,3 +719,52 @@ func TestSystemdInstall_RemovesAnEarlierCronEntry(t *testing.T) {
 
 	assert.Equal(t, "0 3 * * * backup.sh\n", loaded)
 }
+
+func TestSystemdUnits_FollowTheConfigDir(t *testing.T) {
+	elsewhere := filepath.Join(t.TempDir(), "custom-cfg")
+	tests := map[string]string{"set elsewhere": elsewhere, "unset": ""}
+	for name, configDir := range tests {
+		t.Run(name, func(t *testing.T) {
+			s := &scriptedExec{respond: noCrontab}
+			a := newOSAgent(t, "linux", posixExe, s)
+			a.ConfigDir = configDir
+			wantDir := configDir
+			if wantDir == "" {
+				wantDir = filepath.Join(a.Home, ".config")
+			}
+			wantTimer := filepath.Join(wantDir, "systemd", "user", "cache-buster.timer")
+
+			require.NoError(t, a.Install(t.Context()))
+			assert.Equal(t, wantTimer, a.TimerPath())
+			assert.FileExists(t, wantTimer)
+			assert.FileExists(t, filepath.Join(wantDir, "systemd", "user", "cache-buster.service"))
+			if configDir != "" {
+				assert.NoDirExists(t, filepath.Join(a.Home, ".config"))
+			}
+
+			require.NoError(t, a.Uninstall(t.Context()))
+			assert.NoFileExists(t, wantTimer)
+			assert.NoFileExists(t, a.ServicePath())
+		})
+	}
+}
+
+func TestSystemdUninstall_AbsenceIsConfirmedForTheConfigDirTimer(t *testing.T) {
+	s := &scriptedExec{}
+	a := newOSAgent(t, "linux", posixExe, s)
+	a.ConfigDir = filepath.Join(a.Home, "xdg")
+	require.NoError(t, a.Install(t.Context()))
+	s.respond = func(name string, args []string) ([]byte, error) {
+		if name == "crontab" {
+			return noCrontab(name, args)
+		}
+		if args[1] == "disable" {
+			return []byte("exit 1"), errors.New("exit status 1")
+		}
+		return nil, errors.New("bus unreachable")
+	}
+
+	require.ErrorContains(t, a.Uninstall(t.Context()), "systemctl disable")
+
+	assert.FileExists(t, a.TimerPath(), "unit files in the config dir count as installed")
+}

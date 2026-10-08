@@ -201,7 +201,7 @@ moving it. The first run after install is a dry-run on every OS.
 | OS | Scheduler | What is written | Output |
 |----|-----------|-----------------|--------|
 | macOS | launchd agent, loaded with `launchctl bootstrap` | `~/Library/LaunchAgents/dev.mskalski.cache-buster.plist` (`StartInterval` from `auto.interval`, `RunAtLoad`, low priority, a `PATH` with Homebrew, mise, Go, Cargo and Docker) | `~/Library/Logs/cache-buster/auto.log` |
-| Linux | systemd user timer | `~/.config/systemd/user/cache-buster.service` and `cache-buster.timer` (first run a minute after enabling, then `auto.interval` after each run), enabled with `systemctl --user enable` | `~/.local/state/cache-buster/auto.log` |
+| Linux | systemd user timer | `$XDG_CONFIG_HOME/systemd/user` (default `~/.config/systemd/user`) `cache-buster.service` and `cache-buster.timer` (first run a minute after enabling, then `auto.interval` after each run), enabled with `systemctl --user enable` | `~/.local/state/cache-buster/auto.log` |
 | Linux without a systemd user manager | cron | one crontab line tagged `# cache-buster`; other entries are kept | `~/.local/state/cache-buster/auto.log` |
 | Windows | Task Scheduler task `cache-buster`, created with `schtasks /Create /XML` | `~/.local/state/cache-buster/cache-buster-task.xml` (repeats every `auto.interval`, below-normal priority, runs only while you are logged on) | none |
 

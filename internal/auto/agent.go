@@ -51,7 +51,8 @@ func binaryMissing(err error) bool {
 
 // Agent installs and removes the periodic `auto` job with the scheduler of
 // its OS: launchd, a systemd user timer (cron as fallback) or Task Scheduler.
-// An empty OS means the running OS and a nil Now means time.Now.
+// An empty OS means the running OS, a nil Now means time.Now and an empty
+// ConfigDir means Home/.config; systemd looks for user units in ConfigDir.
 type Agent struct {
 	Exec       Executor
 	Out        io.Writer
@@ -62,6 +63,7 @@ type Agent struct {
 	Interval   time.Duration
 	RetryDelay time.Duration
 	OS         string
+	ConfigDir  string
 	Now        func() time.Time
 }
 
