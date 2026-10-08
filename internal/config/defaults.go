@@ -206,6 +206,15 @@ func otherProviders(p Platform) map[string]Provider {
 	}
 }
 
+// xdgCache is ~/.cache/rel, or the XDG cache root on Linux. These tools keep
+// their cache there on macOS and Windows too.
+func xdgCache(p Platform, rel string) string {
+	if p.OS == OSLinux {
+		return p.cache(rel)
+	}
+	return p.home(".cache/" + rel)
+}
+
 func plainCache(maxSize string, paths ...string) Provider {
 	return Provider{
 		Enabled: true,
@@ -245,13 +254,13 @@ func extraCacheProviders(p Platform) map[string]Provider {
 	return map[string]Provider{
 		"edge":        plainCache("3G", edge...),
 		"vivaldi":     plainCache("3G", vivaldi...),
-		"huggingface": optInCache("20G", "~/.cache/huggingface/hub"),
+		"huggingface": optInCache("20G", xdgCache(p, "huggingface/hub")),
 		"playwright":  optInCache("5G", p.cache("ms-playwright")),
 		"lima":        plainCache("10G", p.cache("lima")),
-		"gh":          plainCache("1G", "~/.cache/gh"),
+		"gh":          plainCache("1G", xdgCache(p, "gh")),
 		"chrome-devtools-mcp": {
 			Enabled:      false,
-			Paths:        []string{"~/.cache/chrome-devtools-mcp"},
+			Paths:        []string{xdgCache(p, "chrome-devtools-mcp")},
 			MaxSize:      "2G",
 			MaxAge:       "30d",
 			SkipPrefixes: []string{"chrome-profile-"},

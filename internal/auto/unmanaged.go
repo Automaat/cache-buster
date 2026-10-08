@@ -74,7 +74,7 @@ func CoveredPaths(cfg *config.Config) []string {
 	var out []string
 	for name := range cfg.Providers {
 		pc := cfg.Providers[name]
-		if !pc.Enabled && pc.Type != config.TypeDirPattern {
+		if !cfg.Applies(name) || (!pc.Enabled && pc.Type != config.TypeDirPattern) {
 			continue
 		}
 		paths, err := config.ExpandPaths(pc.Paths)
