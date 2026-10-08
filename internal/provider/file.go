@@ -31,6 +31,9 @@ func NewFileProvider(name string, cfg config.Provider) (*FileProvider, error) {
 
 // Clean implements Provider.
 func (p *FileProvider) Clean(ctx context.Context, opts CleanOptions) (CleanResult, error) {
+	if skipped, ok := p.skipIfBusy(ctx); ok {
+		return skipped, nil
+	}
 	if opts.Mode == CleanModeSmart {
 		return p.smartClean(ctx, opts)
 	}
