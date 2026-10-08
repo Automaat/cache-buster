@@ -5,11 +5,12 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"syscall"
+	"runtime"
 	"testing"
 	"time"
 
 	"github.com/Automaat/cache-buster/internal/config"
+	"github.com/Automaat/cache-buster/internal/osshim"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -43,6 +44,14 @@ func TestMatchProcess(t *testing.T) {
 			assert.Equal(t, tt.want, matchProcess(tt.line, tt.wanted))
 		})
 	}
+}
+
+func TestMatchProcess_WindowsImageNames(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("image-name suffix handling is windows-only")
+	}
+	assert.Equal(t, "go", matchProcess("go.exe", []string{"go"}))
+	assert.Equal(t, "cargo", matchProcess(`C:\Tools\CARGO.EXE`, []string{"cargo"}))
 }
 
 func fakeGuard(lines []string, listErr error, held map[string]bool) *busyGuard {
@@ -96,40 +105,10 @@ func TestBusyGuard_BusyReason(t *testing.T) {
 
 func lockFile(t *testing.T, path string) {
 	t.Helper()
-	f, err := os.Create(filepath.Clean(path))
+	release, acquired, err := osshim.TryLock(path)
 	require.NoError(t, err)
-	t.Cleanup(func() { _ = f.Close() })
-	require.NoError(t, syscall.Flock(int(f.Fd()), syscall.LOCK_EX))
-}
-
-func TestFlockHeld(t *testing.T) {
-	t.Run("missing file is not held", func(t *testing.T) {
-		held, err := flockHeld(filepath.Join(t.TempDir(), ".lock"))
-		require.NoError(t, err)
-		assert.False(t, held)
-	})
-
-	t.Run("unlocked file is not held and stays lockable", func(t *testing.T) {
-		path := filepath.Join(t.TempDir(), ".lock")
-		require.NoError(t, os.WriteFile(path, nil, 0o600))
-
-		held, err := flockHeld(path)
-		require.NoError(t, err)
-		assert.False(t, held)
-
-		held, err = flockHeld(path)
-		require.NoError(t, err)
-		assert.False(t, held, "probe must release its lock")
-	})
-
-	t.Run("lock held by another descriptor", func(t *testing.T) {
-		path := filepath.Join(t.TempDir(), ".lock")
-		lockFile(t, path)
-
-		held, err := flockHeld(path)
-		require.NoError(t, err)
-		assert.True(t, held)
-	})
+	require.True(t, acquired)
+	t.Cleanup(release)
 }
 
 func newUVTestProvider(t *testing.T, cacheDir string) *FileProvider {

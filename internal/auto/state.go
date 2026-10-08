@@ -5,7 +5,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"syscall"
+
+	"github.com/Automaat/cache-buster/internal/osshim"
 )
 
 const (
@@ -54,7 +55,7 @@ func ClearFirstRun(stateDir string) error {
 
 // RunLock is an exclusive lock that keeps two auto runs from overlapping.
 type RunLock struct {
-	f *os.File
+	release func()
 }
 
 // AcquireRunLock takes the lock without blocking. The bool is false when
@@ -63,24 +64,20 @@ func AcquireRunLock(stateDir string) (*RunLock, bool, error) {
 	if err := os.MkdirAll(stateDir, 0o750); err != nil {
 		return nil, false, fmt.Errorf("create state dir: %w", err)
 	}
-	f, err := os.OpenFile(filepath.Join(stateDir, runLockFileName), os.O_CREATE|os.O_RDWR, 0o600)
+	release, acquired, err := osshim.TryLock(filepath.Join(stateDir, runLockFileName))
 	if err != nil {
-		return nil, false, fmt.Errorf("open run lock: %w", err)
-	}
-	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
-		_ = f.Close()
-		if errors.Is(err, syscall.EWOULDBLOCK) {
-			return nil, false, nil
-		}
 		return nil, false, fmt.Errorf("lock run lock: %w", err)
 	}
-	return &RunLock{f: f}, true, nil
+	if !acquired {
+		return nil, false, nil
+	}
+	return &RunLock{release: release}, true, nil
 }
 
 // Release drops the lock.
 func (l *RunLock) Release() {
-	if l == nil || l.f == nil {
+	if l == nil || l.release == nil {
 		return
 	}
-	_ = l.f.Close()
+	l.release()
 }

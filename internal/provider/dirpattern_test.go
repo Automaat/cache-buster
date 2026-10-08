@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"slices"
 	"testing"
@@ -359,30 +358,6 @@ func TestDefaultSailProviderIsOptIn(t *testing.T) {
 	assert.Equal(t, []string{"/private/tmp/sail*"}, sail.Paths)
 	assert.Equal(t, config.TypeDirPattern, sail.Type)
 	assert.NotContains(t, cfg.AllEnabledProviders(), "sail-dirs")
-}
-
-func TestLsofHasOpenFiles(t *testing.T) {
-	if _, err := exec.LookPath("lsof"); err != nil {
-		t.Skip("lsof not installed")
-	}
-
-	dir := t.TempDir()
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "held.txt"), []byte("x"), 0o600))
-
-	open, err := lsofHasOpenFiles(t.Context(), dir)
-	require.NoError(t, err)
-	assert.False(t, open, "no process holds a file yet")
-
-	root, err := os.OpenRoot(dir)
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = root.Close() })
-	f, err := root.Open("held.txt")
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = f.Close() })
-
-	open, err = lsofHasOpenFiles(t.Context(), dir)
-	require.NoError(t, err)
-	assert.True(t, open)
 }
 
 func TestDirPatternActivityDuringChecksBlocksRemoval(t *testing.T) {

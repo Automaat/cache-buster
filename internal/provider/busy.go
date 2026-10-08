@@ -1,15 +1,13 @@
 package provider
 
 import (
-	"bytes"
 	"context"
-	"errors"
 	"fmt"
-	"os"
-	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
-	"syscall"
+
+	"github.com/Automaat/cache-buster/internal/osshim"
 )
 
 // busyProcesses maps a provider name to the tool processes whose presence
@@ -53,8 +51,8 @@ func newBusyGuard(name string, paths []string) *busyGuard {
 	return &busyGuard{
 		locks:         locks,
 		processes:     procs,
-		listProcesses: psCommandLines,
-		lockHeld:      flockHeld,
+		listProcesses: osshim.ProcessCommandLines,
+		lockHeld:      osshim.LockHeld,
 	}
 }
 
@@ -102,6 +100,9 @@ var toolAliases = map[string]string{"uvx": "uv"}
 func matchProcess(commandLine string, wanted []string) string {
 	for field := range strings.FieldsSeq(commandLine) {
 		base := filepath.Base(strings.Trim(field, `"';&|()`))
+		if runtime.GOOS == "windows" && strings.HasSuffix(strings.ToLower(base), ".exe") {
+			base = strings.ToLower(base[:len(base)-len(".exe")])
+		}
 		if alias, ok := toolAliases[base]; ok {
 			base = alias
 		}
@@ -115,35 +116,4 @@ func matchProcess(commandLine string, wanted []string) string {
 		}
 	}
 	return ""
-}
-
-func psCommandLines(ctx context.Context) ([]string, error) {
-	out, err := exec.CommandContext(ctx, "ps", "-axo", "command=").Output()
-	if err != nil {
-		return nil, err
-	}
-	return strings.Split(string(bytes.TrimSpace(out)), "\n"), nil
-}
-
-// flockHeld reports whether another process holds an flock on path, using a
-// non-blocking try-lock. A missing file means nobody holds it.
-func flockHeld(path string) (bool, error) {
-	f, err := os.Open(filepath.Clean(path))
-	if errors.Is(err, os.ErrNotExist) {
-		return false, nil
-	}
-	if err != nil {
-		return false, err
-	}
-	defer func() { _ = f.Close() }()
-
-	fd := int(f.Fd())
-	err = syscall.Flock(fd, syscall.LOCK_EX|syscall.LOCK_NB)
-	if errors.Is(err, syscall.EWOULDBLOCK) {
-		return true, nil
-	}
-	if err != nil {
-		return false, err
-	}
-	return false, syscall.Flock(fd, syscall.LOCK_UN)
 }
