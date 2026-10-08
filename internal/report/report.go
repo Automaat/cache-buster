@@ -95,6 +95,12 @@ func Largest(entries []provider.Entry, n int) []provider.Entry {
 	return top
 }
 
+// IsLoadFailure reports whether text is already a "provider <name>: ..."
+// line, as a provider load error reads, so renderers do not prefix it again.
+func IsLoadFailure(name, text string) bool {
+	return strings.HasPrefix(text, "provider "+name+": ")
+}
+
 // Block is one provider's outcome as the renderer needs it.
 type Block struct {
 	Name    string
@@ -150,8 +156,14 @@ func WriteTop(w io.Writer, s Summary) {
 // the first lines of the provider's own output on a dry-run.
 func WriteBlock(w io.Writer, b Block) {
 	switch {
+	case b.Err != "" && IsLoadFailure(b.Name, b.Err):
+		fmt.Fprintln(w, b.Err)
+		return
 	case b.Err != "":
 		fmt.Fprintf(w, "%s: error: %s\n", b.Name, b.Err)
+		return
+	case IsLoadFailure(b.Name, b.Reason):
+		fmt.Fprintln(w, b.Reason)
 		return
 	case b.Status == StatusSkipped || b.Status == "unavailable":
 		fmt.Fprintf(w, "%s: skipped (%s)\n", b.Name, b.Reason)
@@ -214,6 +226,10 @@ func WriteSkipped(w io.Writer, blocks []Block) {
 		reason := b.Reason
 		if reason == "" {
 			reason = b.Status
+		}
+		if IsLoadFailure(b.Name, reason) {
+			fmt.Fprintf(w, "  %s\n", reason)
+			continue
 		}
 		fmt.Fprintf(w, "  %s: %s\n", b.Name, reason)
 	}

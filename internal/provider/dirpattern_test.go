@@ -468,3 +468,55 @@ func TestDirPatternSkipsTheTempDirInUse(t *testing.T) {
 	assert.NoDirExists(t, other)
 	assert.Contains(t, res.Output, "contains the temp dir in use")
 }
+
+// linkOrSkip hard-links oldname to newname, skipping on file systems that
+// cannot.
+func linkOrSkip(t *testing.T, oldname, newname string) {
+	t.Helper()
+	if err := os.Link(oldname, newname); err != nil {
+		t.Skipf("hard links unsupported here: %v", err)
+	}
+}
+
+func TestDirPatternCountsHardlinkedFileOnce(t *testing.T) {
+	root := t.TempDir()
+	dir := makeDir(t, root, "sail-a", 1000, 5*time.Hour)
+	data := filepath.Join(dir, "sub", "data.bin")
+	linkOrSkip(t, data, filepath.Join(dir, "copy.bin"))
+	linkOrSkip(t, data, filepath.Join(dir, "sub", "again.bin"))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "unique.bin"), make([]byte, 200), 0o600))
+	ageTree(t, dir, 5*time.Hour)
+
+	p := newTestDirProvider(t, root, nil)
+	dry, err := p.Clean(t.Context(), CleanOptions{DryRun: true})
+	require.NoError(t, err)
+	assert.Equal(t, int64(1200), dry.BytesCleaned, "three links to one inode are 1000 bytes once")
+	assert.Equal(t, int64(1200), dry.Entries[0].Size)
+
+	res, err := p.Clean(t.Context(), CleanOptions{})
+	require.NoError(t, err)
+	assert.Equal(t, int64(1200), res.BytesCleaned)
+	assert.False(t, exists(dir))
+}
+
+func TestDirPatternCountsHardlinkAcrossDirectoriesOnce(t *testing.T) {
+	root := t.TempDir()
+	first := makeDir(t, root, "sail-a", 1000, 5*time.Hour)
+	second := makeDir(t, root, "sail-b", 300, 5*time.Hour)
+	linkOrSkip(t, filepath.Join(first, "sub", "data.bin"), filepath.Join(second, "shared.bin"))
+	ageTree(t, second, 5*time.Hour)
+
+	p := newTestDirProvider(t, root, nil)
+	dry, err := p.Clean(t.Context(), CleanOptions{DryRun: true})
+	require.NoError(t, err)
+	assert.Equal(t, int64(1300), dry.BytesCleaned, "the shared 1000 bytes appear in the dry-run total once")
+	var sum int64
+	for _, e := range dry.Entries {
+		sum += e.Size
+	}
+	assert.Equal(t, dry.BytesCleaned, sum, "entry sizes add up to the total")
+
+	res, err := p.Clean(t.Context(), CleanOptions{})
+	require.NoError(t, err)
+	assert.Equal(t, int64(1300), res.BytesCleaned)
+}

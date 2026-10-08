@@ -161,7 +161,7 @@ func scanProvider(ctx context.Context, cfg *config.Config, name string) Provider
 
 	p, err := provider.LoadProvider(name, cfg)
 	if err != nil {
-		status.Error = fmt.Sprintf("load provider: %v", err)
+		status.Error = err.Error()
 		return status
 	}
 
@@ -171,7 +171,7 @@ func scanProvider(ctx context.Context, cfg *config.Config, name string) Provider
 
 	current, err := p.CurrentSize(ctx)
 	if err != nil {
-		status.Error = fmt.Sprintf("get current size: %v", err)
+		status.Error = fmt.Sprintf("provider %s: get current size: %v", name, err)
 		return status
 	}
 
@@ -260,6 +260,11 @@ func outputTable(statuses []ProviderStatus) error {
 		Width(width)
 
 	fmt.Println(t)
+	for _, s := range statuses {
+		if s.Error != "" {
+			fmt.Println(errorStyle.Render(s.Error))
+		}
+	}
 	fmt.Println()
 	fmt.Println(totalStyle.Render(fmt.Sprintf("Total: %s", size.FormatSize(total))))
 

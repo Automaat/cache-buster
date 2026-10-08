@@ -37,13 +37,8 @@ type DirPatternProvider struct {
 
 // NewDirPatternProvider creates a provider that removes stale directories matching cfg.Paths.
 func NewDirPatternProvider(name string, cfg config.Provider) (*DirPatternProvider, error) {
-	for _, path := range cfg.Paths {
-		if !strings.ContainsAny(path, "*?[") {
-			return nil, fmt.Errorf("path %q must contain a glob (*, ? or [)", path)
-		}
-		if !config.IsAbsPortable(path) && !strings.HasPrefix(path, "~/") && !strings.HasPrefix(path, `~\`) {
-			return nil, fmt.Errorf("path %q must be absolute or start with ~/", path)
-		}
+	if err := cfg.DirPatternError(); err != nil {
+		return nil, err
 	}
 
 	base, err := NewBaseProvider(name, cfg)
@@ -87,17 +82,35 @@ func NewDirPatternProvider(name string, cfg config.Provider) (*DirPatternProvide
 type dirScan struct {
 	newest  time.Time
 	gitPath string
-	size    int64
-	files   int64
+	// links maps each hard-linked file seen in the walk to its size, so
+	// Clean can drop inodes an earlier directory already counted.
+	links map[osshim.FileID]int64
+	size  int64
+	files int64
+}
+
+// evaluated is one matched directory after the eligibility checks.
+type evaluated struct {
+	dir    string
+	reason string
+	sc     dirScan
 }
 
 // Clean implements Provider. Smart and full modes behave the same: only
 // whole stale directories are removed, never individual files.
+//
+// Every directory is evaluated before any is removed: removing one drops the
+// link count of files it shares with another, which would hide the shared
+// inode from the later scan and count it twice.
 func (p *DirPatternProvider) Clean(ctx context.Context, opts CleanOptions) (CleanResult, error) {
 	var (
 		out    strings.Builder
 		result CleanResult
 		errs   []error
+		// counted holds the inodes already in the totals, so a file
+		// hard-linked across two matched directories is counted once.
+		counted = make(map[osshim.FileID]struct{})
+		evals   = make([]evaluated, 0, len(p.paths))
 	)
 
 	for _, dir := range p.paths {
@@ -105,14 +118,30 @@ func (p *DirPatternProvider) Clean(ctx context.Context, opts CleanOptions) (Clea
 			result.Output = out.String()
 			return result, err
 		}
-
 		sc, reason := p.evaluate(ctx, dir)
+		evals = append(evals, evaluated{dir: dir, sc: sc, reason: reason})
+	}
+	eligible := len(evals) - countSkipped(evals)
+
+	for _, ev := range evals {
+		if err := ctx.Err(); err != nil {
+			result.Output = out.String()
+			return result, err
+		}
+
+		dir, sc, reason := ev.dir, ev.sc, ev.reason
+		if reason == "" && !opts.DryRun && eligible > 1 {
+			// Other directories were evaluated since this one; confirm it
+			// is still idle and clean of .git before deleting.
+			sc, reason = p.recheck(ctx, dir, sc)
+		}
 		if reason != "" {
 			fmt.Fprintf(&out, "skip: %s (%s)\n", dir, reason)
 			result.SkippedEntries++
 			continue
 		}
 
+		sc.size = uncounted(ev.sc, counted)
 		idle := p.now().Sub(sc.newest).Round(time.Second)
 		if opts.DryRun {
 			fmt.Fprintf(&out, "would remove: %s (%s, idle %s)\n", dir, size.FormatSize(sc.size), idle)
@@ -136,6 +165,30 @@ func (p *DirPatternProvider) Clean(ctx context.Context, opts CleanOptions) (Clea
 
 	result.Output = out.String()
 	return result, errors.Join(errs...)
+}
+
+func countSkipped(evals []evaluated) int {
+	n := 0
+	for _, ev := range evals {
+		if ev.reason != "" {
+			n++
+		}
+	}
+	return n
+}
+
+// uncounted returns the scan's size minus inodes already in counted, and
+// records the scan's inodes there.
+func uncounted(sc dirScan, counted map[osshim.FileID]struct{}) int64 {
+	total := sc.size
+	for id, n := range sc.links {
+		if _, dup := counted[id]; dup {
+			total -= n
+			continue
+		}
+		counted[id] = struct{}{}
+	}
+	return total
 }
 
 // evaluate decides whether dir may be removed. A non-empty reason means skip.
@@ -283,8 +336,17 @@ func scanDir(ctx context.Context, dir string, rootMod time.Time) (sc dirScan, sk
 		}
 
 		if info.Mode().IsRegular() {
-			sc.size += info.Size()
 			sc.files++
+			if id, shared := osshim.SharedFileID(path, info); shared {
+				if _, dup := sc.links[id]; dup {
+					return nil
+				}
+				if sc.links == nil {
+					sc.links = make(map[osshim.FileID]int64)
+				}
+				sc.links[id] = info.Size()
+			}
+			sc.size += info.Size()
 		}
 		return nil
 	})

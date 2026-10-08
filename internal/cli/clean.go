@@ -109,9 +109,14 @@ func runCleanWithContext(newCtx func() (context.Context, context.CancelFunc), lo
 	}
 
 	for _, u := range unavailable {
-		if !quiet && !opts.json {
-			fmt.Fprintf(os.Stderr, "Skipping %s: %s\n", u.Name, u.Reason)
+		if quiet || opts.json {
+			continue
 		}
+		if report.IsLoadFailure(u.Name, u.Reason) {
+			fmt.Fprintln(os.Stderr, u.Reason)
+			continue
+		}
+		fmt.Fprintf(os.Stderr, "Skipping %s: %s\n", u.Name, u.Reason)
 	}
 
 	if !force && !dryRun {
@@ -178,6 +183,9 @@ type unavailableProvider struct {
 }
 
 func (u unavailableProvider) String() string {
+	if report.IsLoadFailure(u.Name, u.Reason) {
+		return u.Reason
+	}
 	if u.Reason == "" {
 		return u.Name
 	}
@@ -188,7 +196,7 @@ func loadAndFilterProviders(cfg *config.Config, names []string) (providers []pro
 	for _, name := range names {
 		p, err := provider.LoadProvider(name, cfg)
 		if err != nil {
-			unavailable = append(unavailable, unavailableProvider{Name: name, Reason: fmt.Sprintf("load error: %v", err)})
+			unavailable = append(unavailable, unavailableProvider{Name: name, Reason: err.Error()})
 			continue
 		}
 

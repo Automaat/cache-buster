@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/smykla-skalski/bilgie/internal/config"
+	"github.com/smykla-skalski/bilgie/internal/osshim"
 )
 
 // Unmanaged scan defaults.
@@ -195,6 +196,7 @@ feed:
 
 func measureDir(ctx context.Context, root string) (int64, bool) {
 	var total int64
+	var links osshim.LinkSet
 	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return ctxErr
@@ -209,6 +211,9 @@ func measureDir(ctx context.Context, root string) (int64, bool) {
 			return nil
 		}
 		if info, infoErr := d.Info(); infoErr == nil {
+			if id, shared := osshim.SharedFileID(path, info); shared && !links.Add(id) {
+				return nil
+			}
 			total += diskUsage(info)
 		}
 		return nil
