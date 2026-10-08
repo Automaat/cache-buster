@@ -16,8 +16,8 @@ import (
 
 // EntryProvider cleans caches whose top-level entries are only usable whole
 // (model snapshots, browser installs, VM images). It removes whole entries,
-// oldest first, never individual files inside one. The newest entry is
-// always kept.
+// oldest first (ties broken by path), never individual files inside one.
+// The newest entry is always kept.
 type EntryProvider struct {
 	*BaseProvider
 	skipPrefixes []string
@@ -47,7 +47,7 @@ func (p *EntryProvider) Clean(ctx context.Context, opts CleanOptions) (CleanResu
 		return CleanResult{}, err
 	}
 
-	sort.Slice(entries, func(i, j int) bool { return entries[i].modTime.Before(entries[j].modTime) })
+	sortEntries(entries)
 
 	var (
 		freed   int64
@@ -151,4 +151,15 @@ func (p *EntryProvider) listEntries(ctx context.Context) (entries []cacheEntry, 
 		}
 	}
 	return entries, total, nil
+}
+
+// sortEntries orders oldest first; equal mtimes tie-break on path so
+// eviction order is deterministic.
+func sortEntries(entries []cacheEntry) {
+	sort.Slice(entries, func(i, j int) bool {
+		if !entries[i].modTime.Equal(entries[j].modTime) {
+			return entries[i].modTime.Before(entries[j].modTime)
+		}
+		return entries[i].path < entries[j].path
+	})
 }
