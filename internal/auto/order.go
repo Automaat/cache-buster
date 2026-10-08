@@ -23,6 +23,7 @@ var rebuildRank = map[string]int{
 	"go-mod":            45,
 	"go-build":          50,
 	"xcode-deriveddata": 55,
+	"project-artifacts": 60,
 	"docker":            70,
 	"xcode-archives":    90,
 }

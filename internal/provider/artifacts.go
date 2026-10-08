@@ -1,0 +1,472 @@
+package provider
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"slices"
+	"sort"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/smykla-skalski/bilgie/internal/config"
+	"github.com/smykla-skalski/bilgie/internal/osshim"
+	"github.com/smykla-skalski/bilgie/pkg/size"
+)
+
+// Project artifact defaults.
+const (
+	defaultArtifactMinIdle = 30 * 24 * time.Hour
+	defaultArtifactBudget  = 10 * time.Second
+	defaultArtifactDepth   = 4
+	openCheckTimeout       = time.Minute
+	scanCacheTTL           = 2 * time.Minute
+)
+
+// ProjectArtifactsProvider removes whole build artifact directories (Rust
+// target, node_modules, Python virtualenvs) of idle projects below the
+// configured roots. A directory counts only when its marker file and the
+// sibling project file both exist. Projects are cleaned oldest first and only
+// as far as needed; an artifact is never removed in part.
+type ProjectArtifactsProvider struct {
+	*BaseProvider
+
+	minIdle    time.Duration
+	budget     time.Duration
+	maxDepth   int
+	kinds      map[artifactKind]bool
+	skipDirty  bool
+	skipIfOpen bool
+	home       string
+
+	now       func() time.Time
+	openCheck func(ctx context.Context, dir string) (bool, error)
+	git       gitRunner
+	processes processLookup
+
+	mu        sync.Mutex
+	protected []string
+	cached    *artifactScan
+	cachedAt  time.Time
+}
+
+// NewProjectArtifactsProvider creates a provider from a project-artifacts config.
+func NewProjectArtifactsProvider(name string, cfg config.Provider) (*ProjectArtifactsProvider, error) {
+	base, err := NewBaseProvider(name, cfg)
+	if err != nil {
+		return nil, err
+	}
+
+	minIdle, err := durationOr(cfg.MinIdle, defaultArtifactMinIdle, "min_idle")
+	if err != nil {
+		return nil, err
+	}
+	budget, err := durationOr(cfg.ScanBudget, defaultArtifactBudget, "scan_budget")
+	if err != nil {
+		return nil, err
+	}
+	depth := cfg.MaxDepth
+	if depth > config.MaxProjectDepth {
+		return nil, fmt.Errorf("max_depth must be at most %d, got %d", config.MaxProjectDepth, depth)
+	}
+	if depth <= 0 {
+		depth = defaultArtifactDepth
+	}
+
+	home, _ := os.UserHomeDir()
+	p := &ProjectArtifactsProvider{
+		BaseProvider: base,
+		minIdle:      minIdle,
+		budget:       budget,
+		maxDepth:     depth,
+		kinds: map[artifactKind]bool{
+			kindRust:   boolOr(cfg.Rust, true),
+			kindNode:   boolOr(cfg.Node, true),
+			kindPython: boolOr(cfg.Python, false),
+		},
+		skipDirty:  boolOr(cfg.SkipIfDirty, true),
+		skipIfOpen: boolOr(cfg.SkipIfOpen, true),
+		home:       home,
+		now:        time.Now,
+		openCheck:  osshim.HasOpenFiles,
+		git:        runGit,
+		processes:  lookupToolProcesses,
+	}
+	p.protected = expandProtected(config.DefaultProtected(), home)
+	p.protected = append(p.protected, config.BuiltinProtectedRoots(home)...)
+	return p, nil
+}
+
+func durationOr(value string, def time.Duration, field string) (time.Duration, error) {
+	if value == "" {
+		return def, nil
+	}
+	d, err := config.ParseDuration(value)
+	if err != nil {
+		return 0, fmt.Errorf("parse %s: %w", field, err)
+	}
+	if d <= 0 {
+		return 0, fmt.Errorf("%s must be positive, got %q", field, value)
+	}
+	return d, nil
+}
+
+func boolOr(v *bool, def bool) bool {
+	if v == nil {
+		return def
+	}
+	return *v
+}
+
+// SetProtected implements ProtectionAware. The paths add to the built-in ones.
+func (p *ProjectArtifactsProvider) SetProtected(paths []string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	for _, path := range paths {
+		if path = filepath.Clean(path); !slices.Contains(p.protected, path) {
+			p.protected = append(p.protected, path)
+		}
+	}
+}
+
+// CurrentSize implements Provider: the size of every artifact found, idle or not.
+func (p *ProjectArtifactsProvider) CurrentSize(ctx context.Context) (int64, error) {
+	scan, err := p.scan(ctx)
+	if err != nil {
+		return 0, err
+	}
+	return scan.total(), nil
+}
+
+// Recoverable implements Recoverer. It applies every check a clean applies
+// except the open-file probe, which is too slow for a status listing.
+func (p *ProjectArtifactsProvider) Recoverable(ctx context.Context) (int64, error) {
+	scan, err := p.scan(ctx)
+	if err != nil {
+		return 0, err
+	}
+	pass := p.newPass(ctx, scan)
+	var total int64
+	for _, c := range pass.candidates(ctx) {
+		if err := ctx.Err(); err != nil {
+			return total, err
+		}
+		if reason := pass.guard(ctx, c); reason == "" {
+			total += c.art.Size
+		}
+	}
+	return total, ctx.Err()
+}
+
+// Clean implements Provider. Smart mode stops once the artifacts are under
+// max_size, or, under disk pressure, once opts.Recovered reports recovery.
+// Full mode removes every eligible artifact.
+func (p *ProjectArtifactsProvider) Clean(ctx context.Context, opts CleanOptions) (CleanResult, error) {
+	scan, err := p.scan(ctx)
+	if err != nil {
+		return CleanResult{}, err
+	}
+	if !opts.DryRun {
+		p.invalidate()
+	}
+
+	var (
+		out    strings.Builder
+		result CleanResult
+		errs   []error
+	)
+	finish := func(err error) (CleanResult, error) {
+		result.Output = strings.TrimRight(out.String(), "\n")
+		return result, err
+	}
+
+	if !opts.DryRun {
+		p.sweepTrash(scan, &out)
+	}
+	if scan.partial {
+		fmt.Fprintf(&out, "note: scan stopped at its %s budget, some projects may be missing\n", p.budget)
+	}
+
+	pass := p.newPass(ctx, scan)
+	remaining := scan.total()
+	var freed int64
+
+	for _, c := range pass.candidates(ctx) {
+		if err := ctx.Err(); err != nil {
+			return finish(err)
+		}
+		if reason := pass.cheapReason(c); reason != "" {
+			skipLine(&out, &result, c, reason)
+			continue
+		}
+		if p.satisfied(opts, remaining-freed, freed) {
+			break
+		}
+		reason := pass.guard(ctx, c)
+		if reason == "" {
+			reason = p.openReason(ctx, c)
+		}
+		if reason == "" {
+			reason = p.finalReason(ctx, c)
+		}
+		if reason == "" {
+			pass.procs, pass.procsErr = p.processes(ctx)
+			reason = pass.busyReason(c)
+		}
+		if err := ctx.Err(); err != nil {
+			return finish(err)
+		}
+		if reason != "" {
+			skipLine(&out, &result, c, reason)
+			continue
+		}
+
+		detail := c.detail(p.now())
+		if !opts.DryRun {
+			gone, rmErr := removeAside(c.art.Path)
+			p.settleProject(ctx, c.proj)
+			switch {
+			case !gone:
+				skipLine(&out, &result, c, "cannot rename aside: "+rmErr.Error())
+				continue
+			case rmErr != nil:
+				errs = append(errs, fmt.Errorf("remove %s: %w", c.art.Path, rmErr))
+				fmt.Fprintf(&out, "error: %s (%v)\n", c.art.Path, rmErr)
+				continue
+			}
+		}
+		verb := "removed"
+		if opts.DryRun {
+			verb = "would remove"
+		}
+		fmt.Fprintf(&out, "%s: %s (%s; %s)\n", verb, c.art.Path, size.FormatSize(c.art.Size), detail)
+		freed += c.art.Size
+		result.BytesCleaned += c.art.Size
+		result.FilesDeleted += c.art.Files
+		result.Entries = append(result.Entries, Entry{Path: c.art.Path, Size: c.art.Size, Detail: detail})
+	}
+
+	return finish(errors.Join(errs...))
+}
+
+func (p *ProjectArtifactsProvider) satisfied(opts CleanOptions, left, freed int64) bool {
+	switch {
+	case opts.Recovered != nil:
+		return opts.Recovered(freed)
+	case opts.Mode == CleanModeSmart:
+		return left <= p.maxSize
+	default:
+		return false
+	}
+}
+
+func skipLine(out *strings.Builder, result *CleanResult, c *candidate, reason string) {
+	fmt.Fprintf(out, "skip: %s (%s)\n", c.art.Path, reason)
+	result.SkippedEntries++
+}
+
+// openReason runs the slow open-file probe. Windows cannot list handles, but
+// it also refuses to rename a directory with open files, so the rename that
+// follows is the check there.
+func (p *ProjectArtifactsProvider) openReason(ctx context.Context, c *candidate) string {
+	if !p.skipIfOpen {
+		return ""
+	}
+	probeCtx, cancel := context.WithTimeout(ctx, openCheckTimeout)
+	defer cancel()
+	open, err := p.openCheck(probeCtx, c.art.Path)
+	switch {
+	case errors.Is(err, osshim.ErrOpenFilesUnsupported):
+		return ""
+	case err != nil:
+		return "open-file check failed: " + err.Error()
+	case open:
+		return "has open files"
+	}
+	return ""
+}
+
+// finalReason revalidates just before removal: the markers must still be
+// there and the project must not have been touched while checks ran.
+func (p *ProjectArtifactsProvider) finalReason(ctx context.Context, c *candidate) string {
+	if !markersValid(c.art) {
+		return "markers changed"
+	}
+	newest, _, err := sampleNewest(ctx, c.proj.Dir, sampleLimit)
+	if err != nil {
+		return "recheck failed: " + err.Error()
+	}
+	if newest.After(c.proj.sampled) {
+		return "modified during checks"
+	}
+	return ""
+}
+
+// removeAside renames dir next to itself and deletes the copy, so a crash
+// leaves either the intact directory or a trash directory that no marker
+// check accepts, never a half-deleted artifact under its real name. gone
+// reports whether the rename happened. The parent keeps its old mtime: the
+// removal is not project activity.
+func removeAside(dir string) (gone bool, err error) {
+	defer keepParentTime(dir)()
+	trash := filepath.Join(filepath.Dir(dir), trashName(filepath.Base(dir)))
+	if err := os.Rename(dir, trash); err != nil {
+		return false, err
+	}
+	return true, os.RemoveAll(trash)
+}
+
+func keepParentTime(path string) func() {
+	parent := filepath.Dir(path)
+	info, err := os.Stat(parent)
+	if err != nil {
+		return func() {}
+	}
+	return func() { _ = os.Chtimes(parent, info.ModTime(), info.ModTime()) }
+}
+
+// settleProject re-baselines the activity sample after a removal, in case the
+// parent's mtime could not be restored.
+func (p *ProjectArtifactsProvider) settleProject(ctx context.Context, proj *project) {
+	if newest, _, err := sampleNewest(ctx, proj.Dir, sampleLimit); err == nil && newest.After(proj.sampled) {
+		proj.sampled = newest
+	}
+}
+
+func (p *ProjectArtifactsProvider) sweepTrash(scan *artifactScan, out *strings.Builder) {
+	for _, trash := range scan.trash {
+		if p.protectedReason(trash) != "" {
+			continue
+		}
+		restore := keepParentTime(trash)
+		err := os.RemoveAll(trash)
+		restore()
+		if err != nil {
+			fmt.Fprintf(out, "error: sweeping %s (%v)\n", trash, err)
+			continue
+		}
+		fmt.Fprintf(out, "swept: %s\n", trash)
+	}
+}
+
+func (p *ProjectArtifactsProvider) invalidate() {
+	p.mu.Lock()
+	p.cached = nil
+	p.mu.Unlock()
+}
+
+// scan returns the artifact scan, reusing a recent one so the size probe and
+// the clean that follows it do not walk every tree twice.
+func (p *ProjectArtifactsProvider) scan(ctx context.Context) (*artifactScan, error) {
+	p.mu.Lock()
+	if p.cached != nil && time.Since(p.cachedAt) < scanCacheTTL {
+		scan := p.cached
+		p.mu.Unlock()
+		return scan, nil
+	}
+	p.mu.Unlock()
+
+	scan, err := p.discover(ctx)
+	if err != nil {
+		return nil, err
+	}
+	p.mu.Lock()
+	p.cached, p.cachedAt = scan, time.Now()
+	p.mu.Unlock()
+	return scan, nil
+}
+
+type candidate struct {
+	art  *artifactDir
+	proj *project
+}
+
+func (c *candidate) detail(now time.Time) string {
+	return fmt.Sprintf("%s, project %s, idle %dd", c.art.Kind, filepath.Base(c.proj.Dir), idleDays(now, c.proj.newest))
+}
+
+func idleDays(now, then time.Time) int {
+	if then.IsZero() || now.Before(then) {
+		return 0
+	}
+	return int(now.Sub(then) / (24 * time.Hour))
+}
+
+type pass struct {
+	p        *ProjectArtifactsProvider
+	scan     *artifactScan
+	procs    []toolProcess
+	procsErr error
+	dirty    map[string]string
+}
+
+func (p *ProjectArtifactsProvider) newPass(ctx context.Context, scan *artifactScan) *pass {
+	ps := &pass{p: p, scan: scan, dirty: map[string]string{}}
+	ps.procs, ps.procsErr = p.processes(ctx)
+	return ps
+}
+
+// candidates lists every artifact, oldest project first. Ties break on
+// project path, then larger artifact first, then path, so order is stable.
+func (ps *pass) candidates(ctx context.Context) []*candidate {
+	var list []*candidate
+	for _, proj := range ps.scan.projects {
+		if ctx.Err() != nil {
+			return nil
+		}
+		ps.p.measureActivity(ctx, proj)
+		for _, art := range proj.artifacts {
+			list = append(list, &candidate{art: art, proj: proj})
+		}
+	}
+	sort.SliceStable(list, func(i, j int) bool {
+		a, b := list[i], list[j]
+		switch {
+		case !a.proj.newest.Equal(b.proj.newest):
+			return a.proj.newest.Before(b.proj.newest)
+		case a.proj.Dir != b.proj.Dir:
+			return a.proj.Dir < b.proj.Dir
+		case a.art.Size != b.art.Size:
+			return a.art.Size > b.art.Size
+		default:
+			return a.art.Path < b.art.Path
+		}
+	})
+	return list
+}
+
+// cheapReason covers the checks that need no process or git work. A
+// non-empty reason means skip.
+func (ps *pass) cheapReason(c *candidate) string {
+	p := ps.p
+	if reason := p.protectedReason(c.proj.Dir); reason != "" {
+		return reason
+	}
+	if reason := p.protectedReason(c.art.Path); reason != "" {
+		return reason
+	}
+	if c.proj.problem != "" {
+		return c.proj.problem
+	}
+	if idle := p.now().Sub(c.proj.newest); idle < p.minIdle {
+		return fmt.Sprintf("project active %s ago, min_idle %s", idle.Round(time.Hour), p.minIdle)
+	}
+	return ""
+}
+
+// guard runs every check that does not need the slow open-file probe.
+func (ps *pass) guard(ctx context.Context, c *candidate) string {
+	if reason := ps.cheapReason(c); reason != "" {
+		return reason
+	}
+	if c.art.unreadable {
+		return "part of it cannot be read"
+	}
+	if reason := ps.busyReason(c); reason != "" {
+		return reason
+	}
+	return ps.dirtyReason(ctx, c.proj)
+}

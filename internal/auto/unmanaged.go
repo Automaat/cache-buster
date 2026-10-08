@@ -70,12 +70,14 @@ func UnmanagedRoots(home string) []string {
 
 // CoveredPaths returns the concrete paths providers manage: every enabled
 // provider plus the directory-pattern sweeps that auto runs even when
-// disabled. Globs are expanded to what exists now.
+// disabled. Project-artifacts roots hold source trees and are not covered:
+// that provider removes only artifact directories below them. Globs are
+// expanded to what exists now.
 func CoveredPaths(cfg *config.Config) []string {
 	var out []string
 	for name := range cfg.Providers {
 		pc := cfg.Providers[name]
-		if !cfg.Applies(name) || (!pc.Enabled && pc.Type != config.TypeDirPattern) {
+		if !cfg.Applies(name) || pc.Type == config.TypeProjectArtifacts || (!pc.Enabled && pc.Type != config.TypeDirPattern) {
 			continue
 		}
 		paths, err := config.ExpandPaths(pc.Paths)

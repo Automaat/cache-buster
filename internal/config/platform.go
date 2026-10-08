@@ -193,3 +193,20 @@ func AppliesOn(name, goos string) bool {
 	}
 	return slices.Contains(oses, goos)
 }
+
+// BuiltinProtectedRoots returns the absolute locations under home that auto
+// never deletes from, whichever provider points at them.
+func BuiltinProtectedRoots(home string) []string {
+	if home == "" {
+		return nil
+	}
+	return []string{
+		filepath.Join(home, "Downloads"),
+		filepath.Join(home, ".local", "share", "opencode"),
+		filepath.Join(home, ".config", "opencode"),
+		filepath.Join(home, ".opencode"),
+		filepath.Join(home, ".cache", "opencode"),
+		filepath.Join(home, "Library", "Caches", "opencode"),
+		filepath.Join(home, "Library", "Developer", "Xcode", "Archives"),
+	}
+}

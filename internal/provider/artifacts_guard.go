@@ -1,0 +1,419 @@
+package provider
+
+import (
+	"bytes"
+	"context"
+	"errors"
+	"fmt"
+	"io"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"regexp"
+	"runtime"
+	"slices"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/smykla-skalski/bilgie/internal/osshim"
+)
+
+const gitStatusTimeout = 15 * time.Second
+
+var kindTools = map[artifactKind][]string{
+	kindRust:   {"cargo", "rustc"},
+	kindNode:   {"node", "npm", "npx", "pnpm", "yarn", "bun"},
+	kindPython: {"python", "python3", "pip", "pip3", "uv", "poetry"},
+}
+
+type gitRunner func(ctx context.Context, dir string, args ...string) (string, error)
+
+// runGit runs git without taking optional locks, so a status probe never
+// rewrites the index of a repository somebody is using.
+func runGit(ctx context.Context, dir string, args ...string) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, gitStatusTimeout)
+	defer cancel()
+	full := append([]string{"--no-optional-locks", "-C", dir}, args...)
+	cmd := exec.CommandContext(ctx, "git", full...)
+	cmd.Env = append(os.Environ(), "GIT_OPTIONAL_LOCKS=0", "LC_ALL=C")
+	osshim.KillTreeOnCancel(cmd)
+	cmd.WaitDelay = cleanWaitDelay
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(stderr.String()))
+	}
+	return string(out), nil
+}
+
+// toolProcess is a running build tool. Cwd is empty when it could not be
+// read; CwdUnknown says the lookup failed for every process.
+type toolProcess struct {
+	Tool        string
+	pid         int
+	CommandLine string
+	Cwd         string
+	CwdUnknown  bool
+}
+
+type processLookup func(ctx context.Context) ([]toolProcess, error)
+
+// lookupToolProcesses lists running build tools with their working
+// directories. Failing to list processes is an error, so callers fail closed.
+func lookupToolProcesses(ctx context.Context) ([]toolProcess, error) {
+	table, err := osshim.ProcessTable(ctx)
+	if err != nil {
+		return nil, err
+	}
+	self := os.Getpid()
+	var procs []toolProcess
+	var pids []int
+	for i := range table {
+		if table[i].PID == self {
+			continue
+		}
+		if tool := matchAnyKind(table[i].CommandLine); tool != "" {
+			procs = append(procs, toolProcess{Tool: tool, pid: table[i].PID, CommandLine: table[i].CommandLine})
+			pids = append(pids, table[i].PID)
+		}
+	}
+	if len(procs) == 0 {
+		return nil, nil
+	}
+	cwds, err := osshim.ProcessCwds(ctx, pids)
+	for i := range procs {
+		switch {
+		case err != nil:
+			procs[i].CwdUnknown = true
+		default:
+			procs[i].Cwd = cwds[procs[i].pid]
+		}
+	}
+	return procs, nil
+}
+
+// measureActivity fills in when the project was last touched: the newest
+// mtime outside .git and the artifact directories (a bounded sample), and the
+// git HEAD and reflog time. Anything unreadable becomes the project's
+// problem, which skips it.
+func (p *ProjectArtifactsProvider) measureActivity(ctx context.Context, proj *project) {
+	if proj.measured || ctx.Err() != nil {
+		return
+	}
+	proj.measured = true
+
+	newest, truncated, err := sampleNewest(ctx, proj.Dir, sampleLimit)
+	if err != nil {
+		if ctx.Err() == nil {
+			proj.problem = "cannot read project: " + err.Error()
+		}
+		proj.measured = ctx.Err() == nil
+		return
+	}
+	proj.sampled = newest
+	proj.newest = newest
+
+	repoRoot, gitDir, err := findGit(proj.Dir, proj.root)
+	if err != nil {
+		proj.problem = "git state unreadable: " + err.Error()
+		return
+	}
+	proj.repoRoot = repoRoot
+	if gitDir == "" {
+		if truncated {
+			proj.problem = "too many files to judge idleness without git"
+		}
+		return
+	}
+	gitTime, err := gitActivity(gitDir)
+	if err != nil {
+		proj.problem = "git state unreadable: " + err.Error()
+		return
+	}
+	if gitTime.After(proj.newest) {
+		proj.newest = gitTime
+	}
+}
+
+// findGit walks up from dir to stop looking for a .git entry. repoRoot is
+// the directory holding it; gitDir is the directory with HEAD, which for a
+// linked worktree is the worktree's own admin directory.
+func findGit(dir, stop string) (repoRoot, gitDir string, err error) {
+	for cur := dir; ; cur = filepath.Dir(cur) {
+		entry := filepath.Join(cur, ".git")
+		if info, statErr := os.Lstat(entry); statErr == nil {
+			switch {
+			case info.IsDir():
+				return cur, entry, nil
+			case info.Mode().IsRegular():
+				resolved, resolveErr := readGitFile(entry, cur)
+				return cur, resolved, resolveErr
+			default:
+				return cur, "", errors.New(".git is neither a directory nor a file")
+			}
+		}
+		if cur == stop || filepath.Dir(cur) == cur {
+			return "", "", nil
+		}
+	}
+}
+
+func readGitFile(path, base string) (string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	target, ok := strings.CutPrefix(strings.TrimSpace(string(data)), "gitdir:")
+	if !ok {
+		return "", errors.New(".git file has no gitdir line")
+	}
+	target = strings.TrimSpace(target)
+	if !filepath.IsAbs(target) {
+		target = filepath.Join(base, target)
+	}
+	return filepath.Clean(target), nil
+}
+
+// gitActivity returns the newest of HEAD's mtime, the reflog's mtime and the
+// timestamp of the reflog's last entry.
+func gitActivity(gitDir string) (time.Time, error) {
+	headInfo, err := os.Stat(filepath.Join(gitDir, "HEAD"))
+	if err != nil {
+		return time.Time{}, err
+	}
+	newest := headInfo.ModTime()
+	reflog := filepath.Join(gitDir, "logs", "HEAD")
+	info, err := os.Stat(reflog)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return newest, nil
+		}
+		return time.Time{}, err
+	}
+	if info.ModTime().After(newest) {
+		newest = info.ModTime()
+	}
+	if ts, ok := lastReflogTime(reflog); ok && ts.After(newest) {
+		newest = ts
+	}
+	return newest, nil
+}
+
+// lastReflogTime parses the commit time of the final reflog line, which reads
+// "<old> <new> Name <email> <unix-time> <tz>\t<message>".
+func lastReflogTime(path string) (time.Time, bool) {
+	f, err := os.Open(path)
+	if err != nil {
+		return time.Time{}, false
+	}
+	defer func() { _ = f.Close() }()
+	info, err := f.Stat()
+	if err != nil {
+		return time.Time{}, false
+	}
+	const tail = 8192
+	offset := max(info.Size()-tail, 0)
+	buf := make([]byte, info.Size()-offset)
+	if _, err := f.ReadAt(buf, offset); err != nil && !errors.Is(err, io.EOF) {
+		return time.Time{}, false
+	}
+	lines := strings.Split(strings.TrimRight(string(buf), "\r\n"), "\n")
+	head, _, _ := strings.Cut(lines[len(lines)-1], "\t")
+	end := strings.LastIndex(head, ">")
+	if end < 0 {
+		return time.Time{}, false
+	}
+	fields := strings.Fields(head[end+1:])
+	if len(fields) == 0 {
+		return time.Time{}, false
+	}
+	secs, err := strconv.ParseInt(fields[0], 10, 64)
+	if err != nil {
+		return time.Time{}, false
+	}
+	return time.Unix(secs, 0), true
+}
+
+// busyReason skips an artifact whose project has a running build tool of the
+// artifact's kind: one whose command line names the project, or whose
+// working directory is inside it (or in the enclosing repository, above it).
+// A matched process whose directory cannot be read counts as busy.
+func (ps *pass) busyReason(c *candidate) string {
+	if ps.procsErr != nil {
+		return "cannot list processes: " + ps.procsErr.Error()
+	}
+	tools := kindTools[c.art.Kind]
+	proj := c.proj
+	for _, proc := range ps.procs {
+		tool := proc.Tool
+		if !slices.Contains(tools, tool) {
+			tool = matchKind(proc.CommandLine, c.art.Kind)
+		}
+		if tool == "" {
+			continue
+		}
+		switch {
+		case foldContains(proc.CommandLine, proj.Dir), foldContains(proc.CommandLine, proj.alias):
+			return tool + " is running in the project"
+		case proc.CwdUnknown:
+			return tool + " is running and its directory cannot be read"
+		case proc.Cwd == "":
+			return tool + " is running and its directory cannot be read"
+		case pathWithin(proc.Cwd, proj.Dir):
+			return tool + " is running in the project"
+		case proj.repoRoot != "" && pathWithin(proc.Cwd, proj.repoRoot) && pathWithin(proj.Dir, proc.Cwd):
+			return tool + " is running in the repository"
+		}
+	}
+	return ""
+}
+
+// dirtyReason skips projects whose git tree has uncommitted changes. Git
+// missing or failing skips the project too. One status per repository.
+func (ps *pass) dirtyReason(ctx context.Context, proj *project) string {
+	p := ps.p
+	if !p.skipDirty || proj.repoRoot == "" {
+		return ""
+	}
+	if reason, ok := ps.dirty[proj.repoRoot]; ok {
+		return reason
+	}
+	out, err := p.git(ctx, proj.repoRoot, "status", "--porcelain")
+	reason := ""
+	switch {
+	case ctx.Err() != nil:
+		return "cancelled"
+	case err != nil:
+		reason = "git status failed: " + err.Error()
+	case strings.TrimSpace(out) != "":
+		reason = "uncommitted changes"
+	}
+	ps.dirty[proj.repoRoot] = reason
+	return reason
+}
+
+// protectedReason reports why path may not be touched: it is, lies inside or
+// contains a protected location, or has a Downloads or opencode element.
+func (p *ProjectArtifactsProvider) protectedReason(path string) string {
+	p.mu.Lock()
+	protected := append([]string(nil), p.protected...)
+	p.mu.Unlock()
+
+	candidates := []string{filepath.Clean(path)}
+	if resolved, err := filepath.EvalSymlinks(path); err == nil && resolved != candidates[0] {
+		candidates = append(candidates, resolved)
+	}
+	for _, cand := range candidates {
+		if lexicallyProtected(cand) {
+			return "protected path"
+		}
+		for _, root := range protected {
+			for _, spelling := range rootSpellings(root) {
+				if pathWithin(cand, spelling) || pathWithin(spelling, cand) {
+					return "protected path " + root
+				}
+			}
+		}
+	}
+	return ""
+}
+
+func rootSpellings(root string) []string {
+	out := []string{root}
+	if resolved, err := filepath.EvalSymlinks(root); err == nil && resolved != root {
+		out = append(out, resolved)
+	}
+	return out
+}
+
+// lexicallyProtected checks only the path text: Downloads and opencode
+// elements and Xcode's Archives folder. It is cheap enough for every
+// directory the search visits.
+func lexicallyProtected(path string) bool {
+	parts := strings.Split(filepath.ToSlash(filepath.Clean(path)), "/")
+	for i, part := range parts {
+		if strings.EqualFold(part, "Downloads") || strings.EqualFold(part, "opencode") {
+			return true
+		}
+		if strings.EqualFold(part, "Xcode") && i+1 < len(parts) && strings.EqualFold(parts[i+1], "Archives") {
+			return true
+		}
+	}
+	return false
+}
+
+// expandProtected turns ~/ entries into absolute paths below home.
+func expandProtected(entries []string, home string) []string {
+	var out []string
+	for _, entry := range entries {
+		if runtime.GOOS == "windows" || strings.HasPrefix(entry, `~\`) {
+			entry = strings.ReplaceAll(entry, `\`, "/")
+		}
+		if rest, ok := strings.CutPrefix(entry, "~/"); ok {
+			if home == "" {
+				continue
+			}
+			entry = filepath.Join(home, filepath.FromSlash(rest))
+		}
+		if filepath.IsAbs(entry) {
+			out = append(out, filepath.Clean(entry))
+		}
+	}
+	return out
+}
+
+func foldPathText(s string) string {
+	if runtime.GOOS == "darwin" || runtime.GOOS == "windows" {
+		return strings.ToLower(s)
+	}
+	return s
+}
+
+func foldContains(text, sub string) bool {
+	return sub != "" && strings.Contains(foldPathText(text), foldPathText(sub))
+}
+
+// pathWithin reports whether path equals root or lies below it, comparing
+// case-insensitively where the default filesystem does.
+func pathWithin(path, root string) bool {
+	path, root = foldPathText(filepath.Clean(path)), foldPathText(filepath.Clean(root))
+	if path == root {
+		return true
+	}
+	if !strings.HasSuffix(root, string(filepath.Separator)) {
+		root += string(filepath.Separator)
+	}
+	return strings.HasPrefix(path, root)
+}
+
+var versionedTool = regexp.MustCompile(`^(python|pythonw|pip)[0-9.]*$`)
+
+// matchKind names the build tool of kind that a command line involves.
+// Versioned interpreters such as python3.12 or pip3.12 count for Python.
+func matchKind(commandLine string, kind artifactKind) string {
+	if tool := matchProcess(commandLine, kindTools[kind]); tool != "" {
+		return tool
+	}
+	if kind != kindPython {
+		return ""
+	}
+	for field := range strings.FieldsSeq(commandLine) {
+		base := strings.ToLower(filepath.Base(strings.Trim(field, `"';&|()`)))
+		base = strings.TrimSuffix(base, ".exe")
+		if versionedTool.MatchString(base) {
+			return base
+		}
+	}
+	return ""
+}
+
+func matchAnyKind(commandLine string) string {
+	for _, kind := range []artifactKind{kindRust, kindNode, kindPython} {
+		if tool := matchKind(commandLine, kind); tool != "" {
+			return tool
+		}
+	}
+	return ""
+}

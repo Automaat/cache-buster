@@ -6,6 +6,9 @@ import "github.com/smykla-skalski/bilgie/internal/cache"
 type Entry struct {
 	Path string `json:"path"`
 	Size int64  `json:"size_bytes"`
+	// Detail says what kind of entry this is, for providers where the path
+	// alone does not (for example "rust, project api, idle 45d").
+	Detail string `json:"detail,omitempty"`
 }
 
 func entriesFromFiles(files []cache.FileInfo) []Entry {
