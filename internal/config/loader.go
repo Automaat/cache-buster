@@ -1,6 +1,7 @@
 package config
 
 import (
+	"slices"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -106,8 +107,9 @@ func (l *Loader) Load() (*Config, error) {
 		if l.v.IsSet("providers." + name + ".skip_if_git_worktree") {
 			merged.SkipIfGitWorktree = userP.SkipIfGitWorktree
 		}
+		// Union, never replace: an empty user list must not strip protections.
 		if l.v.IsSet("providers." + name + ".skip_prefixes") {
-			merged.SkipPrefixes = userP.SkipPrefixes
+			merged.SkipPrefixes = append(slices.Clone(defaultP.SkipPrefixes), userP.SkipPrefixes...)
 		}
 		cfg.Providers[name] = merged
 	}

@@ -1,6 +1,7 @@
 package config
 
 import (
+	"slices"
 	"os"
 	"path/filepath"
 	"testing"
@@ -285,5 +286,29 @@ func TestNewLoader(t *testing.T) {
 	}
 	if loader.v == nil {
 		t.Fatal("NewLoader() viper instance is nil")
+	}
+}
+
+func TestLoader_SkipPrefixesAreUnioned(t *testing.T) {
+	for _, list := range []string{"[]", `[""]`, "[extra-]"} {
+		configPath := filepath.Join(t.TempDir(), "config.yaml")
+		content := "version: \"1\"\nproviders:\n  chrome-devtools-mcp:\n    enabled: true\n    skip_prefixes: " + list + "\n"
+		if err := os.WriteFile(configPath, []byte(content), 0o600); err != nil {
+			t.Fatalf("write config: %v", err)
+		}
+		loader := NewLoader()
+		loader.SetConfigPath(configPath)
+
+		cfg, err := loader.Load()
+		if err != nil {
+			t.Fatalf("Load() error = %v", err)
+		}
+		p := cfg.Providers["chrome-devtools-mcp"]
+		if !slices.Contains(p.SkipPrefixes, "chrome-profile-") {
+			t.Errorf("skip_prefixes %s dropped chrome-profile-: %v", list, p.SkipPrefixes)
+		}
+		if list == "[extra-]" && !slices.Contains(p.SkipPrefixes, "extra-") {
+			t.Errorf("user prefix lost: %v", p.SkipPrefixes)
+		}
 	}
 }
