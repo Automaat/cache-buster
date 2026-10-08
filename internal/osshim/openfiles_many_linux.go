@@ -28,21 +28,22 @@ func procOpenFilesUnder(ctx context.Context, root string, dirs []string, selfUID
 
 // OpenFilesUnder reports, for each dir, whether any process has a file open
 // inside it, reading /proc once for all of them. A dir that no longer exists
-// holds nothing. An error means the answer is unknown and every dir must count
+// holds nothing; one that cannot be resolved counts as open. An error means the answer is unknown and every dir must count
 // as open.
 func OpenFilesUnder(ctx context.Context, dirs []string) (map[string]bool, error) {
-	var live, resolved []string
+	live := make([]string, 0, len(dirs))
+	resolved := make([]string, 0, len(dirs))
+	out := make(map[string]bool, len(dirs))
 	for _, dir := range dirs {
 		r, err := filepath.EvalSymlinks(dir)
-		if errors.Is(err, fs.ErrNotExist) {
-			continue
+		switch {
+		case errors.Is(err, fs.ErrNotExist):
+		case err != nil:
+			out[dir] = true
+		default:
+			live, resolved = append(live, dir), append(resolved, r)
 		}
-		if err != nil {
-			return nil, err
-		}
-		live, resolved = append(live, dir), append(resolved, r)
 	}
-	out := make(map[string]bool, len(dirs))
 	if len(live) == 0 {
 		return out, nil
 	}

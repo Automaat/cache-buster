@@ -22,7 +22,7 @@ const (
 	defaultArtifactMinIdle    = 60 * 24 * time.Hour
 	defaultArtifactBudget     = 10 * time.Second
 	defaultArtifactPassBudget = 30 * time.Second
-	openSnapshotTTL           = 5 * time.Second
+	openSnapshotTTL           = 2 * time.Second
 	defaultArtifactDepth      = 4
 	openCheckTimeout          = time.Minute
 	scanCacheTTL              = 2 * time.Minute
@@ -353,8 +353,8 @@ func (ps *pass) openInSnapshot(ctx context.Context, path string) (bool, error) {
 		}
 		probeCtx, cancel := context.WithTimeout(ctx, openCheckTimeout)
 		defer cancel()
-		ps.openSnap, ps.openErr = p.openMany(probeCtx, dirs)
 		ps.openAt = p.now()
+		ps.openSnap, ps.openErr = p.openMany(probeCtx, dirs)
 	}
 	if ps.openErr != nil {
 		return false, ps.openErr

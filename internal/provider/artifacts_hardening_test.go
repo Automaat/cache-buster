@@ -654,3 +654,21 @@ func TestProjectArtifacts_DevServersCountAsNodeTools(t *testing.T) {
 	assert.Equal(t, "vite", matchKind("vite --port 3000", kindNode))
 	assert.Equal(t, "next-server", matchKind("next-server (v14.0.0)", kindNode))
 }
+
+func TestProjectArtifacts_SnapshotAgeStartsWhenTheListingStarts(t *testing.T) {
+	h := newArtifactHarness(t, nil)
+	nodeProject(t, h.path("a"), 10, 120*day)
+	nodeProject(t, h.path("b"), 10, 110*day)
+	clock := time.Now()
+	h.p.now = func() time.Time { return clock }
+	calls := 0
+	h.p.openMany = func(context.Context, []string) (map[string]bool, error) {
+		calls++
+		clock = clock.Add(openSnapshotTTL + time.Second)
+		return map[string]bool{}, nil
+	}
+
+	h.clean(CleanOptions{Mode: CleanModeFull})
+
+	assert.Equal(t, 2, calls, "a listing that outlasts the TTL is not reused")
+}
