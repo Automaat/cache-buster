@@ -73,7 +73,7 @@ func TestRun_NeverDeletesProtectedPaths(t *testing.T) {
 	add("uv", true, config.Provider{Paths: []string{filepath.Join(home, "precious", "data")}})
 	add("cargo", true, config.Provider{Paths: []string{filepath.Join(home, "Downloads")}})
 	add("gradle", true, config.Provider{Paths: []string{filepath.Join(home, ".local", "share", "opencode")}})
-	add("gh", true, config.Provider{Paths: []string{filepath.Join(home, "repos", "feature")}})
+	add("edge", true, config.Provider{Paths: []string{filepath.Join(home, "repos", "feature")}})
 	add("sweep", false, config.Provider{
 		Type:    config.TypeDirPattern,
 		Paths:   []string{filepath.Join(home, "precious", "sweep-*")},

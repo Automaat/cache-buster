@@ -444,3 +444,10 @@ func TestDefaultProvidersFor_RelativeTempDirFallsBackToTmp(t *testing.T) {
 	require.NoError(t, cfg.Validate())
 	assert.Equal(t, []string{filepath.Join("/tmp", "sail*")}, cfg.Providers["sail-dirs"].Paths)
 }
+
+func TestDefaultProvidersFor_MacOSIgnoresXDGDataHome(t *testing.T) {
+	p := macPlatform
+	p.XDGDataHome = "/Users/u/xdg-data"
+
+	assert.Equal(t, []string{"~/.local/share/mise"}, DefaultProvidersFor(p)["mise"].Paths)
+}

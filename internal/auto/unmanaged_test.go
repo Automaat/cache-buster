@@ -137,9 +137,12 @@ func TestUnmanagedRoots_FollowXDGOverrides(t *testing.T) {
 
 	roots := UnmanagedRoots(home)
 
-	assert.Contains(t, roots, data)
 	if runtime.GOOS == "linux" {
+		assert.Contains(t, roots, data)
 		assert.Contains(t, roots, cache)
+	}
+	if runtime.GOOS == "darwin" {
+		assert.NotContains(t, roots, data, "launchd does not pass XDG variables")
 	}
 }
 

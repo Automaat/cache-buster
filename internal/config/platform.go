@@ -58,12 +58,17 @@ func (p Platform) cache(rel string) string {
 }
 
 // data spells a path below the per-user data root: $XDG_DATA_HOME or
-// ~/.local/share on Linux and macOS, %LOCALAPPDATA% on Windows.
+// ~/.local/share on Linux, always ~/.local/share on macOS because the launchd
+// agent does not inherit the shell's XDG variables, %LOCALAPPDATA% on Windows.
 func (p Platform) data(rel string) string {
-	if p.OS == OSWindows {
+	switch p.OS {
+	case OSWindows:
 		return p.under(p.LocalAppData, "AppData/Local", rel)
+	case OSDarwin:
+		return p.home(".local/share/" + rel)
+	default:
+		return p.under(p.XDGDataHome, ".local/share", rel)
 	}
-	return p.under(p.XDGDataHome, ".local/share", rel)
 }
 
 // under joins rel to root, or to the home-relative fallback when root is

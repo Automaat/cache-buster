@@ -51,7 +51,7 @@ type ScanOptions struct {
 func UnmanagedRoots(home string) []string {
 	roots := []string{os.TempDir()}
 	if home != "" {
-		roots = append(roots, envOr("XDG_DATA_HOME", filepath.Join(home, ".local", "share")))
+		roots = append(roots, filepath.Join(home, ".local", "share"))
 		switch runtime.GOOS {
 		case "darwin":
 			roots = append(roots, filepath.Join(home, "Library", "Caches"))
@@ -59,6 +59,7 @@ func UnmanagedRoots(home string) []string {
 			roots = append(roots, localAppData(home))
 		default:
 			roots = append(roots, envOr("XDG_CACHE_HOME", filepath.Join(home, ".cache")))
+			roots[1] = envOr("XDG_DATA_HOME", roots[1])
 		}
 	}
 	if runtime.GOOS == "darwin" {

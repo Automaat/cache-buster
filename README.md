@@ -1,6 +1,6 @@
 # cache-buster
 
-Developer cache manager for macOS. Interactive TUI, 27 built-in providers, auto-discovery, smart LRU cleaning.
+Developer cache manager for macOS, Linux and Windows. Interactive TUI, 27 built-in providers, auto-discovery, smart LRU cleaning.
 
 ![demo](./doc/demo.gif)
 <!-- Generate with: brew install vhs && vhs doc/demo.tape -->
@@ -302,7 +302,7 @@ terminal.
 only used for `status`. `lsof` run as a non-root user cannot see other users'
 processes.
 
-The built-in `sail-dirs` provider (`/private/tmp/sail*`) uses `dir-pattern` and is
+The built-in `sail-dirs` provider (`sail*` in the OS temp dir) uses `dir-pattern` and is
 disabled by default. Enable it with `enabled: true` after reviewing
 `cache-buster clean sail-dirs --dry-run`, which lists each directory with its size,
 idle time and the reason it would be skipped.
