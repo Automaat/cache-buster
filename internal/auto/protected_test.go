@@ -302,3 +302,11 @@ func absPath(posix string) string {
 	}
 	return posix
 }
+
+func TestProtectedPaths_BackslashHomeEntryIsExpandedOnEveryOS(t *testing.T) {
+	home := absPath("/Users/me")
+
+	got := ProtectedPaths(&config.Config{Protected: []string{`~\Photos\raw`}}, home)
+
+	assert.Contains(t, got, filepath.Join(home, "Photos", "raw"))
+}

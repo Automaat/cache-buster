@@ -42,7 +42,7 @@ func isProtected(path, home string, scanTree bool) bool {
 func ProtectedPaths(cfg *config.Config, home string) []string {
 	var out []string
 	for _, entry := range config.MergeProtected(cfg.Protected) {
-		if runtime.GOOS == "windows" {
+		if runtime.GOOS == "windows" || strings.HasPrefix(entry, `~\`) {
 			entry = strings.ReplaceAll(entry, `\`, "/")
 		}
 		if rest, ok := strings.CutPrefix(entry, "~/"); ok {
