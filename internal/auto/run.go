@@ -172,7 +172,7 @@ func Run(ctx context.Context, cfg *config.Config, dryRun bool, deps Deps) (Repor
 			continue
 		}
 
-		res := runCandidate(ctx, c, tier, dryRun, deps, protected)
+		res := runCandidate(ctx, cfg, c, tier, dryRun, deps, protected)
 		rep.Results = append(rep.Results, res)
 		switch {
 		case deps.Verbose:
@@ -289,7 +289,7 @@ func pruneVolumes(cmd string) bool {
 	return strings.Contains(lower, "volume")
 }
 
-func runCandidate(ctx context.Context, c *candidate, tier Tier, dryRun bool, deps Deps, protected []string) Result {
+func runCandidate(ctx context.Context, cfg *config.Config, c *candidate, tier Tier, dryRun bool, deps Deps, protected []string) Result {
 	res := Result{Name: c.name}
 
 	p, err := deps.NewProvider(c.name, c.cfg)
@@ -298,13 +298,17 @@ func runCandidate(ctx context.Context, c *candidate, tier Tier, dryRun bool, dep
 		return res
 	}
 
-	reason, ctxErr := protectedReason(ctx, p, c.cfg.Type == config.TypeDirPattern, deps.Home, protected)
-	if ctxErr != nil {
-		res.Status, res.Err = StatusError, ctxErr
-		return res
-	}
-	if reason != "" {
-		return skipped(res, reason)
+	if aware, ok := p.(provider.ProtectionAware); ok {
+		aware.SetProtected(append(slices.Clone(protected), protectedRoots(deps.Home)...))
+	} else {
+		reason, ctxErr := protectedReason(ctx, p, c.cfg.Type == config.TypeDirPattern, deps.Home, protected)
+		if ctxErr != nil {
+			res.Status, res.Err = StatusError, ctxErr
+			return res
+		}
+		if reason != "" {
+			return skipped(res, reason)
+		}
 	}
 	if !availableCtx(ctx, p) {
 		if err := ctx.Err(); err != nil {
@@ -328,11 +332,15 @@ func runCandidate(ctx context.Context, c *candidate, tier Tier, dryRun bool, dep
 		}
 	}
 
-	out, err := p.Clean(ctx, provider.CleanOptions{
+	opts := provider.CleanOptions{
 		DryRun:  dryRun,
 		Mode:    provider.CleanModeSmart,
 		Timeout: DockerCleanTimeout,
-	})
+	}
+	if tier != TierOK {
+		opts.Recovered = recoveredFunc(cfg, deps, dryRun)
+	}
+	out, err := p.Clean(ctx, opts)
 	res.Output = strings.TrimSpace(out.Output)
 	res.Freed = out.BytesCleaned
 	res.Entries = out.Entries
@@ -348,6 +356,23 @@ func runCandidate(ctx context.Context, c *candidate, tier Tier, dryRun bool, dep
 		res.Status = StatusCleaned
 	}
 	return res
+}
+
+// recoveredFunc tells a provider freeing space in steps when it can stop: free
+// space is back above the floors. A dry-run frees nothing, so it adds the
+// bytes the provider reports it would free.
+func recoveredFunc(cfg *config.Config, deps Deps, dryRun bool) func(freed int64) bool {
+	return func(freed int64) bool {
+		now, err := deps.Free()
+		if err != nil {
+			return false
+		}
+		if dryRun {
+			now.Free += freed
+		}
+		tier, err := ChooseTier(now, cfg.Auto)
+		return err == nil && tier == TierOK
+	}
 }
 
 func skipped(res Result, reason string) Result {

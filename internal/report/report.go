@@ -138,7 +138,11 @@ func WriteTop(w io.Writer, s Summary) {
 	}
 	fmt.Fprintln(w, "  largest:")
 	for _, e := range s.Top {
-		fmt.Fprintf(w, "    %10s  %s\n", size.FormatSize(e.Size), e.Path)
+		detail := ""
+		if e.Detail != "" {
+			detail = "  (" + e.Detail + ")"
+		}
+		fmt.Fprintf(w, "    %10s  %s%s\n", size.FormatSize(e.Size), e.Path, detail)
 	}
 	if more := s.Entries - len(s.Top); more > 0 {
 		fmt.Fprintf(w, "    ... and %d more (--verbose lists all)\n", more)

@@ -13,18 +13,7 @@ import (
 
 // protectedRoots returns the home-relative locations auto never touches.
 func protectedRoots(home string) []string {
-	if home == "" {
-		return nil
-	}
-	return []string{
-		filepath.Join(home, "Downloads"),
-		filepath.Join(home, ".local", "share", "opencode"),
-		filepath.Join(home, ".config", "opencode"),
-		filepath.Join(home, ".opencode"),
-		filepath.Join(home, ".cache", "opencode"),
-		filepath.Join(home, "Library", "Caches", "opencode"),
-		filepath.Join(home, "Library", "Developer", "Xcode", "Archives"),
-	}
+	return config.BuiltinProtectedRoots(home)
 }
 
 // protectedElement matches path elements that mark user data in the path of

@@ -163,6 +163,9 @@ func ProtectionConflicts(
 		if err != nil {
 			continue
 		}
+		if _, aware := p.(provider.ProtectionAware); aware {
+			continue
+		}
 		reason, ctxErr := protectedReason(ctx, p, pc.Type == config.TypeDirPattern, home, protected)
 		if ctxErr != nil {
 			break
