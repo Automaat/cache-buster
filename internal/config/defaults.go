@@ -13,6 +13,7 @@ func DefaultProviders() map[string]Provider {
 		systemProviders(),
 		xcodeProviders(),
 		otherProviders(),
+		tempDirProviders(),
 	} {
 		maps.Copy(all, group)
 	}
@@ -168,5 +169,19 @@ func DefaultConfig() *Config {
 	return &Config{
 		Version:   currentVersion,
 		Providers: DefaultProviders(),
+	}
+}
+
+// tempDirProviders are opt-in: they delete whole directories, so they stay
+// disabled until the user enables them.
+func tempDirProviders() map[string]Provider {
+	return map[string]Provider{
+		"sail-dirs": {
+			Enabled: false,
+			Type:    TypeDirPattern,
+			Paths:   []string{"/private/tmp/sail*"},
+			MaxSize: "20G",
+			MinIdle: "2h",
+		},
 	}
 }

@@ -162,6 +162,20 @@ providers:
 | `max_size` | Size limit (e.g., `10G`, `500M`) |
 | `max_age` | File age threshold for smart clean (e.g., `30d`) |
 | `clean_cmd` | Command for full clean (empty = file-based deletion) |
+| `type` | `dir-pattern` removes whole stale directories matching a glob in `paths` |
+| `min_idle` | `dir-pattern`: minimum idle time, from the newest mtime in the tree (default `2h`) |
+| `skip_if_open` | `dir-pattern`: skip directories with open files via `lsof +D` (default `true`) |
+| `skip_if_git_worktree` | `dir-pattern`: skip directories containing a `.git` entry (default `true`) |
+
+`dir-pattern` paths must contain a glob character. The provider ignores
+`max_age` and removes every stale match whole regardless of `max_size`, which is
+only used for `status`. `lsof` run as a non-root user cannot see other users'
+processes.
+
+The built-in `sail-dirs` provider (`/private/tmp/sail*`) uses `dir-pattern` and is
+disabled by default. Enable it with `enabled: true` after reviewing
+`cache-buster clean sail-dirs --dry-run`, which lists each directory with its size,
+idle time and the reason it would be skipped.
 
 ## Building from Source
 
