@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -500,11 +501,11 @@ func newAgent(t *testing.T, rec *recorder) Agent {
 		UID:        501,
 		Interval:   45 * time.Minute,
 		RetryDelay: time.Nanosecond,
+		OS:         "darwin",
 	}
 }
 
 func TestAgentInstall_WritesPlistArmsDryRunAndLoads(t *testing.T) {
-	skipOnWindows(t, "#207 launchd scheduler tests")
 	rec := &recorder{}
 	a := newAgent(t, rec)
 
@@ -521,11 +522,12 @@ func TestAgentInstall_WritesPlistArmsDryRunAndLoads(t *testing.T) {
 	assert.Contains(t, string(data), "<integer>2700</integer>")
 	info, err := os.Stat(a.PlistPath())
 	require.NoError(t, err)
-	assert.Equal(t, os.FileMode(0o644), info.Mode().Perm())
+	if runtime.GOOS != "windows" {
+		assert.Equal(t, os.FileMode(0o644), info.Mode().Perm())
+	}
 }
 
 func TestAgentInstall_BootstrapFailureIsReturned(t *testing.T) {
-	skipOnWindows(t, "#207 launchd scheduler tests")
 	rec := &recorder{fail: map[string]error{"bootstrap": errors.New("exit 5")}}
 	a := newAgent(t, rec)
 
@@ -536,7 +538,6 @@ func TestAgentInstall_BootstrapFailureIsReturned(t *testing.T) {
 }
 
 func TestAgentInstall_RetriesBootstrapUntilItSucceeds(t *testing.T) {
-	skipOnWindows(t, "#207 launchd scheduler tests")
 	attempts := 0
 	a := newAgent(t, &recorder{})
 	a.Exec = func(_ context.Context, _ string, args ...string) ([]byte, error) {
@@ -554,7 +555,6 @@ func TestAgentInstall_RetriesBootstrapUntilItSucceeds(t *testing.T) {
 }
 
 func TestAgentInstall_GivesUpAfterFiveBootstrapAttempts(t *testing.T) {
-	skipOnWindows(t, "#207 launchd scheduler tests")
 	attempts := 0
 	a := newAgent(t, &recorder{})
 	a.Exec = func(_ context.Context, _ string, args ...string) ([]byte, error) {
@@ -583,7 +583,6 @@ func TestAgentInstall_RefusesGoRunBinaryAndRelativePath(t *testing.T) {
 }
 
 func TestAgentUninstall_UnloadsRemovesPlistAndMarker(t *testing.T) {
-	skipOnWindows(t, "#207 launchd scheduler tests")
 	rec := &recorder{}
 	a := newAgent(t, rec)
 	require.NoError(t, a.Install(t.Context()))
@@ -606,7 +605,6 @@ func TestAgentUninstall_NotInstalledIsNotAnError(t *testing.T) {
 }
 
 func TestRenderPlist_ValidXMLWithExpectedKeys(t *testing.T) {
-	skipOnWindows(t, "#207 launchd scheduler tests")
 	data, err := RenderPlist("/Users/me/bin/cache&buster", "/Users/me", "/Users/me/Library/Logs/cb/auto.log", 30*time.Minute)
 	require.NoError(t, err)
 
@@ -694,7 +692,6 @@ func TestIsProtected_CaseInsensitiveAndCacheLocations(t *testing.T) {
 }
 
 func TestAgentUninstall_RealBootoutFailureKeepsPlistAndMarker(t *testing.T) {
-	skipOnWindows(t, "#207 launchd scheduler tests")
 	rec := &recorder{}
 	a := newAgent(t, rec)
 	require.NoError(t, a.Install(t.Context()))
@@ -869,7 +866,6 @@ func TestReport_Previewed(t *testing.T) {
 }
 
 func TestAgentUninstall_UnrecognisedBootoutAndPrintFailureKeepsState(t *testing.T) {
-	skipOnWindows(t, "#207 launchd scheduler tests")
 	rec := &recorder{}
 	a := newAgent(t, rec)
 	require.NoError(t, a.Install(t.Context()))
@@ -892,7 +888,6 @@ func TestWithoutDataAlias_CaseInsensitive(t *testing.T) {
 }
 
 func TestAgentUninstall_UnrecognisedBootoutWithFailingPrintStillRemoves(t *testing.T) {
-	skipOnWindows(t, "#207 launchd scheduler tests")
 	rec := &recorder{}
 	a := newAgent(t, rec)
 	require.NoError(t, a.Install(t.Context()))

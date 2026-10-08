@@ -8,7 +8,7 @@ Developer cache manager for macOS, Linux and Windows with configurable size limi
 cmd/cache-buster/     - CLI entrypoint
 internal/
   cache/              - Cache size scanning
-  auto/               - Free-space tiers, auto run, launchd agent, first-run marker
+  auto/               - Free-space tiers, auto run, per-OS scheduler (launchd, systemd/cron, schtasks), notifiers, first-run marker
   cli/                - Cobra command implementations (status, clean, config, auto, history, install-agent)
   config/             - Config loading, defaults, validation
   osshim/             - Per-OS shims (lock, process list, kill tree, open files, free space)

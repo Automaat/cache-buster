@@ -1,0 +1,11 @@
+[Unit]
+Description=Run cache-buster automatic cache cleanup every 45m0s
+
+[Timer]
+OnActiveSec=1min
+OnUnitInactiveSec=2700s
+AccuracySec=1min
+Unit=cache-buster.service
+
+[Install]
+WantedBy=timers.target

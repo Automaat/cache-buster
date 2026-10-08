@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 	"time"
@@ -70,6 +71,7 @@ providers:
 		home:     home,
 		exe:      "/opt/homebrew/bin/cache-buster",
 		uid:      501,
+		goos:     "darwin",
 	}
 	return f
 }
@@ -261,7 +263,6 @@ func TestAuto_ConfigOverridesChangeTier(t *testing.T) {
 }
 
 func TestInstallAgent_WritesPlistWithoutRealLaunchctl(t *testing.T) {
-	skipOnWindows(t, "#207 launchd scheduler tests")
 	f := newAutoFixture(t, 100*autoGiB, "auto:\n  interval: 60m\n")
 
 	require.NoError(t, runInstallAgentWithLoader(t.Context(), f.loader, f.env))
@@ -285,7 +286,6 @@ func TestInstallAgent_RejectsTooShortInterval(t *testing.T) {
 }
 
 func TestUninstallAgent_RemovesPlist(t *testing.T) {
-	skipOnWindows(t, "#207 launchd scheduler tests")
 	f := newAutoFixture(t, 100*autoGiB, "")
 	require.NoError(t, runInstallAgentWithLoader(t.Context(), f.loader, f.env))
 	f.launchd = nil
@@ -309,4 +309,88 @@ func TestAssumedFree(t *testing.T) {
 
 	_, err = assumedFree("lots", base)
 	require.Error(t, err)
+}
+
+func TestInstallAgent_PicksTheBackendOfTheOS(t *testing.T) {
+	tests := []struct {
+		goos     string
+		exe      string
+		wantCmds [][]string
+		wantFile func(home, state string) string
+	}{
+		{"linux", "/usr/local/bin/cache-buster", [][]string{
+			{"systemctl", "--user", "show-environment"},
+			{"systemctl", "--user", "daemon-reload"},
+			{"systemctl", "--user", "enable", auto.SystemdUnit + ".timer"},
+			{"systemctl", "--user", "restart", auto.SystemdUnit + ".timer"},
+			{"crontab", "-l"},
+		}, func(home, _ string) string {
+			return filepath.Join(home, ".config", "systemd", "user", auto.SystemdUnit+".timer")
+		}},
+		{"windows", `C:\bin\cache-buster.exe`, nil, func(_, state string) string {
+			return filepath.Join(state, auto.TaskName+"-task.xml")
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.goos, func(t *testing.T) {
+			f := newAutoFixture(t, 100*autoGiB, "auto:\n  interval: 60m\n")
+			f.env.goos = tt.goos
+			f.env.exe = tt.exe
+
+			require.NoError(t, runInstallAgentWithLoader(t.Context(), f.loader, f.env))
+
+			assert.FileExists(t, tt.wantFile(f.home, f.env.stateDir))
+			assert.True(t, auto.FirstRunPending(f.env.stateDir))
+			if tt.wantCmds != nil {
+				assert.Equal(t, tt.wantCmds, f.launchd)
+			} else {
+				require.Len(t, f.launchd, 1)
+				assert.Equal(t, "schtasks", f.launchd[0][0])
+			}
+
+			f.launchd = nil
+			require.NoError(t, f.env.agent(0).Uninstall(t.Context()))
+			assert.NoFileExists(t, tt.wantFile(f.home, f.env.stateDir))
+			assert.False(t, auto.FirstRunPending(f.env.stateDir))
+		})
+	}
+}
+
+func TestAuto_MissingNotifierIsALoggedSkip(t *testing.T) {
+	f := newAutoFixture(t, 1*autoGiB, "")
+	require.NoError(t, auto.ClearFirstRun(f.env.stateDir))
+	f.env.notify = auto.NotifierFor("linux", func(_ context.Context, name string, _ ...string) ([]byte, error) {
+		return nil, &exec.Error{Name: name, Err: exec.ErrNotFound}
+	})
+
+	require.NoError(t, runAutoWithLoader(t.Context(), f.loader, f.env, false))
+
+	assert.Contains(t, f.out.String(), "notification skipped")
+	assert.NotContains(t, f.out.String(), "warning:")
+}
+
+func TestUserConfigDir_HonoursAbsoluteXDGConfigHome(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "home")
+	custom := filepath.Join(t.TempDir(), "cfg")
+
+	t.Setenv("XDG_CONFIG_HOME", custom)
+	assert.Equal(t, custom, userConfigDir(home))
+
+	t.Setenv("XDG_CONFIG_HOME", "relative/cfg")
+	assert.Equal(t, filepath.Join(home, ".config"), userConfigDir(home))
+
+	t.Setenv("XDG_CONFIG_HOME", "")
+	assert.Equal(t, filepath.Join(home, ".config"), userConfigDir(home))
+}
+
+func TestInstallAgent_WritesSystemdUnitsUnderTheConfigDir(t *testing.T) {
+	f := newAutoFixture(t, 100*autoGiB, "")
+	f.env.goos = "linux"
+	f.env.exe = "/usr/local/bin/cache-buster"
+	f.env.configDir = filepath.Join(f.home, "xdg")
+
+	require.NoError(t, runInstallAgentWithLoader(t.Context(), f.loader, f.env))
+
+	assert.FileExists(t, filepath.Join(f.home, "xdg", "systemd", "user", auto.SystemdUnit+".timer"))
+	assert.NoDirExists(t, filepath.Join(f.home, ".config"))
 }
