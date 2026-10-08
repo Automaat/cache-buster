@@ -108,13 +108,16 @@ type fakeRustup struct {
 
 func (f *fakeRustup) run(_ context.Context, args ...string) (string, error) {
 	f.calls = append(f.calls, args)
+	if len(args) < 2 {
+		return "", errors.New("unexpected rustup args")
+	}
 	if args[0] == "override" {
 		return "no overrides", nil
 	}
 	if args[1] == "list" {
 		return f.list, nil
 	}
-	if f.fail != "" && args[2] == f.fail {
+	if f.fail != "" && len(args) > 2 && args[2] == f.fail {
 		return "boom", errors.New("exit 1")
 	}
 	return "", nil
