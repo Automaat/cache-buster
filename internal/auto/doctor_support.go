@@ -141,6 +141,7 @@ type Conflict struct {
 // ProtectionConflicts lists the enabled providers whose paths are protected,
 // so auto skips them on every run.
 func ProtectionConflicts(
+	ctx context.Context,
 	cfg *config.Config,
 	home string,
 	newProvider func(name string, cfg config.Provider) (provider.Provider, error),
@@ -162,7 +163,14 @@ func ProtectionConflicts(
 		if err != nil {
 			continue
 		}
-		if reason := protectedReason(p, home, protected); reason != "" {
+		if _, aware := p.(provider.ProtectionAware); aware {
+			continue
+		}
+		reason, ctxErr := protectedReason(ctx, p, pc.Type == config.TypeDirPattern, home, protected)
+		if ctxErr != nil {
+			break
+		}
+		if reason != "" {
 			out = append(out, Conflict{Provider: name, Reason: reason})
 		}
 	}

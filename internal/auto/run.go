@@ -199,6 +199,9 @@ func Run(ctx context.Context, cfg *config.Config, dryRun bool, deps Deps) (Repor
 	} else {
 		rep.EndStale = true
 	}
+	if tier != TierOK && !rep.Recovered && len(rep.Results) > 0 && !slices.ContainsFunc(rep.Results, func(r Result) bool { return r.Status != StatusSkipped }) {
+		fmt.Fprintln(deps.Out, "nothing to clean: every provider was skipped, see the reasons above")
+	}
 	fmt.Fprintf(deps.Out, "done: free %s\n", size.FormatSize(rep.End.Free))
 	return rep, nil
 }
@@ -308,8 +311,15 @@ func runCandidate(ctx context.Context, cfg *config.Config, c *candidate, tier Ti
 
 	if aware, ok := p.(provider.ProtectionAware); ok {
 		aware.SetProtected(append(slices.Clone(protected), protectedRoots(deps.Home)...))
-	} else if reason := protectedReason(p, deps.Home, protected); reason != "" {
-		return skipped(res, reason)
+	} else {
+		reason, ctxErr := protectedReason(ctx, p, c.cfg.Type == config.TypeDirPattern, deps.Home, protected)
+		if ctxErr != nil {
+			res.Status, res.Err = StatusError, ctxErr
+			return res
+		}
+		if reason != "" {
+			return skipped(res, reason)
+		}
 	}
 	if !availableCtx(ctx, p) {
 		if err := ctx.Err(); err != nil {
@@ -381,13 +391,34 @@ func skipped(res Result, reason string) Result {
 	return res
 }
 
-func protectedReason(p provider.Provider, home string, protected []string) string {
+// protectedReason returns why a provider's paths are off limits, or "" when
+// they are clear. Paths that cannot be verified in the budget are reported as
+// too large to verify. A directory-pattern sweep also matches protected names
+// in its own path, since it targets user directories. The error is ctx's when
+// the scan was cancelled.
+func protectedReason(ctx context.Context, p provider.Provider, sweep bool, home string, protected []string) (string, error) {
 	for _, path := range p.Paths() {
-		if isProtectedWith(path, home, protected, true) {
-			return "protected path " + path
+		if sweep && (hasProtectedName(path) || hasResolvedProtectedName(path)) {
+			return "protected path " + path, nil
+		}
+		v := checkProtected(ctx, path, home, protected, true)
+		switch {
+		case v.cancelled:
+			return "", ctx.Err()
+		case v.kind == verdictProtected && v.detail != "":
+			return "protected path " + path + " (" + v.detail + ")", nil
+		case v.kind == verdictProtected:
+			return "protected path " + path, nil
+		case v.kind == verdictUnverified:
+			return v.detail, nil
 		}
 	}
-	return ""
+	return "", nil
+}
+
+func hasResolvedProtectedName(path string) bool {
+	resolved, err := filepath.EvalSymlinks(path)
+	return err == nil && hasProtectedName(resolved)
 }
 
 func printResult(out io.Writer, res Result) {

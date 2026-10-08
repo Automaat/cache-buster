@@ -314,6 +314,18 @@ func TestAge(t *testing.T) {
 	assert.Equal(t, "under a minute", Age(-time.Hour))
 }
 
+func TestDiagnose_UnverifiableConflictHintsAtNarrowerPaths(t *testing.T) {
+	for _, reason := range []string{"too large to verify: /x/cache", "cannot verify: /x/cache/locked"} {
+		in := healthy()
+		in.Conflicts = []auto.Conflict{{Provider: "go-mod", Reason: reason}}
+
+		f := find(t, Diagnose(in), "config")
+
+		assert.Contains(t, f.Message, reason)
+		assert.Contains(t, f.Hint, "narrower directories")
+	}
+}
+
 func TestDiagnose_ProviderLoadErrorIsNamed(t *testing.T) {
 	in := healthy()
 	in.LoadErrors = []error{&provider.LoadError{Name: "sail-dirs", Err: errors.New(`path "sail/*" must be absolute or start with ~/`)}}

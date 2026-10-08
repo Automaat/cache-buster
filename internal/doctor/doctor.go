@@ -460,7 +460,7 @@ func configFindings(in Input) []Finding {
 		out = append(out, Finding{
 			Area: "config", Level: Warn,
 			Message: fmt.Sprintf("%s: %s; auto never cleans it", c.Provider, c.Reason),
-			Hint:    fmt.Sprintf("set providers.%s.enabled: false, or point its paths away from protected data", c.Provider),
+			Hint:    skipHint(c.Provider, c.Reason),
 		})
 	}
 	out = append(out, alwaysSkipped(in, conflicted)...)
@@ -542,6 +542,8 @@ func skipHint(name, reason string) string {
 	switch {
 	case strings.HasPrefix(reason, "protected path"):
 		return fmt.Sprintf("set providers.%s.enabled: false, or point its paths away from protected data", name)
+	case strings.HasPrefix(reason, "too large to verify"), strings.HasPrefix(reason, "cannot verify"):
+		return fmt.Sprintf("point providers.%s.paths at narrower directories, or set providers.%s.enabled: false", name, name)
 	case reason == "unavailable":
 		return fmt.Sprintf("install the tool %s needs, or set providers.%s.enabled: false", name, name)
 	default:

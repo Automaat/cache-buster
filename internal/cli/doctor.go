@@ -76,7 +76,7 @@ func runDoctorWithLoader(ctx context.Context, loader *config.Loader, env autoEnv
 		_, in.NotifierErr = lookPath(in.NotifierProgram)
 	}
 	if cfg != nil {
-		in.Conflicts = auto.ProtectionConflicts(cfg, env.home, env.newProvider)
+		in.Conflicts = auto.ProtectionConflicts(ctx, cfg, env.home, env.newProvider)
 		in.LoadErrors = auto.LoadErrors(cfg, env.newProvider)
 	}
 

@@ -20,7 +20,7 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: "1.27.1"
+          go-version-file: go.mod
 
       - name: Run golangci-lint
         uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
@@ -37,7 +37,7 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: "1.27.1"
+          go-version-file: go.mod
 
       - name: Install nilaway
         run: go install go.uber.org/nilaway/cmd/nilaway@v0.0.0-20260918162853-acb8859b9031
@@ -92,7 +92,7 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: "1.27.1"
+          go-version-file: go.mod
 
       - name: Run vet
         run: go vet ./...
@@ -123,7 +123,7 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: "1.27.1"
+          go-version-file: go.mod
 
       - name: Run govulncheck
         run: |
@@ -162,7 +162,7 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: "1.27.1"
+          go-version-file: go.mod
 
       - name: Build binary
         run: |
