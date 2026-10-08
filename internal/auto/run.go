@@ -60,6 +60,7 @@ type Report struct {
 	Tier      Tier
 	DryRun    bool
 	Recovered bool
+	EndStale  bool
 }
 
 // Previewed reports whether the run reached a pressure tier and at least one
@@ -136,6 +137,8 @@ func Run(ctx context.Context, cfg *config.Config, dryRun bool, deps Deps) (Repor
 
 	if end, freeErr := deps.Free(); freeErr == nil {
 		report.End = end
+	} else {
+		report.EndStale = true
 	}
 	fmt.Fprintf(deps.Out, "done: free %s\n", size.FormatSize(report.End.Free))
 	return report, nil

@@ -149,3 +149,16 @@ func TestScanUnmanaged_CancelWhileWorkersRunHasNoRace(t *testing.T) {
 
 	assert.NotNil(t, report)
 }
+
+func TestScanUnmanaged_RealDirCoveredThroughSymlinkedProviderPath(t *testing.T) {
+	root := t.TempDir()
+	mkdirFile(t, filepath.Join(root, "managed", "a.bin"), 100000)
+	mkdirFile(t, filepath.Join(root, "other", "a.bin"), 100000)
+	alias := filepath.Join(t.TempDir(), "alias")
+	require.NoError(t, os.Symlink(filepath.Join(root, "managed"), alias))
+
+	report := ScanUnmanaged(t.Context(), ScanOptions{Roots: []string{root}, Covered: []string{alias}, MinBytes: 1})
+
+	require.Len(t, report.Dirs, 1)
+	assert.Equal(t, "other", filepath.Base(report.Dirs[0].Path))
+}

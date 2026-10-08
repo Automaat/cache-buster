@@ -14,9 +14,10 @@ import (
 type Notifier func(ctx context.Context, title, message string) error
 
 // StillLow reports whether free space after the run is still under the
-// configured floors. A dry-run frees nothing, so it never counts.
+// configured floors. A dry-run frees nothing and an unreadable final
+// measurement proves nothing, so neither counts.
 func StillLow(report Report, cfg config.Auto) (bool, error) {
-	if report.DryRun {
+	if report.DryRun || report.EndStale {
 		return false, nil
 	}
 	return BelowFloor(report.End, cfg)

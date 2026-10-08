@@ -1,12 +1,14 @@
 package auto
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"runtime"
 	"testing"
 
 	"github.com/Automaat/cache-buster/internal/config"
+	"github.com/Automaat/cache-buster/internal/provider"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -99,4 +101,29 @@ func TestDefaultNotifier_OnlyWhereSupported(t *testing.T) {
 		return
 	}
 	assert.Nil(t, notify)
+}
+
+func TestRun_FailedFinalReadMarksEndStaleAndSuppressesNotification(t *testing.T) {
+	reads := 0
+	deps := Deps{
+		Free: func() (FreeSpace, error) {
+			reads++
+			if reads > 1 {
+				return FreeSpace{}, errors.New("statfs failed")
+			}
+			return FreeSpace{Free: gib, Total: 1000 * gib}, nil
+		},
+		NewProvider: func(string, config.Provider) (provider.Provider, error) { return nil, errors.New("none") },
+		Out:         &bytes.Buffer{},
+	}
+
+	report, err := Run(t.Context(), &config.Config{Auto: autoCfg()}, false, deps)
+
+	require.NoError(t, err)
+	assert.True(t, report.EndStale)
+	var sent []sentNote
+	got, err := NotifyIfStillLow(t.Context(), noteRecorder(&sent, nil), report, autoCfg())
+	require.NoError(t, err)
+	assert.False(t, got)
+	assert.Empty(t, sent)
 }
