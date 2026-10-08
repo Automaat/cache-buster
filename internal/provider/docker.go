@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os/exec"
+	"regexp"
 	"strings"
 	"time"
 
@@ -17,6 +18,8 @@ import (
 type DockerProvider struct {
 	*BaseProvider
 	cleanCmd string
+	// dfType restricts docker system df rows to one Type; empty sums all rows.
+	dfType string
 }
 
 // NewDockerProvider creates a Docker provider with availability checking.
@@ -28,18 +31,56 @@ func NewDockerProvider(name string, cfg config.Provider) (*DockerProvider, error
 
 	return &DockerProvider{
 		BaseProvider: base,
-		cleanCmd:     cfg.CleanCmd,
+		cleanCmd:     stripVolumesFlag(cfg.CleanCmd),
 	}, nil
+}
+
+var embeddedVolumesFlag = regexp.MustCompile(`\s--volumes(=\S*)?`)
+
+// stripVolumesFlag drops --volumes from configs written by older versions,
+// whose saved clean_cmd would otherwise keep deleting volumes.
+func stripVolumesFlag(cmd string) string {
+	parts, err := shellquote.Split(cmd)
+	if err != nil {
+		return cmd
+	}
+	kept := parts[:0]
+	for _, part := range parts {
+		if part == "--volumes" || strings.HasPrefix(part, "--volumes=") {
+			continue
+		}
+		// Wrapped commands such as sh -c carry the flag inside one token.
+		kept = append(kept, embeddedVolumesFlag.ReplaceAllString(part, ""))
+	}
+	return shellquote.Join(kept...)
+}
+
+// dockerVolumesDFType is the docker system df row type for volumes.
+const dockerVolumesDFType = "Local Volumes"
+
+// NewDockerVolumesProvider creates a provider that prunes only Docker volumes.
+func NewDockerVolumesProvider(name string, cfg config.Provider) (*DockerProvider, error) {
+	p, err := NewDockerProvider(name, cfg)
+	if err != nil {
+		return nil, err
+	}
+	p.dfType = dockerVolumesDFType
+	return p, nil
 }
 
 // dockerDFRow is one line of docker system df --format '{{json .}}' output.
 type dockerDFRow struct {
+	Type string `json:"Type"`
 	Size string `json:"Size"`
 }
 
 // CurrentSize returns actual Docker data usage from docker system df.
 // Falls back to path-based size if docker system df fails.
 func (p *DockerProvider) CurrentSize(ctx context.Context) (int64, error) {
+	// The path fallback measures the whole Docker VM, not just volumes.
+	if p.dfType != "" {
+		return p.dockerDataSize(ctx)
+	}
 	if b, err := p.dockerDataSize(ctx); err == nil {
 		return b, nil
 	}
@@ -78,6 +119,9 @@ func (p *DockerProvider) dockerDataSize(ctx context.Context) (int64, error) {
 			if firstErr == nil {
 				firstErr = fmt.Errorf("unmarshal docker df line %q: %w", line, jsonErr)
 			}
+			continue
+		}
+		if p.dfType != "" && row.Type != p.dfType {
 			continue
 		}
 		b, parseErr := size.ParseSize(row.Size)
@@ -120,7 +164,9 @@ func (p *DockerProvider) Clean(ctx context.Context, opts CleanOptions) (CleanRes
 		}, nil
 	}
 
-	if opts.Mode == CleanModeSmart {
+	// The until filter does not apply to volumes, so the volumes provider
+	// always runs its configured command.
+	if opts.Mode == CleanModeSmart && p.dfType == "" {
 		return p.smartClean(ctx, opts)
 	}
 	return p.fullClean(ctx, opts)
@@ -129,7 +175,7 @@ func (p *DockerProvider) Clean(ctx context.Context, opts CleanOptions) (CleanRes
 func (p *DockerProvider) smartClean(ctx context.Context, opts CleanOptions) (CleanResult, error) {
 	hours := max(int64(p.maxAge.Hours()), 1)
 	filterArg := fmt.Sprintf("until=%dh", hours)
-	args := []string{"docker", "system", "prune", "-af", "--volumes", "--filter", filterArg}
+	args := []string{"docker", "system", "prune", "-af", "--filter", filterArg}
 
 	if opts.DryRun {
 		return CleanResult{

@@ -106,7 +106,7 @@ func TestDockerCurrentSize_FallsBackToPathBased(t *testing.T) {
 	assert.Equal(t, int64(5), size)
 }
 
-func TestDockerSmartCleanDryRun_IncludesVolumes(t *testing.T) {
+func TestDockerSmartCleanDryRun_NeverIncludesVolumes(t *testing.T) {
 	fakeDockerBin(t, `exit 0`)
 
 	p := newTestDockerProvider(t, []string{t.TempDir()})
@@ -115,7 +115,7 @@ func TestDockerSmartCleanDryRun_IncludesVolumes(t *testing.T) {
 		DryRun: true,
 	})
 	require.NoError(t, err)
-	assert.Equal(t, "would run: docker system prune -af --volumes --filter until=720h", result.Output)
+	assert.Equal(t, "would run: docker system prune -af --filter until=720h", result.Output)
 }
 
 func TestDockerSmartClean_DaemonUnavailable(t *testing.T) {
@@ -179,4 +179,101 @@ esac`)
 	result, err := p.Clean(t.Context(), CleanOptions{Mode: CleanModeSmart})
 	require.Error(t, err)
 	assert.Contains(t, result.Output, "prune failed")
+}
+
+func TestDockerFullCleanDryRun_DefaultNeverIncludesVolumes(t *testing.T) {
+	fakeDockerBin(t, `exit 0`)
+
+	cfg, ok := config.DefaultConfig().GetProvider("docker")
+	require.True(t, ok)
+	cfg.Paths = []string{t.TempDir()}
+	p, err := NewProvider("docker", cfg)
+	require.NoError(t, err)
+
+	result, err := p.Clean(t.Context(), CleanOptions{Mode: CleanModeFull, DryRun: true})
+	require.NoError(t, err)
+	assert.Equal(t, "would run: docker system prune -af", result.Output)
+	assert.NotContains(t, result.Output, "--volumes")
+}
+
+func TestDockerVolumesDefault_DisabledAndPrunesVolumes(t *testing.T) {
+	fakeDockerBin(t, `exit 0`)
+
+	cfg, ok := config.DefaultConfig().GetProvider("docker-volumes")
+	require.True(t, ok)
+	assert.False(t, cfg.Enabled)
+	cfg.Paths = []string{t.TempDir()}
+
+	p, err := NewProvider("docker-volumes", cfg)
+	require.NoError(t, err)
+
+	for _, mode := range []CleanMode{CleanModeFull, CleanModeSmart} {
+		result, cleanErr := p.Clean(t.Context(), CleanOptions{Mode: mode, DryRun: true})
+		require.NoError(t, cleanErr)
+		assert.Equal(t, "would run: docker volume prune -f", result.Output)
+	}
+}
+
+func TestDockerVolumesSize_OnlyCountsVolumesRow(t *testing.T) {
+	fakeDockerBin(t, `echo '{"Type":"Images","Size":"9GB"}'
+echo '{"Type":"Local Volumes","Size":"2GB"}'
+echo '{"Type":"Build Cache","Size":"750MB"}'
+`)
+
+	p, err := NewDockerVolumesProvider("docker-volumes", config.Provider{
+		Paths:    []string{t.TempDir()},
+		MaxSize:  "10G",
+		CleanCmd: "docker volume prune -f",
+	})
+	require.NoError(t, err)
+
+	total, err := p.CurrentSize(t.Context())
+	require.NoError(t, err)
+	assert.Equal(t, int64(2*1024*1024*1024), total)
+}
+
+func TestDockerLegacyConfigVolumesFlagStripped(t *testing.T) {
+	fakeDockerBin(t, `exit 0`)
+
+	p, err := NewProvider("docker", config.Provider{
+		Paths:    []string{t.TempDir()},
+		MaxSize:  "10G",
+		CleanCmd: "docker system prune -af --volumes",
+	})
+	require.NoError(t, err)
+
+	result, err := p.Clean(t.Context(), CleanOptions{Mode: CleanModeFull, DryRun: true})
+	require.NoError(t, err)
+	assert.Equal(t, "would run: docker system prune -af", result.Output)
+}
+
+func TestDockerVolumesSize_NoVolumesRow_NoPathFallback(t *testing.T) {
+	fakeDockerBin(t, `echo '{"Type":"Images","Size":"9GB"}'
+`)
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "Docker.raw"), []byte("hello"), 0o600))
+
+	p, err := NewDockerVolumesProvider("docker-volumes", config.Provider{
+		Paths:    []string{dir},
+		MaxSize:  "10G",
+		CleanCmd: "docker volume prune -f",
+	})
+	require.NoError(t, err)
+
+	_, err = p.CurrentSize(t.Context())
+	require.Error(t, err)
+}
+
+func TestStripVolumesFlag(t *testing.T) {
+	tests := map[string]string{
+		"docker system prune -af --volumes":          "docker system prune -af",
+		"docker system prune --volumes=true -af":     "docker system prune -af",
+		`sh -c "docker system prune -af --volumes"`:  "sh -c 'docker system prune -af'",
+		"sh -c 'docker system prune -af\t--volumes'": "sh -c 'docker system prune -af'",
+		"docker system prune -af":                    "docker system prune -af",
+		"docker volume prune -f":                     "docker volume prune -f",
+	}
+	for in, want := range tests {
+		assert.Equal(t, want, stripVolumesFlag(in), in)
+	}
 }
