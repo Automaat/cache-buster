@@ -20,6 +20,7 @@ var DoctorCmd = &cobra.Command{
 	Long: `Checks, without changing anything:
 
   agent      installed and loaded in the scheduler of this OS
+  cadence    tick and full-pass intervals, the last tick and the next expected full pass
   last run   time, tier, bytes freed and errors from runs.jsonl
   free space current free space and its 7-day trend from the run history
   config     disabled providers, providers skipped on every recent run, protected-path conflicts
@@ -66,6 +67,8 @@ func runDoctorWithLoader(ctx context.Context, loader *config.Loader, env autoEnv
 
 	in.Runs, in.Corrupt, in.RunsErr = auto.ReadRuns(env.stateDir, 0)
 	in.FirstRunPending = auto.FirstRunPending(env.stateDir)
+	in.Tick, _ = auto.ReadTickState(env.stateDir)
+	in.Pass, _ = auto.ReadPassState(env.stateDir)
 
 	in.Free, in.FreeErr = env.free()
 

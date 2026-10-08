@@ -35,7 +35,7 @@ func shellQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
-// RenderCronLine builds the crontab entry that runs `exe auto`. Percent signs
+// RenderCronLine builds the crontab entry that runs `exe tick`. Percent signs
 // are escaped because cron turns an unescaped one into a newline.
 func RenderCronLine(exe, home, logPath string, interval time.Duration) (string, error) {
 	schedule, err := cronSchedule(interval)
@@ -45,7 +45,7 @@ func RenderCronLine(exe, home, logPath string, interval time.Duration) (string, 
 	if strings.ContainsAny(exe+logPath, "\n\r") {
 		return "", fmt.Errorf("paths must not contain line breaks")
 	}
-	command := fmt.Sprintf("env PATH=%s nice -n 10 %s auto >> %s 2>&1",
+	command := fmt.Sprintf("env PATH=%s nice -n 10 %s tick >> %s 2>&1",
 		shellQuote(systemdPath(home)), shellQuote(exe), shellQuote(logPath))
 	return schedule + " " + strings.ReplaceAll(command, "%", `\%`) + cronMarker(CronTag) + "\n", nil
 }

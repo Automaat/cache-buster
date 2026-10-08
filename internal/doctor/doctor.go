@@ -88,6 +88,9 @@ type Input struct {
 
 	FirstRunPending bool
 
+	Tick auto.TickState
+	Pass auto.PassState
+
 	NotifierProgram string
 	NotifierErr     error
 
@@ -114,6 +117,7 @@ func (r Report) Attention() int {
 // Diagnose runs every check.
 func Diagnose(in Input) Report {
 	findings := []Finding{agentFinding(in)}
+	findings = append(findings, cadenceFindings(in)...)
 	findings = append(findings, lastRunFindings(in)...)
 	findings = append(findings, freeSpaceFindings(in)...)
 	findings = append(findings, configFindings(in)...)
@@ -143,6 +147,57 @@ func agentFinding(in Input) Finding {
 		f.Message = fmt.Sprintf("installed and loaded (%s)", in.Agent.Backend)
 	}
 	return f
+}
+
+// tickStaleFactor missed ticks mean the scheduler is not running the agent.
+const tickStaleFactor = 3
+
+func cadenceFindings(in Input) []Finding {
+	if in.Cfg == nil {
+		return nil
+	}
+	limits, err := in.Cfg.Auto.Limits()
+	if err != nil {
+		return nil
+	}
+
+	out := []Finding{{
+		Area: "cadence",
+		Message: fmt.Sprintf("tick every %s, full pass every %s (low %s, critical %s)",
+			limits.TickInterval, limits.Interval, limits.LowCooldown, limits.CriticalCooldown),
+	}}
+
+	tick := Finding{Area: "last tick"}
+	switch {
+	case (in.Tick.Time.IsZero() || in.Tick.Time.After(in.Now)) && in.Agent.Installed:
+		tick.Level = Warn
+		tick.Message = "no tick recorded: the installed agent may still run the old 30-minute auto cadence"
+		tick.Hint = "run: bilgie install-agent"
+	case in.Tick.Time.IsZero() || in.Tick.Time.After(in.Now):
+		tick.Level = Note
+		tick.Message = "no tick recorded yet"
+	default:
+		age := in.Now.Sub(in.Tick.Time)
+		tick.Message = fmt.Sprintf("%s ago (tier %s, %s)", Age(age), in.Tick.Tier, in.Tick.Reason)
+		if in.Agent.Installed && age > tickStaleFactor*limits.TickInterval {
+			tick.Level = Fail
+			tick.Message += fmt.Sprintf("; ticks should come every %s: the agent is not ticking", limits.TickInterval)
+			tick.Hint = hintLog(in.LogPath, "run: bilgie install-agent to reinstall it")
+		}
+	}
+	out = append(out, tick, Finding{Area: "next full pass", Message: nextPass(in, limits.Interval)})
+	return out
+}
+
+func nextPass(in Input, interval time.Duration) string {
+	if in.Pass.Time.IsZero() || in.Pass.Time.After(in.Now) {
+		return "at the next tick (no pass recorded yet)"
+	}
+	due := in.Pass.Time.Add(interval)
+	if !due.After(in.Now) {
+		return "due at the next tick while space is healthy"
+	}
+	return fmt.Sprintf("in %s while space is healthy, sooner if free space is low or falling", Age(due.Sub(in.Now)))
 }
 
 func lastRunFindings(in Input) []Finding {
@@ -300,7 +355,7 @@ func freeSpaceFindings(in Input) []Finding {
 			switch tier {
 			case auto.TierLow:
 				f.Level = Warn
-			case auto.TierCritical:
+			case auto.TierCritical, auto.TierEmergency:
 				f.Level = Fail
 			case auto.TierOK:
 			}

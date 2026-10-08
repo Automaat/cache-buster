@@ -217,24 +217,61 @@ done: free 18 GiB
 `bytes`, `top` with `path` and `size_bytes`, and `skipped_entries` for directory-pattern providers)
 and to the document (`providers`, `skipped`, `errors`, `entries`, `bytes`).
 
-### auto
+### tick, auto and the agent
 
 ```bash
-bilgie auto             # Trim by free-space tier
+bilgie tick             # Cheap free-space check; starts a pass only when one is needed
+bilgie auto             # Run one full pass now (tier from free space)
 bilgie auto --dry-run   # Preview only
 bilgie auto --verbose   # List every entry
-bilgie install-agent    # Run auto every auto.interval with the OS scheduler
+bilgie install-agent    # Run tick every auto.tick_interval with the OS scheduler
 bilgie uninstall-agent  # Unload and remove everything install-agent created
 ```
 
-`auto` reads the free space of the data volume (`statfs` of `/System/Volumes/Data`)
+The scheduled agent runs `bilgie tick` every `auto.tick_interval` (default 2m). A tick reads free
+space of the data volume with one `statfs` call and decides; it walks no directory, sizes nothing
+and starts no provider unless it decides to run a pass. A healthy tick prints nothing
+(`bilgie tick --verbose` explains the decision). A tick exits at once when another pass holds the run lock.
+
+| Free space | What a tick does |
+|------------|------------------|
+| healthy | nothing, except a routine pass every `auto.interval` (default 30m) that trims providers over their limit |
+| low | a full pass, at most every `auto.low_cooldown` (default 10m) |
+| critical | the same pass at the shorter `auto.critical_cooldown` (default 2m); cheapest-to-rebuild providers go first and the pass stops as soon as space recovers |
+| emergency | as critical, with the stale-directory sweeps (`dir-pattern` providers such as `sail-dirs`, even when disabled) first |
+| falling | a low-tier pass when the projected free space crosses the low threshold within `auto.forecast` (default 15m) |
+
+Thresholds:
+
+- Low is `max(min_free, min(min_free_pct of the volume, min_free_cap))`. With the defaults
+  (`30G`, `5`, `100G`) that is 46 GiB on a 926 GiB disk and never more than 100 GiB, so a large
+  disk is not permanently "low". An explicit `min_free` above the cap is kept.
+- Critical is below `critical_free` (default 10G) and emergency below `emergency_free` (default 5G);
+  neither exceeds the level above it.
+- Hysteresis: a tier worsens at once but eases only after free space is `hysteresis` (default 2G)
+  above its threshold, and a pass runs until space is that far above the low threshold. Moving
+  from low to a worse tier skips the cooldown (never faster than every 30 seconds).
+- Forecast: the last 10 readings (kept in `~/.local/state/bilgie/tick.json`, at most 30 minutes old and
+  restarted after a gap) give one rate per interval. A pass starts when there are at least 5 readings, the
+  median rate falls faster than 50 MiB per minute, and the projection over `auto.forecast` is under the
+  low threshold. The median means one sudden drop is never a trend. `forecast: 0` turns it off.
+- Notifications: at most one per tier per `auto.notify_cooldown` (default 3h), unless free space
+  dropped by more than 10 GiB since that tier's last notification. A tier not yet notified (a worse
+  one) is always sent.
+
+`auto` still works as before and is a full pass on demand (it also resets the routine-pass timer).
+An agent installed by v0.10.0 ran `auto` every 30 minutes; run `bilgie install-agent` once to
+replace it with the tick agent (`bilgie doctor` warns while no tick has been recorded).
+
+`auto` reads free space of the data volume (`statfs` of `/System/Volumes/Data` on macOS)
 and always trims in smart mode (files older than `max_age`, then LRU to `max_size`):
 
 | Tier | Free space | What runs |
 |------|------------|-----------|
-| ok | at or above `min_free` and `min_free_pct` | only enabled providers over their limit |
-| low | below `min_free` or `min_free_pct` | every enabled provider, cheapest to rebuild first; stops as soon as free space is back above the thresholds |
-| critical | under 5 GiB | the stale-directory sweeps first (`dir-pattern` providers such as `sail-dirs`, even when disabled), then the low-tier trim |
+| ok | at or above the low threshold | only enabled providers over their limit |
+| low | below the low threshold | every enabled provider, cheapest to rebuild first; stops once free space is back above the threshold plus the hysteresis |
+| critical | below `critical_free` | the low-tier trim, scheduled at the short cooldown |
+| emergency | below `emergency_free` | the stale-directory sweeps first (`dir-pattern` providers such as `sail-dirs`, even when disabled), then the low-tier trim |
 
 Safety rules:
 
@@ -245,9 +282,9 @@ Safety rules:
 - Docker prune commands are cancelled after 10 minutes; command providers keep their `clean_timeout`.
 - Providers whose tool is busy are skipped, as in `clean`.
 - Two runs never overlap; a second one exits immediately.
-- The first run after `install-agent` is a dry-run that deletes nothing. A marker in
+- The first run after `install-agent` is a dry-run that deletes nothing, and a tick never runs a real pass while it is pending. A marker in
   `~/.local/state/bilgie/` records it, so it survives restarts and only a completed
-  dry-run in the low or critical tier, where at least one provider ran, clears it, and only when no provider failed. Running `install-agent` again arms it again.
+  dry-run below the low threshold, where at least one provider ran, clears it, and only when no provider failed. Running `install-agent` again arms it again.
 
 `install-agent` picks the scheduler of the running OS. Install from a built or installed
 binary, not `go run`; the job records the binary path, so run `install-agent` again after
@@ -255,14 +292,13 @@ moving it. The first run after install is a dry-run on every OS.
 
 | OS | Scheduler | What is written | Output |
 |----|-----------|-----------------|--------|
-| macOS | launchd agent, loaded with `launchctl bootstrap` | `~/Library/LaunchAgents/dev.mskalski.bilgie.plist` (`StartInterval` from `auto.interval`, `RunAtLoad`, low priority, a `PATH` with Homebrew, mise, Go, Cargo and Docker) | `~/Library/Logs/bilgie/auto.log` |
-| Linux | systemd user timer | `$XDG_CONFIG_HOME/systemd/user` (default `~/.config/systemd/user`) `bilgie.service` and `bilgie.timer` (first run a minute after enabling, then `auto.interval` after each run), enabled with `systemctl --user enable` | `~/.local/state/bilgie/auto.log` |
-| Linux without a systemd user manager | cron | one crontab line tagged `# bilgie`; other entries are kept | `~/.local/state/bilgie/auto.log` |
-| Windows | Task Scheduler task `bilgie`, created with `schtasks /Create /XML` | `~/.local/state/bilgie/bilgie-task.xml` (repeats every `auto.interval`, below-normal priority, runs only while you are logged on) | none |
+| macOS | launchd agent, loaded with `launchctl bootstrap` (an existing agent is booted out first) | `~/Library/LaunchAgents/dev.mskalski.bilgie.plist` (runs `tick`, `StartInterval` from `auto.tick_interval`, `RunAtLoad`, low priority, a `PATH` with Homebrew, mise, Go, Cargo and Docker) | `~/Library/Logs/bilgie/auto.log` |
+| Linux | systemd user timer | `$XDG_CONFIG_HOME/systemd/user` (default `~/.config/systemd/user`) `bilgie.service` and `bilgie.timer` (runs `tick`; first run a minute after enabling, then `auto.tick_interval` after each run; existing units are rewritten and the timer restarted), enabled with `systemctl --user enable` | `~/.local/state/bilgie/auto.log` |
+| Linux without a systemd user manager | cron | one crontab line tagged `# bilgie` running `tick`; other entries are kept and an earlier line is replaced | `~/.local/state/bilgie/auto.log` |
+| Windows | Task Scheduler task `bilgie`, created with `schtasks /Create /XML` | `~/.local/state/bilgie/bilgie-task.xml` (runs `tick`, repeats every `auto.tick_interval`, below-normal priority, runs only while you are logged on) | none |
 
-Cron fires on fixed minute and hour marks, so the cron fallback only accepts an `auto.interval`
-that divides an hour or a day evenly (1m, 2m, 5m, 10m, 15m, 20m, 30m, 1h, 2h, 3h, 4h, 6h, 8h, 12h,
-24h) and refuses any other. Installing the systemd timer removes an earlier cron entry and the cron fallback removes earlier systemd units.
+Cron fires on fixed minute and hour marks, so the cron fallback only accepts an `auto.tick_interval`
+that divides an hour or a day evenly (1m, 2m, 5m, 10m, 15m, 20m, 30m, 1h) and refuses any other. Installing the systemd timer removes an earlier cron entry and the cron fallback removes earlier systemd units.
 The systemd user timer runs only while your user manager is up; on a headless box run
 `loginctl enable-linger $USER` so it survives logout, otherwise install falls back to cron.
 `uninstall-agent` removes the job, its definition
@@ -290,7 +326,7 @@ docker    7     0 B       0 B         2        5
 ```
 
 `history` skips unreadable lines and reports how many. When a real run (not a dry-run) ends with
-free space still under `min_free` or `min_free_pct`, `auto` shows one desktop notification (`osascript` on macOS, `notify-send` on Linux, a PowerShell toast on
+free space still under the low threshold, the pass shows one desktop notification (rate limited as above) (`osascript` on macOS, `notify-send` on Linux, a PowerShell toast on
 Windows); a run that recovered enough space stays quiet. A notifier that is not installed is logged as a skipped
 notification. A failed notification or log write is reported but does not fail the run, and a notifier is
 cancelled after 10 seconds so it cannot hold the run lock.
@@ -303,7 +339,8 @@ bilgie doctor
 
 Checks, without changing anything, that the agent works: it is installed and loaded in the
 scheduler of this OS (`launchctl print`, `systemctl --user is-active` or the crontab, `schtasks`),
-the last run (time, tier, bytes freed, errors from `runs.jsonl`) is recent for `auto.interval`,
+the cadence (tick and full-pass intervals), the last tick (it must be recent for `auto.tick_interval`; a missing tick
+means the installed agent is still the old 30-minute `auto` one) and the next expected full pass, the last run (time, tier, bytes freed, errors from `runs.jsonl`) is recent for `auto.interval`,
 free space is above the floors, the 7-day free-space trend from the run history, config problems
 (disabled providers, providers skipped on each of the last runs for a reason other than
 "within limit", providers on protected paths) and whether the notifier program exists.
@@ -312,6 +349,9 @@ It exits non-zero when a finding needs attention; each one carries a "what to do
 ```text
 $ bilgie doctor
 [ok  ] agent: installed and loaded (launchd)
+[ok  ] cadence: tick every 2m0s, full pass every 30m0s (low 10m0s, critical 2m0s)
+[ok  ] last tick: 1m ago (tier low, low: next pass in 7m0s)
+[ok  ] next full pass: in 21m while space is healthy, sooner if free space is low or falling
 [FAIL] last run: 9h ago (tier low, freed 4.1 GiB, 1 provider error(s)); failed: docker
        what to do: see /Users/me/Library/Logs/bilgie/auto.log; run: bilgie auto --dry-run --verbose to see each error
 [FAIL] schedule: last run was 9h ago but the interval is 30m0s: the agent is not running
@@ -375,14 +415,25 @@ providers:
 | `skip_if_git_worktree` | `dir-pattern`: skip directories containing a `.git` entry (default `true`) |
 | `skip_prefixes` | Whole-entry providers never evict entries whose name starts with one of these prefixes; user values add to the built-in ones |
 
-The optional top-level `auto` block configures `bilgie auto`:
+The optional top-level `auto` block configures `bilgie tick`, `bilgie auto` and the agent. Every key is optional; the values shown are the defaults:
 
 ```yaml
 auto:
-  interval: 30m      # scheduler interval, minimum 1m
-  min_free: 30G      # below this, trim every enabled provider
-  min_free_pct: 15   # or below this percentage of the volume (0 disables)
+  tick_interval: 2m         # how often the agent checks free space (whole minutes, minimum 1m)
+  interval: 30m             # routine full pass while space is healthy (minimum 1m)
+  min_free: 30G             # low threshold: absolute floor
+  min_free_pct: 5           # ... or this percentage of the volume (0 disables)
+  min_free_cap: 100G        # the percentage part never exceeds this
+  critical_free: 10G        # critical tier below this
+  emergency_free: 5G        # emergency tier below this (stale-directory sweeps)
+  hysteresis: 2G            # a tier eases only this far above its threshold
+  low_cooldown: 10m         # minimum gap between passes at the low tier
+  critical_cooldown: 2m     # ... at the critical and emergency tiers
+  forecast: 15m             # pass when the falling trend crosses the low threshold within this (0 disables)
+  notify_cooldown: 3h       # minimum gap between notifications of one tier
 ```
+
+A config that sets `min_free_pct: 15` keeps that value, but the percentage part is still limited by `min_free_cap` (100G by default): on a 2 TB volume the low threshold is 100G, not 300G. Raise `min_free_cap` to restore the old threshold.
 
 The optional top-level `protected` list names paths that `auto` never deletes from and that `status`
 reports under "needs a human":

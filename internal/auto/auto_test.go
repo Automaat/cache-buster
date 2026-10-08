@@ -23,7 +23,7 @@ import (
 const gib = int64(1) << 30
 
 func autoCfg() config.Auto {
-	return config.Auto{Interval: "30m", MinFree: "30G", MinFreePct: 15}
+	return config.Auto{Interval: "30m", MinFree: "30G", MinFreePct: 15, MinFreeCap: "200G"}
 }
 
 func TestChooseTier(t *testing.T) {
@@ -40,10 +40,17 @@ func TestChooseTier(t *testing.T) {
 		{"under pct floor only", autoCfg(), 100 * gib, TierLow},
 		{"under min_free only", config.Auto{MinFree: "200G", MinFreePct: 1}, 150 * gib, TierLow},
 		{"pct disabled", config.Auto{MinFree: "30G", MinFreePct: 0}, 40 * gib, TierOK},
-		{"just above critical", autoCfg(), 5*gib + 1, TierLow},
-		{"exactly critical boundary", autoCfg(), 5 * gib, TierLow},
-		{"just under critical", autoCfg(), 5*gib - 1, TierCritical},
-		{"nearly full", autoCfg(), 400 << 20, TierCritical},
+		{"just above critical", autoCfg(), 10*gib + 1, TierLow},
+		{"exactly critical boundary", autoCfg(), 10 * gib, TierLow},
+		{"just under critical", autoCfg(), 10*gib - 1, TierCritical},
+		{"just above emergency", autoCfg(), 5*gib + 1, TierCritical},
+		{"exactly emergency boundary", autoCfg(), 5 * gib, TierCritical},
+		{"just under emergency", autoCfg(), 5*gib - 1, TierEmergency},
+		{"nearly full", autoCfg(), 400 << 20, TierEmergency},
+		{"large disk default is not permanently low", config.Auto{}, 139 * gib, TierOK},
+		{"cap bounds the pct floor", config.Auto{MinFree: "30G", MinFreePct: 15}, 101 * gib, TierOK},
+		{"below the cap is low", config.Auto{MinFree: "30G", MinFreePct: 15}, 99 * gib, TierLow},
+		{"explicit min_free above the cap is kept", config.Auto{MinFree: "200G", MinFreePct: 15}, 150 * gib, TierLow},
 		{"blank settings use defaults", config.Auto{MinFreePct: 0}, 20 * gib, TierLow},
 	}
 	for _, tt := range tests {
@@ -77,6 +84,7 @@ func TestTierString(t *testing.T) {
 	assert.Equal(t, "ok", TierOK.String())
 	assert.Equal(t, "low", TierLow.String())
 	assert.Equal(t, "critical", TierCritical.String())
+	assert.Equal(t, "emergency", TierEmergency.String())
 	assert.Equal(t, "unknown", Tier(9).String())
 }
 
@@ -241,7 +249,7 @@ func TestRun_CriticalSweepsFirstEvenWhenDisabled(t *testing.T) {
 	report, err := h.run(false, 2*gib)
 
 	require.NoError(t, err)
-	assert.Equal(t, TierCritical, report.Tier)
+	assert.Equal(t, TierEmergency, report.Tier)
 	assert.Equal(t, []string{"sail-dirs", "npm"}, h.calls)
 }
 
@@ -634,7 +642,7 @@ func TestRenderPlist_ValidXMLWithExpectedKeys(t *testing.T) {
 	text := string(data)
 	assert.Contains(t, tokens, AgentLabel)
 	assert.Contains(t, tokens, "/Users/me/bin/cache&buster", "ampersand must round-trip through escaping")
-	assert.Contains(t, tokens, "auto")
+	assert.Contains(t, tokens, "tick")
 	assert.Contains(t, text, "<key>StartInterval</key>\n\t<integer>1800</integer>")
 	assert.Contains(t, text, "<key>RunAtLoad</key>\n\t<true/>")
 	assert.Contains(t, text, "/Users/me/.local/share/mise/shims")
@@ -874,7 +882,7 @@ func TestReport_Previewed(t *testing.T) {
 	assert.False(t, Report{Tier: TierLow, Results: []Result{{Status: StatusError}, {Status: StatusSkipped}}}.Previewed())
 	assert.False(t, Report{Tier: TierLow}.Previewed())
 	assert.True(t, Report{Tier: TierLow, Results: []Result{{Status: StatusError}, {Status: StatusDryRun}}}.Previewed())
-	assert.True(t, Report{Tier: TierCritical, Results: ran}.Previewed())
+	assert.True(t, Report{Tier: TierEmergency, Results: ran}.Previewed())
 }
 
 func TestAgentUninstall_UnrecognisedBootoutAndPrintFailureKeepsState(t *testing.T) {

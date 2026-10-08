@@ -36,14 +36,14 @@ func readRecords(t *testing.T, f *autoFixture) []auto.RunRecord {
 }
 
 func TestAuto_AppendsOneRecordPerRunAndHistoryReadsItBack(t *testing.T) {
-	f := newAutoFixture(t, 100*autoGiB, "")
+	f := newAutoFixture(t, 40*autoGiB, "")
 
 	require.NoError(t, runAutoWithLoader(t.Context(), f.loader, f.env, false))
 
 	runs := readRecords(t, f)
 	require.Len(t, runs, 1)
 	assert.Equal(t, "low", runs[0].Tier)
-	assert.Equal(t, 100*autoGiB, runs[0].FreeBefore)
+	assert.Equal(t, 40*autoGiB, runs[0].FreeBefore)
 	require.Len(t, runs[0].Providers, 1)
 	assert.Equal(t, "tool", runs[0].Providers[0].Name)
 	assert.Equal(t, auto.StatusCleaned, runs[0].Providers[0].Status)
@@ -68,7 +68,7 @@ func TestAuto_RecordsSkippedProvidersWithReasons(t *testing.T) {
 
 func TestAuto_NotifiesOnlyWhenStillUnderThreshold(t *testing.T) {
 	t.Run("space stays low", func(t *testing.T) {
-		f := newAutoFixture(t, 100*autoGiB, "")
+		f := newAutoFixture(t, 40*autoGiB, "")
 		var notes noteLog
 		f.env.notify = notes.notifier(nil)
 
@@ -79,7 +79,7 @@ func TestAuto_NotifiesOnlyWhenStillUnderThreshold(t *testing.T) {
 	})
 
 	t.Run("cleanup recovers space", func(t *testing.T) {
-		f := newAutoFixture(t, 100*autoGiB, "")
+		f := newAutoFixture(t, 40*autoGiB, "")
 		var notes noteLog
 		f.env.notify = notes.notifier(nil)
 		f.env.free = func() (auto.FreeSpace, error) {
@@ -118,7 +118,7 @@ func TestAuto_NotifiesOnlyWhenStillUnderThreshold(t *testing.T) {
 }
 
 func TestAuto_NotifierFailureDoesNotFailTheRun(t *testing.T) {
-	f := newAutoFixture(t, 100*autoGiB, "")
+	f := newAutoFixture(t, 40*autoGiB, "")
 	var notes noteLog
 	f.env.notify = notes.notifier(errors.New("no permission"))
 
@@ -131,7 +131,7 @@ func TestAuto_NotifierFailureDoesNotFailTheRun(t *testing.T) {
 }
 
 func TestAuto_RecordFailureDoesNotFailTheRun(t *testing.T) {
-	f := newAutoFixture(t, 100*autoGiB, "")
+	f := newAutoFixture(t, 40*autoGiB, "")
 	require.NoError(t, os.MkdirAll(filepath.Join(f.env.stateDir, auto.RunLogName), 0o750))
 
 	require.NoError(t, runAutoWithLoader(t.Context(), f.loader, f.env, false))
@@ -141,7 +141,7 @@ func TestAuto_RecordFailureDoesNotFailTheRun(t *testing.T) {
 }
 
 func TestAuto_ProviderErrorStillRecorded(t *testing.T) {
-	f := newAutoFixture(t, 100*autoGiB, "")
+	f := newAutoFixture(t, 40*autoGiB, "")
 	f.env.newProvider = func(string, config.Provider) (provider.Provider, error) { return nil, os.ErrInvalid }
 
 	require.Error(t, runAutoWithLoader(t.Context(), f.loader, f.env, false))
@@ -242,7 +242,7 @@ func TestStatus_ListsUnmanagedDirsFromInjectedScan(t *testing.T) {
 }
 
 func TestAuto_FreeSpaceReadFailureIsStillRecorded(t *testing.T) {
-	f := newAutoFixture(t, 100*autoGiB, "")
+	f := newAutoFixture(t, 40*autoGiB, "")
 	f.env.free = func() (auto.FreeSpace, error) { return auto.FreeSpace{}, os.ErrInvalid }
 
 	require.Error(t, runAutoWithLoader(t.Context(), f.loader, f.env, false))
