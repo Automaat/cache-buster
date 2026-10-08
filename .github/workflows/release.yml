@@ -76,11 +76,13 @@ jobs:
           git tag -a "$VERSION" -m "Release $VERSION"
           git push origin "$VERSION"
 
-      - name: Validate Homebrew token
-        run: |
-          if [ -z "${{ secrets.HOMEBREW_TAP_TOKEN }}" ]; then
-            echo "Warning: HOMEBREW_TAP_TOKEN secret is not set. Homebrew tap publishing will be skipped."
-          fi
+      - name: Generate App Token
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ vars.SMYKLOT_APP_ID }}
+          private-key: ${{ secrets.SMYKLOT_APP_PRIVATE_KEY }}
+          repositories: bilgie,homebrew-tap
 
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
@@ -89,5 +91,4 @@ jobs:
           version: v2.18.2
           args: release --clean
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}

@@ -48,19 +48,28 @@ changelog:
 brews:
   - name: bilgie
     repository:
-      owner: Automaat
+      owner: smykla-skalski
       name: homebrew-tap
-      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
-    commit_author:
-      name: goreleaser-bot
-      email: bot@goreleaser.com
+      branch: main
+      token: "{{ .Env.GITHUB_TOKEN }}"
+    directory: Formula
+    commit_msg_template: "chore(formula): update bilgie to {{ .Tag }}"
     homepage: "https://github.com/smykla-skalski/bilgie"
-    description: "Developer cache manager with configurable size limits"
+    description: "Disk-pressure janitor for dev machines running many agents"
     license: "MIT"
     install: |
       bin.install "bilgie"
+      generate_completions_from_executable(bin/"bilgie", "completion")
     test: |
-      system "#{bin}/bilgie --version"
+      system "#{bin}/bilgie", "--version"
+    caveats: |
+      To start the background janitor:
+
+        bilgie install-agent
+
+      The first run is a dry-run. Check cache sizes with:
+
+        bilgie status
 
 release:
   github:
