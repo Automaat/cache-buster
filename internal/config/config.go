@@ -4,12 +4,92 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
+
+	"github.com/Automaat/cache-buster/pkg/size"
 )
 
 // Config holds cache-buster configuration.
 type Config struct {
 	Providers map[string]Provider `mapstructure:"providers" yaml:"providers"`
 	Version   string              `mapstructure:"version" yaml:"version"`
+	Auto      Auto                `mapstructure:"auto" yaml:"auto"`
+}
+
+// Auto configures the unattended auto command and its launchd agent.
+type Auto struct {
+	// Interval is how often the launchd agent runs auto (default 30m).
+	Interval string `mapstructure:"interval" yaml:"interval"`
+	// MinFree is the free-space floor; below it auto trims every enabled provider (default 30G).
+	MinFree string `mapstructure:"min_free" yaml:"min_free"`
+	// MinFreePct is the free-space floor as a percentage of the volume (default 15).
+	MinFreePct float64 `mapstructure:"min_free_pct" yaml:"min_free_pct"`
+}
+
+// Auto defaults.
+const (
+	DefaultAutoInterval   = "30m"
+	DefaultAutoMinFree    = "30G"
+	DefaultAutoMinFreePct = 15.0
+)
+
+// MinAutoInterval is the shortest accepted agent interval.
+const MinAutoInterval = time.Minute
+
+// DefaultAuto returns the auto settings used when the config omits them.
+func DefaultAuto() Auto {
+	return Auto{Interval: DefaultAutoInterval, MinFree: DefaultAutoMinFree, MinFreePct: DefaultAutoMinFreePct}
+}
+
+// Resolved fills blank interval and min_free with their defaults.
+func (a Auto) Resolved() Auto {
+	if strings.TrimSpace(a.Interval) == "" {
+		a.Interval = DefaultAutoInterval
+	}
+	if strings.TrimSpace(a.MinFree) == "" {
+		a.MinFree = DefaultAutoMinFree
+	}
+	return a
+}
+
+// IntervalDuration parses Interval.
+func (a Auto) IntervalDuration() (time.Duration, error) {
+	a = a.Resolved()
+	d, err := ParseDuration(a.Interval)
+	if err != nil {
+		return 0, fmt.Errorf("interval: %w", err)
+	}
+	if d < MinAutoInterval {
+		return 0, fmt.Errorf("interval must be at least %s, got %q", MinAutoInterval, a.Interval)
+	}
+	return d, nil
+}
+
+// MinFreeBytes parses MinFree.
+func (a Auto) MinFreeBytes() (int64, error) {
+	a = a.Resolved()
+	b, err := size.ParseSize(a.MinFree)
+	if err != nil {
+		return 0, fmt.Errorf("min_free: %w", err)
+	}
+	if b < 0 {
+		return 0, fmt.Errorf("min_free must not be negative, got %q", a.MinFree)
+	}
+	return b, nil
+}
+
+// Validate checks the auto settings.
+func (a Auto) Validate() error {
+	if _, err := a.IntervalDuration(); err != nil {
+		return err
+	}
+	if _, err := a.MinFreeBytes(); err != nil {
+		return err
+	}
+	if a.MinFreePct < 0 || a.MinFreePct > 100 {
+		return fmt.Errorf("min_free_pct must be between 0 and 100, got %v", a.MinFreePct)
+	}
+	return nil
 }
 
 // Provider defines a cache provider's settings.
@@ -39,6 +119,9 @@ const TypeDirPattern = "dir-pattern"
 
 // Validate checks config for required fields.
 func (c *Config) Validate() error {
+	if err := c.Auto.Validate(); err != nil {
+		return fmt.Errorf("auto: %w", err)
+	}
 	for name := range c.Providers {
 		p := c.Providers[name]
 		if strings.Contains(name, ".") {

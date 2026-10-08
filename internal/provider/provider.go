@@ -49,6 +49,9 @@ type DiskSizer interface {
 type CleanOptions struct {
 	DryRun bool
 	Mode   CleanMode
+	// Timeout bounds Docker's prune command when positive. Other providers
+	// keep their own clean_timeout. Zero leaves Docker unbounded.
+	Timeout time.Duration
 }
 
 // CleanResult contains cleaning operation results.

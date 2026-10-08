@@ -8,7 +8,8 @@ macOS developer cache manager with configurable size limits. Monitors and cleans
 cmd/cache-buster/     - CLI entrypoint
 internal/
   cache/              - Cache size scanning
-  cli/                - Cobra command implementations (status, clean, config)
+  auto/               - Free-space tiers, auto run, launchd agent, first-run marker
+  cli/                - Cobra command implementations (status, clean, config, auto, install-agent)
   config/             - Config loading, defaults, validation
   provider/           - Provider interface + implementations (command, file, docker)
 pkg/size/             - Human-readable size parsing/formatting

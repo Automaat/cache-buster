@@ -42,7 +42,7 @@ func (l *Loader) path() (string, error) {
 func (l *Loader) Load() (*Config, error) {
 	var cfg *Config
 	if l.skipDefaults {
-		cfg = &Config{Version: "1", Providers: make(map[string]Provider)}
+		cfg = &Config{Version: "1", Providers: make(map[string]Provider), Auto: DefaultAuto()}
 	} else {
 		cfg = DefaultConfig()
 	}
@@ -66,6 +66,8 @@ func (l *Loader) Load() (*Config, error) {
 	if err := l.v.Unmarshal(&userCfg); err != nil {
 		return nil, fmt.Errorf("unmarshal config: %w", err)
 	}
+
+	l.mergeAuto(cfg, &userCfg)
 
 	// Merge user overrides on top of defaults, field by field.
 	for name := range userCfg.Providers {
@@ -117,6 +119,19 @@ func (l *Loader) Load() (*Config, error) {
 	return cfg, nil
 }
 
+// mergeAuto applies the user's auto settings over the defaults, field by field.
+func (l *Loader) mergeAuto(cfg, userCfg *Config) {
+	if l.v.IsSet("auto.interval") {
+		cfg.Auto.Interval = userCfg.Auto.Interval
+	}
+	if l.v.IsSet("auto.min_free") {
+		cfg.Auto.MinFree = userCfg.Auto.MinFree
+	}
+	if l.v.IsSet("auto.min_free_pct") {
+		cfg.Auto.MinFreePct = userCfg.Auto.MinFreePct
+	}
+}
+
 // LoadOrCreate loads config (always merges with defaults). Returns (config, created, error).
 //
 // Deprecated: Use Load() instead. The created return value is always false.
@@ -146,6 +161,10 @@ func (l *Loader) Save(cfg *Config) error {
 		"providers": cfg.Providers,
 	} {
 		l.v.Set(key, value)
+	}
+	// Defaults stay out of the file so a later default change still applies.
+	if cfg.Auto != DefaultAuto() {
+		l.v.Set("auto", cfg.Auto)
 	}
 
 	return l.v.WriteConfigAs(configPath)

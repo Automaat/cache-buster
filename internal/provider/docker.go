@@ -171,14 +171,19 @@ func (p *DockerProvider) dockerDataSize(ctx context.Context) (int64, error) {
 	return total, nil
 }
 
+// dockerProbeTimeout bounds the daemon probe so a wedged Docker Desktop cannot hang a run.
+const dockerProbeTimeout = 15 * time.Second
+
 // Available implements Provider.
 func (p *DockerProvider) Available() bool {
 	if _, err := exec.LookPath("docker"); err != nil {
 		return false
 	}
 
-	cmd := exec.Command("docker", "ps", "--quiet")
-	return cmd.Run() == nil
+	ctx, cancel := context.WithTimeout(context.Background(), dockerProbeTimeout)
+	defer cancel()
+
+	return exec.CommandContext(ctx, "docker", "ps", "--quiet").Run() == nil
 }
 
 // Clean implements Provider.
@@ -208,7 +213,7 @@ func (p *DockerProvider) smartClean(ctx context.Context, opts CleanOptions) (Cle
 		}, nil
 	}
 
-	return runMeasuredClean(ctx, p.name, args, p.CurrentSize)
+	return runMeasuredCleanTimeout(ctx, p.name, args, p.CurrentSize, opts.Timeout)
 }
 
 func (p *DockerProvider) fullClean(ctx context.Context, opts CleanOptions) (CleanResult, error) {
@@ -223,5 +228,5 @@ func (p *DockerProvider) fullClean(ctx context.Context, opts CleanOptions) (Clea
 		return CleanResult{}, fmt.Errorf("invalid command: %w", err)
 	}
 
-	return runMeasuredClean(ctx, p.name, parts, p.CurrentSize)
+	return runMeasuredCleanTimeout(ctx, p.name, parts, p.CurrentSize, opts.Timeout)
 }
