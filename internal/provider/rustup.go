@@ -1,0 +1,193 @@
+package provider
+
+import (
+	"bytes"
+	"context"
+	"errors"
+	"fmt"
+	"os/exec"
+	"regexp"
+	"strings"
+
+	"github.com/Automaat/cache-buster/internal/config"
+)
+
+// rustupRunner runs rustup with args and returns its combined output.
+type rustupRunner func(ctx context.Context, args ...string) (string, error)
+
+// RustupProvider uninstalls rustup toolchains other than stable and the default.
+type RustupProvider struct {
+	*BaseProvider
+	run rustupRunner
+}
+
+// NewRustupProvider creates a provider that uninstalls unused toolchains.
+func NewRustupProvider(name string, cfg config.Provider) (*RustupProvider, error) {
+	base, err := NewBaseProvider(name, cfg)
+	if err != nil {
+		return nil, err
+	}
+	return &RustupProvider{BaseProvider: base, run: execRustup}, nil
+}
+
+func execRustup(ctx context.Context, args ...string) (string, error) {
+	cmd := exec.CommandContext(ctx, "rustup", args...)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	err := cmd.Run()
+	// Stdout only: stderr notices must never be parsed as toolchain rows.
+	if err != nil {
+		return strings.TrimSpace(stdout.String() + stderr.String()), err
+	}
+	return strings.TrimSpace(stdout.String()), nil
+}
+
+// Available reports whether rustup is on PATH.
+func (p *RustupProvider) Available() bool {
+	_, err := exec.LookPath("rustup")
+	return err == nil
+}
+
+// Clean implements Provider. Smart and full modes behave the same: a
+// toolchain is removed whole or not at all.
+func (p *RustupProvider) Clean(ctx context.Context, opts CleanOptions) (CleanResult, error) {
+	current, sizeErr := p.CurrentSize(ctx)
+	if sizeErr == nil && current <= p.maxSize {
+		return CleanResult{Output: "already under limit"}, nil
+	}
+
+	listing, err := p.run(ctx, "toolchain", "list")
+	if err != nil {
+		return CleanResult{Output: listing}, fmt.Errorf("rustup toolchain list: %w", err)
+	}
+
+	overrides, err := p.run(ctx, "override", "list")
+	if err != nil {
+		return CleanResult{Output: overrides}, fmt.Errorf("rustup override list: %w", err)
+	}
+
+	removable, err := removableToolchains(listing, overrides)
+	if err != nil {
+		return CleanResult{}, err
+	}
+	if len(removable) == 0 {
+		return CleanResult{Output: "no old toolchains to remove"}, nil
+	}
+
+	if opts.DryRun {
+		return CleanResult{Output: "would uninstall: " + strings.Join(removable, ", ")}, nil
+	}
+
+	sizeBefore, beforeErr := current, sizeErr
+	var removed []string
+	for _, tc := range removable {
+		if ctx.Err() != nil {
+			return CleanResult{Output: "interrupted"}, ctx.Err()
+		}
+		if out, err := p.run(ctx, "toolchain", "uninstall", tc); err != nil {
+			return CleanResult{Output: out}, fmt.Errorf("uninstall %s: %w", tc, err)
+		}
+		removed = append(removed, tc)
+	}
+
+	var freed int64
+	if sizeAfter, afterErr := p.CurrentSize(ctx); beforeErr == nil && afterErr == nil && sizeBefore > sizeAfter {
+		freed = sizeBefore - sizeAfter
+	}
+	return CleanResult{
+		BytesCleaned: freed,
+		Output:       "uninstalled: " + strings.Join(removed, ", "),
+	}, nil
+}
+
+// removableToolchains parses `rustup toolchain list` and returns toolchains
+// safe to uninstall. It fails closed: without an identifiable default
+// toolchain nothing is removed.
+func removableToolchains(listing, overrides string) ([]string, error) {
+	pinned := overrideToolchains(overrides)
+	var (
+		names      []string
+		keep       = map[string]bool{}
+		hasDefault bool
+	)
+	for line := range strings.SplitSeq(listing, "\n") {
+		fields := strings.Fields(line)
+		if strings.HasPrefix(strings.TrimSpace(line), "no installed toolchains") {
+			continue
+		}
+		if len(fields) == 0 || !toolchainNamePattern.MatchString(fields[0]) {
+			continue
+		}
+		name := fields[0]
+		names = append(names, name)
+
+		marker := toolchainMarker(fields[1:])
+		if strings.Contains(marker, "default") {
+			hasDefault = true
+			keep[name] = true
+		}
+		if isPinned(name, pinned) || strings.Contains(marker, "active") || strings.Contains(marker, "override") || isStableToolchain(name) {
+			keep[name] = true
+		}
+	}
+	if len(names) == 0 {
+		return nil, nil
+	}
+	if !hasDefault {
+		return nil, errors.New("rustup: no default toolchain found, refusing to remove any")
+	}
+
+	var removable []string
+	for _, name := range names {
+		if !keep[name] {
+			removable = append(removable, name)
+		}
+	}
+	return removable, nil
+}
+
+var toolchainNamePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
+
+// toolchainMarker returns the parenthesised suffix of a listing row. A
+// linked toolchain's path is not a marker.
+func toolchainMarker(rest []string) string {
+	if len(rest) == 0 || !strings.HasPrefix(rest[0], "(") {
+		return ""
+	}
+	joined := strings.Join(rest, " ")
+	if !strings.HasSuffix(joined, ")") {
+		return ""
+	}
+	return joined
+}
+
+// overrideToolchains returns the toolchain names pinned by directory
+// overrides, from `rustup override list` rows of "<path> <toolchain>".
+func overrideToolchains(overrides string) []string {
+	var pinned []string
+	for line := range strings.SplitSeq(overrides, "\n") {
+		fields := strings.Fields(line)
+		if len(fields) < 2 {
+			continue
+		}
+		if tc := fields[len(fields)-1]; toolchainNamePattern.MatchString(tc) {
+			pinned = append(pinned, tc)
+		}
+	}
+	return pinned
+}
+
+// isPinned matches full names and bare channels such as 1.75.0 or nightly.
+func isPinned(name string, pinned []string) bool {
+	for _, p := range pinned {
+		if name == p || strings.HasPrefix(name, p+"-") {
+			return true
+		}
+	}
+	return false
+}
+
+func isStableToolchain(name string) bool {
+	return name == "stable" || strings.HasPrefix(name, "stable-")
+}
