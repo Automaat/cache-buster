@@ -418,7 +418,7 @@ the cadence (tick and full-pass intervals), the last tick (it must be recent for
 means the installed agent is still the old 30-minute `auto` one) and the next expected full pass, the last run (time, tier, bytes freed, errors from `runs.jsonl`) is recent for `auto.interval`,
 free space is above the floors, the 7-day free-space trend from the run history, config problems
 (disabled providers, providers skipped on each of the last runs for a reason other than
-"within limit", providers on protected paths) and whether the notifier program exists.
+"within limit", providers on protected paths, providers whose config does not load) and whether the notifier program exists.
 It exits non-zero when a finding needs attention; each one carries a "what to do" line.
 
 ```text
@@ -555,7 +555,19 @@ terminal.
 
 `clean --json` needs `--force` or `--dry-run` because it cannot prompt.
 
-`dir-pattern` paths must contain a glob character. The provider ignores
+`dir-pattern` paths must contain a glob character and be absolute or start with `~/`,
+and `min_idle` must parse. A provider whose config does not load is not hidden:
+`clean`, `status`, `auto` and `doctor` print `provider <name>: <reason>` (the same text goes into the
+`--json` output and the run log) and every other provider still runs. `auto` refuses a whole config that
+fails validation (a relative or glob-less path) and names the offending provider in that error.
+
+Sizes and freed bytes count each hard-linked file once, across all matched directories and in dry-run
+totals; a `dir-pattern` sweep reports a shared file as freed only when every link to it lies inside the removed directories, and duplicate patterns list a directory once. On Linux and macOS a file is identified by device and inode. On Windows by volume serial and file
+index (one extra open per file); if the identity cannot be read, every link counts in full, so the
+figure can only be too high. The age-based file trim lists each link on its own and still counts it
+separately.
+
+The provider ignores
 `max_age` and removes every stale match whole regardless of `max_size`, which is
 only used for `status`. `lsof` run as a non-root user cannot see other users'
 processes.

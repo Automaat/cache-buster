@@ -69,3 +69,37 @@ func TestConfig_Validate_DirPatternRequiresAbsolute(t *testing.T) {
 	}}
 	require.ErrorContains(t, cfg.Validate(), "absolute")
 }
+
+func TestDirPatternError(t *testing.T) {
+	tests := []struct {
+		name string
+		p    Provider
+		want string
+	}{
+		{"valid", Provider{Type: TypeDirPattern, Paths: []string{"~/x/sail*"}, MinIdle: "2h"}, ""},
+		{"not a dir-pattern", Provider{Paths: []string{"relative"}, MinIdle: "bad"}, ""},
+		{"no glob", Provider{Type: TypeDirPattern, Paths: []string{"~/x/sail"}}, "must contain a glob"},
+		{"relative", Provider{Type: TypeDirPattern, Paths: []string{"rel/sail*"}}, "must be absolute or start with ~/"},
+		{"bad min_idle", Provider{Type: TypeDirPattern, Paths: []string{"~/x*"}, MinIdle: "soon"}, "parse min_idle"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.p.DirPatternError()
+			if tt.want == "" {
+				assert.NoError(t, err)
+				return
+			}
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tt.want)
+		})
+	}
+}
+
+func TestEnabledProvidersKeepsMisconfiguredDirPattern(t *testing.T) {
+	cfg := &Config{Providers: map[string]Provider{
+		"broken": {Enabled: true, Type: TypeDirPattern, Paths: []string{"rel/none-*"}, MaxSize: "1G"},
+		"quiet":  {Enabled: true, Type: TypeDirPattern, Paths: []string{filepath.Join(t.TempDir(), "none-*")}, MaxSize: "1G"},
+	}}
+
+	assert.Equal(t, []string{"broken"}, cfg.EnabledProviders(), "valid providers with no matches stay hidden")
+}

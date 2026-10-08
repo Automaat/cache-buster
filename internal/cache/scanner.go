@@ -7,9 +7,12 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/smykla-skalski/bilgie/internal/osshim"
 )
 
 // FileInfo holds file metadata for cache entries.
@@ -33,6 +36,9 @@ func CalculateSize(paths []string) (ScanResult, error) {
 
 // CalculateSizeContext calculates total size of all files under given paths.
 // Walks directories in parallel. Returns 0 if paths is empty.
+// Each hard-linked file is counted once, across all paths; where the file
+// identity is unreadable (Windows without an openable handle) every link
+// counts in full, so the total can only overstate.
 // Access errors are collected as warnings rather than stopping the scan.
 // The walk stops early and returns ctx.Err() once ctx is cancelled.
 func CalculateSizeContext(ctx context.Context, paths []string) (ScanResult, error) {
@@ -40,9 +46,10 @@ func CalculateSizeContext(ctx context.Context, paths []string) (ScanResult, erro
 	var firstErr atomic.Value
 	var mu sync.Mutex
 	var warnings []AccessError
+	var links osshim.LinkSet
 
 	var wg sync.WaitGroup
-	for _, path := range paths {
+	for _, path := range slices.Compact(slices.Sorted(slices.Values(paths))) {
 		wg.Add(1)
 		go func(p string) {
 			defer wg.Done()
@@ -68,6 +75,9 @@ func CalculateSizeContext(ctx context.Context, paths []string) (ScanResult, erro
 					mu.Lock()
 					warnings = append(warnings, accessErr)
 					mu.Unlock()
+					return nil
+				}
+				if id, _, shared := osshim.SharedFileID(path, info); shared && !links.Add(id) {
 					return nil
 				}
 				total.Add(info.Size())

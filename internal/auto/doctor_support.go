@@ -168,3 +168,31 @@ func ProtectionConflicts(
 	}
 	return out
 }
+
+// LoadErrors lists the enabled providers that fail to load from their
+// config, so auto reports an error for them on every run.
+func LoadErrors(
+	cfg *config.Config,
+	newProvider func(name string, cfg config.Provider) (provider.Provider, error),
+) []error {
+	names := make([]string, 0, len(cfg.Providers))
+	for name := range cfg.Providers {
+		names = append(names, name)
+	}
+	slices.Sort(names)
+
+	var out []error
+	for _, name := range names {
+		pc := cfg.Providers[name]
+		if !pc.Enabled || !cfg.Applies(name) || neverRun(name, pc) {
+			continue
+		}
+		if !hasTargets(pc) {
+			continue
+		}
+		if _, err := newProvider(name, pc); err != nil {
+			out = append(out, err)
+		}
+	}
+	return out
+}
