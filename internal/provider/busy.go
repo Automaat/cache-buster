@@ -23,7 +23,6 @@ var busyProcesses = map[string][]string{
 	"gradle":   {"gradle", "gradlew"},
 	"rustup":   {"rustup", "cargo", "rustc"},
 	"uv":       {"uv"},
-	"mise":     {"mise"},
 }
 
 // busyLockFiles maps a provider name to a lock file name, relative to each

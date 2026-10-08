@@ -228,16 +228,18 @@ func pathSpellings(path string) []string {
 	return out
 }
 
-// busyNow reports why mise cannot be pruned right now: a running mise, or a
+// busyNow reports why mise cannot be pruned right now: a process whose executable is mise, or a
 // process whose command line names a binary below mise's installs directory.
 // A failed process listing counts as busy.
 func (p *MiseProvider) busyNow(ctx context.Context) string {
-	if skipped, ok := p.skipIfBusy(ctx); ok {
-		return skipped.SkipReason
-	}
 	lines, err := p.procLines(ctx)
 	if err != nil {
 		return "cannot list processes: " + err.Error()
+	}
+	for _, line := range lines {
+		if matchProcess(firstToken(strings.TrimSpace(line)), []string{"mise"}) != "" {
+			return "mise is running"
+		}
 	}
 	for _, root := range p.installRoots() {
 		prefix := foldPath(root) + "/"

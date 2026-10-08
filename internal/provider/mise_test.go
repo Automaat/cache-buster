@@ -283,14 +283,27 @@ func TestMise_RunningMiseSkips(t *testing.T) {
 	f := newMiseFixture(t)
 	installFakeTool(t, "mise", fakeToolSpec{Replies: map[string]fakeReply{"prune --dry-run": {Touch: f.marker}}})
 	p := newMise(t, f.root, config.Provider{})
-	p.busy = newBusyGuard("mise", p.paths)
-	p.busy.listProcesses = func(context.Context) ([]string, error) { return []string{"mise run dev"}, nil }
+	p.procLines = func(context.Context) ([]string, error) { return []string{"/opt/homebrew/bin/mise run dev"}, nil }
 
 	res, err := p.Clean(context.Background(), CleanOptions{})
 
 	require.NoError(t, err)
 	assert.Equal(t, "mise is running", res.SkipReason)
 	assert.NoFileExists(t, f.marker)
+}
+
+func TestMise_ProcessMentioningMiseDirIsNotBusy(t *testing.T) {
+	f := newMiseFixture(t)
+	installFakeTool(t, "mise", fakeToolSpec{Replies: map[string]fakeReply{"prune --dry-run": {}}})
+	p := newMise(t, f.root, config.Provider{})
+	p.procLines = func(context.Context) ([]string, error) {
+		return []string{"vim " + filepath.Join(f.root, "..", "mise"), "ls /home/u/.config/mise"}, nil
+	}
+
+	res, err := p.Clean(context.Background(), CleanOptions{DryRun: true})
+
+	require.NoError(t, err)
+	assert.Empty(t, res.SkipReason)
 }
 
 func TestMise_ListingTimeoutSkips(t *testing.T) {
