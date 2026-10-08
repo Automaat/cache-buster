@@ -10,10 +10,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Automaat/cache-buster/pkg/size"
+	"github.com/smykla-skalski/bilgie/pkg/size"
 )
 
-// Config holds cache-buster configuration.
+// Config holds bilgie configuration.
 type Config struct {
 	Providers map[string]Provider `mapstructure:"providers" yaml:"providers"`
 	Version   string              `mapstructure:"version" yaml:"version"`

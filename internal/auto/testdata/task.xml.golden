@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-16"?>
 <Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
   <RegistrationInfo>
-    <Description>cache-buster automatic cache cleanup</Description>
+    <Description>bilgie automatic cache cleanup</Description>
   </RegistrationInfo>
   <Triggers>
     <TimeTrigger>
@@ -32,7 +32,7 @@
   </Settings>
   <Actions Context="Author">
     <Exec>
-      <Command>C:\Users\me\bin\cache-buster.exe</Command>
+      <Command>C:\Users\me\bin\bilgie.exe</Command>
       <Arguments>auto</Arguments>
     </Exec>
   </Actions>

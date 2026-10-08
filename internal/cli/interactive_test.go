@@ -7,8 +7,8 @@ import (
 	"charm.land/bubbles/v2/progress"
 	"charm.land/bubbles/v2/spinner"
 	tea "charm.land/bubbletea/v2"
-	"github.com/Automaat/cache-buster/internal/config"
-	"github.com/Automaat/cache-buster/internal/provider"
+	"github.com/smykla-skalski/bilgie/internal/config"
+	"github.com/smykla-skalski/bilgie/internal/provider"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -244,7 +244,7 @@ func TestModelView(t *testing.T) {
 		m := newModel(cfg, []string{"p1"}, false, false, nil)
 		view := m.View()
 
-		assert.Contains(t, view.Content, "Cache Buster")
+		assert.Contains(t, view.Content, "Bilgie")
 		assert.Contains(t, view.Content, "Select providers to clean")
 	})
 

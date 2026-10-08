@@ -3,7 +3,7 @@ package provider
 import (
 	"fmt"
 
-	"github.com/Automaat/cache-buster/internal/config"
+	"github.com/smykla-skalski/bilgie/internal/config"
 )
 
 // fileBasedProviders lists providers that clean by deleting files.

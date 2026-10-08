@@ -11,7 +11,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Automaat/cache-buster/internal/config"
+	"github.com/smykla-skalski/bilgie/internal/config"
 )
 
 // Unmanaged scan defaults.

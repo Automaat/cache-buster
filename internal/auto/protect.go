@@ -7,7 +7,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/Automaat/cache-buster/internal/config"
+	"github.com/smykla-skalski/bilgie/internal/config"
 )
 
 // protectedRoots returns the home-relative locations auto never touches.

@@ -3,10 +3,10 @@
 <plist version="1.0">
 <dict>
 	<key>Label</key>
-	<string>dev.mskalski.cache-buster</string>
+	<string>dev.mskalski.bilgie</string>
 	<key>ProgramArguments</key>
 	<array>
-		<string>/opt/homebrew/bin/cache-buster</string>
+		<string>/opt/homebrew/bin/bilgie</string>
 		<string>auto</string>
 	</array>
 	<key>StartInterval</key>
@@ -20,9 +20,9 @@
 	<key>Nice</key>
 	<integer>10</integer>
 	<key>StandardOutPath</key>
-	<string>/Users/me/Library/Logs/cache-buster/auto.log</string>
+	<string>/Users/me/Library/Logs/bilgie/auto.log</string>
 	<key>StandardErrorPath</key>
-	<string>/Users/me/Library/Logs/cache-buster/auto.log</string>
+	<string>/Users/me/Library/Logs/bilgie/auto.log</string>
 	<key>EnvironmentVariables</key>
 	<dict>
 		<key>PATH</key>

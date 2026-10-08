@@ -11,9 +11,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Automaat/cache-buster/internal/cache"
-	"github.com/Automaat/cache-buster/internal/config"
-	"github.com/Automaat/cache-buster/pkg/size"
+	"github.com/smykla-skalski/bilgie/internal/cache"
+	"github.com/smykla-skalski/bilgie/internal/config"
+	"github.com/smykla-skalski/bilgie/pkg/size"
 )
 
 var versionDirPattern = regexp.MustCompile(`^([A-Za-z][A-Za-z0-9]*)(\d{4}\.\d+)$`)

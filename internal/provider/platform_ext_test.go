@@ -4,7 +4,7 @@ import (
 	"runtime"
 	"testing"
 
-	"github.com/Automaat/cache-buster/internal/config"
+	"github.com/smykla-skalski/bilgie/internal/config"
 )
 
 // skipWithoutModeBits skips tests that need the OS to deny access through

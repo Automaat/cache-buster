@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Automaat/cache-buster/internal/config"
-	"github.com/Automaat/cache-buster/internal/osshim"
+	"github.com/smykla-skalski/bilgie/internal/config"
+	"github.com/smykla-skalski/bilgie/internal/osshim"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -59,9 +59,9 @@ func TestExcludeSelf(t *testing.T) {
 	wanted := []string{"cargo", "rustc"}
 	procs := []osshim.Process{
 		{PID: 1, PPID: 0, CommandLine: "/sbin/launchd"},
-		{PID: 40, PPID: 1, CommandLine: "sudo sh -c cache-buster clean cargo"},
-		{PID: 50, PPID: 40, CommandLine: "zsh -c cache-buster clean cargo"},
-		{PID: 60, PPID: 50, CommandLine: "cache-buster clean cargo"},
+		{PID: 40, PPID: 1, CommandLine: "sudo sh -c bilgie clean cargo"},
+		{PID: 50, PPID: 40, CommandLine: "zsh -c bilgie clean cargo"},
+		{PID: 60, PPID: 50, CommandLine: "bilgie clean cargo"},
 		{PID: 70, PPID: 1, CommandLine: "vim notes.txt"},
 	}
 
@@ -82,7 +82,7 @@ func TestExcludeSelf(t *testing.T) {
 		parentTool := []osshim.Process{
 			{PID: 1, PPID: 0, CommandLine: "/sbin/launchd"},
 			{PID: 50, PPID: 1, CommandLine: "/Users/me/.cargo/bin/cargo run -- clean cargo"},
-			{PID: 60, PPID: 50, CommandLine: "target/debug/cache-buster clean cargo"},
+			{PID: 60, PPID: 50, CommandLine: "target/debug/bilgie clean cargo"},
 		}
 		g := fakeGuard(excludeSelf(parentTool, 60, wanted), nil, nil)
 		assert.Equal(t, "cargo is running", g.busyReason(context.Background()))
@@ -90,8 +90,8 @@ func TestExcludeSelf(t *testing.T) {
 
 	t.Run("linux comm suffix does not defeat the wrapper check", func(t *testing.T) {
 		linux := []osshim.Process{
-			{PID: 50, PPID: 1, CommandLine: "sh -c cache-buster clean cargo sh", Args: "sh -c cache-buster clean cargo"},
-			{PID: 60, PPID: 50, CommandLine: "cache-buster clean cargo cache-buster", Args: "cache-buster clean cargo"},
+			{PID: 50, PPID: 1, CommandLine: "sh -c bilgie clean cargo sh", Args: "sh -c bilgie clean cargo"},
+			{PID: 60, PPID: 50, CommandLine: "bilgie clean cargo bilgie", Args: "bilgie clean cargo"},
 		}
 		assert.Empty(t, excludeSelf(linux, 60, wanted))
 	})
@@ -100,8 +100,8 @@ func TestExcludeSelf(t *testing.T) {
 		brew := []osshim.Process{
 			{PID: 1, PPID: 0, CommandLine: "/sbin/launchd"},
 			{PID: 50, PPID: 1, CommandLine: "/opt/homebrew/ruby -W1 /opt/homebrew/Library/Homebrew/brew.rb bundle"},
-			{PID: 55, PPID: 50, CommandLine: "/bin/sh -c cache-buster clean homebrew"},
-			{PID: 60, PPID: 55, CommandLine: "cache-buster clean homebrew"},
+			{PID: 55, PPID: 50, CommandLine: "/bin/sh -c bilgie clean homebrew"},
+			{PID: 60, PPID: 55, CommandLine: "bilgie clean homebrew"},
 		}
 		g := fakeGuard(excludeSelf(brew, 60, []string{"brew"}), nil, nil)
 		g.processes = []string{"brew"}
@@ -109,7 +109,7 @@ func TestExcludeSelf(t *testing.T) {
 
 		spaced := []osshim.Process{
 			{PID: 50, PPID: 0, CommandLine: "/Users/John Smith/.cargo/bin/cargo run"},
-			{PID: 60, PPID: 50, CommandLine: "cache-buster clean cargo"},
+			{PID: 60, PPID: 50, CommandLine: "bilgie clean cargo"},
 		}
 		g = fakeGuard(excludeSelf(spaced, 60, wanted), nil, nil)
 		assert.Equal(t, "cargo is running", g.busyReason(context.Background()))
@@ -117,7 +117,7 @@ func TestExcludeSelf(t *testing.T) {
 
 	t.Run("cycle among kept ancestors terminates", func(t *testing.T) {
 		cyc := []osshim.Process{
-			{PID: 60, PPID: 5, CommandLine: "cache-buster clean cargo"},
+			{PID: 60, PPID: 5, CommandLine: "bilgie clean cargo"},
 			{PID: 5, PPID: 6, CommandLine: "cargo"},
 			{PID: 6, PPID: 5, CommandLine: "cargo"},
 		}

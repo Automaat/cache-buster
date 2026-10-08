@@ -4,7 +4,7 @@ Set Width 1200
 Set Height 600
 Set Theme "Catppuccin Mocha"
 
-Type "cache-buster"
+Type "bilgie"
 Enter
 Sleep 3s
 Type "o"

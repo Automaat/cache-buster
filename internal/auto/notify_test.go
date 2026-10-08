@@ -12,8 +12,8 @@ import (
 	"time"
 	"unicode/utf16"
 
-	"github.com/Automaat/cache-buster/internal/config"
-	"github.com/Automaat/cache-buster/internal/provider"
+	"github.com/smykla-skalski/bilgie/internal/config"
+	"github.com/smykla-skalski/bilgie/internal/provider"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -121,7 +121,7 @@ func TestNotifierFor_RunsTheNativeToolPerOS(t *testing.T) {
 		}},
 		{goosLinux, "notify-send", func(t *testing.T, args []string) {
 			t.Helper()
-			assert.Equal(t, []string{"--app-name=cache-buster", "--", "title", hostile}, args)
+			assert.Equal(t, []string{"--app-name=bilgie", "--", "title", hostile}, args)
 		}},
 		{goosWindows, "powershell.exe", func(t *testing.T, args []string) {
 			t.Helper()
@@ -163,7 +163,7 @@ func decodePowerShell(t *testing.T, encoded string) string {
 }
 
 func TestToastScript_Golden(t *testing.T) {
-	script := toastScriptFor("Disk space is low", "12 GiB free of 500 GiB after cleanup.")
+	script := toastScriptFor("bilgie: disk space is low", "12 GiB free of 500 GiB after cleanup.")
 
 	assertGolden(t, "toast.ps1", script)
 }

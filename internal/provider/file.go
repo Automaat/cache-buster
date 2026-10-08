@@ -7,9 +7,9 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/Automaat/cache-buster/internal/cache"
-	"github.com/Automaat/cache-buster/internal/config"
-	"github.com/Automaat/cache-buster/pkg/size"
+	"github.com/smykla-skalski/bilgie/internal/cache"
+	"github.com/smykla-skalski/bilgie/internal/config"
+	"github.com/smykla-skalski/bilgie/pkg/size"
 )
 
 // FileProvider cleans caches by deleting oldest files until under limit.

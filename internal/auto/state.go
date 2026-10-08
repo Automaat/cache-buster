@@ -6,16 +6,17 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/Automaat/cache-buster/internal/osshim"
+	"github.com/smykla-skalski/bilgie/internal/appname"
+	"github.com/smykla-skalski/bilgie/internal/osshim"
 )
 
 const (
-	stateDirName    = "cache-buster"
+	stateDirName    = appname.Name
 	firstRunMarker  = "first-run-pending"
 	runLockFileName = "auto.lock"
 )
 
-// StateDir returns ~/.local/state/cache-buster. It ignores XDG_STATE_HOME on
+// StateDir returns ~/.local/state/bilgie. It ignores XDG_STATE_HOME on
 // purpose: install-agent runs in a shell and the agent under launchd, and both
 // must find the same marker.
 func StateDir() (string, error) {

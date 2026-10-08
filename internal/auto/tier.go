@@ -7,8 +7,8 @@ import (
 	"os"
 	"runtime"
 
-	"github.com/Automaat/cache-buster/internal/config"
-	"github.com/Automaat/cache-buster/internal/osshim"
+	"github.com/smykla-skalski/bilgie/internal/config"
+	"github.com/smykla-skalski/bilgie/internal/osshim"
 )
 
 // CriticalFree is the free-space level under which the stale-directory

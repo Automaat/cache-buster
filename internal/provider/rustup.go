@@ -12,8 +12,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Automaat/cache-buster/internal/cache"
-	"github.com/Automaat/cache-buster/internal/config"
+	"github.com/smykla-skalski/bilgie/internal/cache"
+	"github.com/smykla-skalski/bilgie/internal/config"
 )
 
 // rustupRunner runs rustup with args and returns its combined output.

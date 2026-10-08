@@ -21,7 +21,7 @@ const serviceNotFoundExit = 113
 
 // PlistPath is where the launchd agent definition lives.
 func (a Agent) PlistPath() string {
-	return filepath.Join(a.Home, "Library", "LaunchAgents", AgentLabel+".plist")
+	return filepath.Join(a.Home, "Library", "LaunchAgents", a.id().label+".plist")
 }
 
 func (a Agent) domainTarget() string {
@@ -32,7 +32,7 @@ func (a Agent) domainTarget() string {
 // state the caller wants. When bootout fails in a form not recognised as
 // "not loaded", a failing `launchctl print` confirms the job is absent; any other print failure keeps the error.
 func (a Agent) unload(ctx context.Context) error {
-	target := a.domainTarget() + "/" + AgentLabel
+	target := a.domainTarget() + "/" + a.id().label
 	out, err := a.Exec(ctx, "launchctl", "bootout", target)
 	if err == nil || jobNotLoaded(string(out)) {
 		return nil

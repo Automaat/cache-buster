@@ -3,7 +3,7 @@ go = "1.27.2"
 golangci-lint = "2.14.0"
 
 [env]
-BINARY = "cache-buster"
+BINARY = "bilgie"
 
 [tasks.version]
 description = "Get version from git"
@@ -14,14 +14,14 @@ hide = true
 description = "Build binary"
 run = """
 VERSION=$(git describe --tags --always --dirty 2>/dev/null || echo dev)
-go build -ldflags "-s -w -X main.version=$VERSION" -o $BINARY ./cmd/cache-buster
+go build -ldflags "-s -w -X main.version=$VERSION" -o $BINARY ./cmd/bilgie
 """
 
 [tasks.install]
 description = "Install to GOPATH/bin"
 run = """
 VERSION=$(git describe --tags --always --dirty 2>/dev/null || echo dev)
-go install -ldflags "-s -w -X main.version=$VERSION" ./cmd/cache-buster
+go install -ldflags "-s -w -X main.version=$VERSION" ./cmd/bilgie
 """
 
 [tasks.test]

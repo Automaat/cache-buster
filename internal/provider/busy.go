@@ -8,7 +8,7 @@ import (
 	"runtime"
 	"strings"
 
-	"github.com/Automaat/cache-buster/internal/osshim"
+	"github.com/smykla-skalski/bilgie/internal/osshim"
 )
 
 // busyProcesses maps a provider name to the tool processes whose presence
@@ -57,9 +57,9 @@ func newBusyGuard(name string, paths []string) *busyGuard {
 	}
 }
 
-// processLister returns a lister that leaves out cache-buster's own process
+// processLister returns a lister that leaves out bilgie's own process
 // and its ancestors. They carry the provider name as an argument
-// ("cache-buster clean cargo"), so they would always read as the tool being
+// ("bilgie clean cargo"), so they would always read as the tool being
 // busy.
 func processLister(wanted []string) func(context.Context) ([]string, error) {
 	return func(ctx context.Context) ([]string, error) {
@@ -73,9 +73,9 @@ func processLister(wanted []string) func(context.Context) ([]string, error) {
 
 // excludeSelf drops the process with pid self and its ancestors, except an
 // ancestor that is a wanted tool: its executable is the tool, or its command
-// line names the tool without embedding cache-buster's own arguments
+// line names the tool without embedding bilgie's own arguments
 // ("cargo run -- clean", "ruby brew.rb bundle"). A wrapper such as
-// "sh -c cache-buster clean cargo" embeds them and is dropped. A zero pid is
+// "sh -c bilgie clean cargo" embeds them and is dropped. A zero pid is
 // unknown and never matches.
 func excludeSelf(procs []osshim.Process, self int, wanted []string) []string {
 	byPID := make(map[int]*osshim.Process, len(procs))

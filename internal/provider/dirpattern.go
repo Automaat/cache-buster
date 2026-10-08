@@ -10,9 +10,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Automaat/cache-buster/internal/config"
-	"github.com/Automaat/cache-buster/internal/osshim"
-	"github.com/Automaat/cache-buster/pkg/size"
+	"github.com/smykla-skalski/bilgie/internal/config"
+	"github.com/smykla-skalski/bilgie/internal/osshim"
+	"github.com/smykla-skalski/bilgie/pkg/size"
 )
 
 // defaultMinIdle is how long a directory must be untouched before removal.

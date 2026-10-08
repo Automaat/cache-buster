@@ -95,7 +95,7 @@ func TestPath(t *testing.T) {
 		t.Fatalf("Path() error = %v", err)
 	}
 
-	want := filepath.Join(home, ".config/cache-buster/config.yaml")
+	want := filepath.Join(home, ".config/bilgie/config.yaml")
 	if path != want {
 		t.Errorf("Path() = %v, want %v", path, want)
 	}
@@ -112,7 +112,7 @@ func TestDirPath(t *testing.T) {
 		t.Fatalf("DirPath() error = %v", err)
 	}
 
-	want := filepath.Join(home, ".config/cache-buster")
+	want := filepath.Join(home, ".config/bilgie")
 	if path != want {
 		t.Errorf("DirPath() = %v, want %v", path, want)
 	}

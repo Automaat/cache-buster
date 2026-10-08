@@ -1,6 +1,17 @@
-# cache-buster
+# bilgie
 
-Developer cache manager for macOS, Linux and Windows. Interactive TUI, 27 built-in providers, auto-discovery, smart LRU cleaning.
+A bilge pump for developer machines. Caches pile up quietly in the hull of your disk until
+something floods; bilgie works like the float switch that guards a boat's bilge:
+
+- **Idle** while free space stays above the level you set.
+- **Pump** as soon as it drops below: caches are trimmed, cheapest to rebuild first, until the water level is back.
+- **Sweep hard** at the critical level: stale directories go too.
+
+Interactive TUI, 27 built-in providers for macOS, Linux and Windows, auto-discovery, smart LRU cleaning and an
+unattended `auto` mode that runs from the OS scheduler.
+
+> bilgie was called `cache-buster` and lived at `github.com/Automaat/cache-buster`. The old module path is
+> moved: import and install `github.com/smykla-skalski/bilgie`. The old repository URLs redirect.
 
 ![demo](./doc/demo.gif)
 <!-- Generate with: brew install vhs && vhs doc/demo.tape -->
@@ -10,18 +21,18 @@ Developer cache manager for macOS, Linux and Windows. Interactive TUI, 27 built-
 ### Homebrew
 
 ```bash
-brew install Automaat/tap/cache-buster
+brew install Automaat/tap/bilgie
 ```
 
 ### Go Install
 
 ```bash
-go install github.com/Automaat/cache-buster/cmd/cache-buster@latest
+go install github.com/smykla-skalski/bilgie/cmd/bilgie@latest
 ```
 
 ### Binary Download
 
-Download the archive for your platform from [releases](https://github.com/Automaat/cache-buster/releases):
+Download the archive for your platform from [releases](https://github.com/smykla-skalski/bilgie/releases):
 
 | OS | Architectures | Archive |
 |----|---------------|---------|
@@ -29,21 +40,31 @@ Download the archive for your platform from [releases](https://github.com/Automa
 | Linux | amd64, arm64 | `.tar.gz` |
 | Windows | amd64, arm64 | `.zip` |
 
-Extract it and put `cache-buster` (`cache-buster.exe` on Windows) on your `PATH`.
+Extract it and put `bilgie` (`bilgie.exe` on Windows) on your `PATH`.
+
+### Upgrading from cache-buster
+
+The first run of any `bilgie` command moves `~/.config/cache-buster` to `~/.config/bilgie` and
+`~/.local/state/cache-buster` to `~/.local/state/bilgie` (config, run history and the first-run marker),
+and prints one line per move. A new directory that already exists is never overwritten, and a legacy
+directory that cannot be read is skipped with a warning. `install-agent` and `uninstall-agent` also remove
+an agent installed under the old names (launchd label `dev.mskalski.cache-buster`, the `cache-buster`
+systemd unit, crontab tag and Task Scheduler task). Run `bilgie install-agent` once after upgrading; the first
+run after it is a dry-run again.
 
 ## Quick Start
 
 ```bash
 # Launch interactive TUI (default)
-cache-buster
+bilgie
 
 # Check all cache sizes
-cache-buster status
+bilgie status
 ```
 
 ## Interactive Mode
 
-Running `cache-buster` with no arguments launches a full-screen TUI built with [Bubble Tea](https://github.com/charmbracelet/bubbletea).
+Running `bilgie` with no arguments launches a full-screen TUI built with [Bubble Tea](https://github.com/charmbracelet/bubbletea).
 
 Providers are scanned in parallel with live size updates. Select what to clean, confirm, and watch progress — all without leaving the terminal.
 
@@ -79,8 +100,8 @@ Selection → Confirmation → Cleaning (with progress bar) → Done (summary)
 ### Flags
 
 ```bash
-cache-buster --dry-run     # Preview without deleting
-cache-buster --full        # Use full clean instead of smart (default)
+bilgie --dry-run     # Preview without deleting
+bilgie --full        # Use full clean instead of smart (default)
 ```
 
 ## Providers
@@ -132,9 +153,9 @@ Providers are auto-detected — only tools installed on your system appear in th
 ### status
 
 ```bash
-cache-buster status          # Table output
-cache-buster status --json   # JSON output
-cache-buster status --unmanaged 20  # List more unmanaged directories (0 turns the scan off)
+bilgie status          # Table output
+bilgie status --json   # JSON output
+bilgie status --unmanaged 20  # List more unmanaged directories (0 turns the scan off)
 ```
 
 After the provider table, `status` lists the largest directories (100 MiB and up) that no
@@ -152,11 +173,11 @@ measured with the same kind of bounded scan (10 second budget, Ctrl-C stops it, 
 ### clean
 
 ```bash
-cache-buster clean go-build npm  # Specific providers
-cache-buster clean --all         # All enabled
-cache-buster clean --dry-run     # Preview only
-cache-buster clean --force       # Skip confirmation
-cache-buster clean --smart       # LRU-based trimming
+bilgie clean go-build npm  # Specific providers
+bilgie clean --all         # All enabled
+bilgie clean --dry-run     # Preview only
+bilgie clean --force       # Skip confirmation
+bilgie clean --smart       # LRU-based trimming
 ```
 
 **Clean modes:**
@@ -166,10 +187,10 @@ cache-buster clean --smart       # LRU-based trimming
 ### auto
 
 ```bash
-cache-buster auto             # Trim by free-space tier
-cache-buster auto --dry-run   # Preview only
-cache-buster install-agent    # Run auto every auto.interval with the OS scheduler
-cache-buster uninstall-agent  # Unload and remove everything install-agent created
+bilgie auto             # Trim by free-space tier
+bilgie auto --dry-run   # Preview only
+bilgie install-agent    # Run auto every auto.interval with the OS scheduler
+bilgie uninstall-agent  # Unload and remove everything install-agent created
 ```
 
 `auto` reads the free space of the data volume (`statfs` of `/System/Volumes/Data`)
@@ -191,7 +212,7 @@ Safety rules:
 - Providers whose tool is busy are skipped, as in `clean`.
 - Two runs never overlap; a second one exits immediately.
 - The first run after `install-agent` is a dry-run that deletes nothing. A marker in
-  `~/.local/state/cache-buster/` records it, so it survives restarts and only a completed
+  `~/.local/state/bilgie/` records it, so it survives restarts and only a completed
   dry-run in the low or critical tier, where at least one provider ran, clears it, and only when no provider failed. Running `install-agent` again arms it again.
 
 `install-agent` picks the scheduler of the running OS. Install from a built or installed
@@ -200,10 +221,10 @@ moving it. The first run after install is a dry-run on every OS.
 
 | OS | Scheduler | What is written | Output |
 |----|-----------|-----------------|--------|
-| macOS | launchd agent, loaded with `launchctl bootstrap` | `~/Library/LaunchAgents/dev.mskalski.cache-buster.plist` (`StartInterval` from `auto.interval`, `RunAtLoad`, low priority, a `PATH` with Homebrew, mise, Go, Cargo and Docker) | `~/Library/Logs/cache-buster/auto.log` |
-| Linux | systemd user timer | `$XDG_CONFIG_HOME/systemd/user` (default `~/.config/systemd/user`) `cache-buster.service` and `cache-buster.timer` (first run a minute after enabling, then `auto.interval` after each run), enabled with `systemctl --user enable` | `~/.local/state/cache-buster/auto.log` |
-| Linux without a systemd user manager | cron | one crontab line tagged `# cache-buster`; other entries are kept | `~/.local/state/cache-buster/auto.log` |
-| Windows | Task Scheduler task `cache-buster`, created with `schtasks /Create /XML` | `~/.local/state/cache-buster/cache-buster-task.xml` (repeats every `auto.interval`, below-normal priority, runs only while you are logged on) | none |
+| macOS | launchd agent, loaded with `launchctl bootstrap` | `~/Library/LaunchAgents/dev.mskalski.bilgie.plist` (`StartInterval` from `auto.interval`, `RunAtLoad`, low priority, a `PATH` with Homebrew, mise, Go, Cargo and Docker) | `~/Library/Logs/bilgie/auto.log` |
+| Linux | systemd user timer | `$XDG_CONFIG_HOME/systemd/user` (default `~/.config/systemd/user`) `bilgie.service` and `bilgie.timer` (first run a minute after enabling, then `auto.interval` after each run), enabled with `systemctl --user enable` | `~/.local/state/bilgie/auto.log` |
+| Linux without a systemd user manager | cron | one crontab line tagged `# bilgie`; other entries are kept | `~/.local/state/bilgie/auto.log` |
+| Windows | Task Scheduler task `bilgie`, created with `schtasks /Create /XML` | `~/.local/state/bilgie/bilgie-task.xml` (repeats every `auto.interval`, below-normal priority, runs only while you are logged on) | none |
 
 Cron fires on fixed minute and hour marks, so the cron fallback only accepts an `auto.interval`
 that divides an hour or a day evenly (1m, 2m, 5m, 10m, 15m, 20m, 30m, 1h, 2h, 3h, 4h, 6h, 8h, 12h,
@@ -214,14 +235,14 @@ The systemd user timer runs only while your user manager is up; on a headless bo
 files and the first-run marker, and succeeds when nothing is installed; on Linux it clears both
 the systemd units and the crontab line.
 
-Every run appends one JSON line to `~/.local/state/cache-buster/runs.jsonl`: time, tier, free space
+Every run appends one JSON line to `~/.local/state/bilgie/runs.jsonl`: time, tier, free space
 before and after, bytes freed per provider, and skipped providers with their reasons. The log rotates
 to `runs.jsonl.1` at 8 MiB.
 
 ```bash
-cache-buster history           # Last 10 runs
-cache-buster history -n 50     # More runs (0 shows all)
-cache-buster history --json    # Full records, including per-provider detail
+bilgie history           # Last 10 runs
+bilgie history -n 50     # More runs (0 shows all)
+bilgie history --json    # Full records, including per-provider detail
 ```
 
 `history` skips unreadable lines and reports how many. When a real run (not a dry-run) ends with
@@ -233,21 +254,21 @@ cancelled after 10 seconds so it cannot hold the run lock.
 ### config
 
 ```bash
-cache-buster config init   # Create default config
-cache-buster config show   # Display current config
-cache-buster config edit   # Open in $EDITOR
+bilgie config init   # Create default config
+bilgie config show   # Display current config
+bilgie config edit   # Open in $EDITOR
 ```
 
 ## Configuration
 
-Location: `~/.config/cache-buster/config.yaml`
+Location: `~/.config/bilgie/config.yaml`
 
-Generate defaults with `cache-buster config init`.
+Generate defaults with `bilgie config init`.
 
 A saved config keeps the values it was created with. When a default changes
 later, the saved value wins: configs from older versions keep `enabled: true`
 for `huggingface` and `playwright`, which are now disabled by default.
-`cache-buster config show` ends with a note for every provider whose saved
+`bilgie config show` ends with a note for every provider whose saved
 `enabled` differs from the current default. Edit the file to change it.
 
 ```yaml
@@ -276,7 +297,7 @@ providers:
 | `skip_if_git_worktree` | `dir-pattern`: skip directories containing a `.git` entry (default `true`) |
 | `skip_prefixes` | Whole-entry providers never evict entries whose name starts with one of these prefixes; user values add to the built-in ones |
 
-The optional top-level `auto` block configures `cache-buster auto`:
+The optional top-level `auto` block configures `bilgie auto`:
 
 ```yaml
 auto:
@@ -314,7 +335,7 @@ failure. If the check itself fails, the provider is skipped too.
 
 Busy detection errs toward skipping: any process whose command line contains
 the tool name counts, including wrappers such as `sudo` or `sh -c`. The
-cache-buster process and its wrapper ancestors are not counted, but an
+bilgie process and its wrapper ancestors are not counted, but an
 ancestor that is the tool itself, such as `cargo run -- clean cargo`, is. A hung
 `clean_cmd` is killed with its whole process group, so it must not need a
 terminal.
@@ -330,14 +351,14 @@ The built-in `sail-dirs` provider (`sail*` in the OS temp dir and in the fixed s
 temp dir, `/tmp` or `/private/tmp` on macOS, listed once when both resolve to the same directory)
 uses `dir-pattern` and is disabled by default. The paths follow the machine and are not saved to
 the config file. Enable it with `enabled: true` after reviewing
-`cache-buster clean sail-dirs --dry-run`, which lists each directory with its size,
+`bilgie clean sail-dirs --dry-run`, which lists each directory with its size,
 idle time and the reason it would be skipped.
 
 ## Building from Source
 
 ```bash
-git clone https://github.com/Automaat/cache-buster
-cd cache-buster
+git clone https://github.com/smykla-skalski/bilgie
+cd bilgie
 mise run build
 ```
 

@@ -16,8 +16,8 @@ import (
 )
 
 const (
-	posixExe   = "/usr/local/bin/cache-buster"
-	windowsExe = `C:\Users\me\bin\cache-buster.exe`
+	posixExe   = "/usr/local/bin/bilgie"
+	windowsExe = `C:\Users\me\bin\bilgie.exe`
 )
 
 func TestBackendNamesShareOneStem(t *testing.T) {
@@ -34,7 +34,7 @@ func TestIsAbsPath_FollowsTargetOS(t *testing.T) {
 	}{
 		{"linux", "/usr/bin/x", true},
 		{"darwin", "/opt/homebrew/bin/x", true},
-		{"linux", "cache-buster", false},
+		{"linux", "bilgie", false},
 		{"linux", `C:\x\y.exe`, false},
 		{"windows", `C:\x\y.exe`, true},
 		{"windows", `c:/x/y.exe`, true},
@@ -65,9 +65,9 @@ func TestInstall_ArmsFirstRunDryRunOnEveryOS(t *testing.T) {
 
 func TestInstall_RejectsBadBinaryOnEveryOS(t *testing.T) {
 	for goos, exes := range map[string][]string{
-		"darwin":  {"cache-buster", "/var/x/go-build1/b001/exe/cache-buster", windowsExe},
-		"linux":   {"cache-buster", "/var/x/go-build1/b001/exe/cache-buster", windowsExe},
-		"windows": {"cache-buster.exe", `C:\x\go-build1\b001\exe\cache-buster.exe`, posixExe},
+		"darwin":  {"bilgie", "/var/x/go-build1/b001/exe/bilgie", windowsExe},
+		"linux":   {"bilgie", "/var/x/go-build1/b001/exe/bilgie", windowsExe},
+		"windows": {"bilgie.exe", `C:\x\go-build1\b001\exe\bilgie.exe`, posixExe},
 	} {
 		for _, exe := range exes {
 			s := &scriptedExec{}
@@ -88,14 +88,14 @@ func TestInstall_RejectsUnsupportedOS(t *testing.T) {
 }
 
 func TestRenderPlist_Golden(t *testing.T) {
-	data, err := RenderPlist("/opt/homebrew/bin/cache-buster", "/Users/me", "/Users/me/Library/Logs/cache-buster/auto.log", 45*time.Minute)
+	data, err := RenderPlist("/opt/homebrew/bin/bilgie", "/Users/me", "/Users/me/Library/Logs/bilgie/auto.log", 45*time.Minute)
 	require.NoError(t, err)
 
 	assertGolden(t, "launchd.plist", string(data))
 }
 
 func TestRenderSystemd_Golden(t *testing.T) {
-	service, err := RenderSystemdService(posixExe, "/home/me", "/home/me/.local/state/cache-buster/auto.log")
+	service, err := RenderSystemdService(posixExe, "/home/me", "/home/me/.local/state/bilgie/auto.log")
 	require.NoError(t, err)
 	timer, err := RenderSystemdTimer(45 * time.Minute)
 	require.NoError(t, err)
@@ -105,11 +105,11 @@ func TestRenderSystemd_Golden(t *testing.T) {
 }
 
 func TestRenderSystemd_EscapesSpecialCharacters(t *testing.T) {
-	service, err := RenderSystemdService(`/opt/my "tools"/100%/$x/cache-buster`, "/home/me", "/home/me/100%/auto.log")
+	service, err := RenderSystemdService(`/opt/my "tools"/100%/$x/bilgie`, "/home/me", "/home/me/100%/auto.log")
 	require.NoError(t, err)
 
 	text := string(service)
-	assert.Contains(t, text, `ExecStart="/opt/my \"tools\"/100%%/$$x/cache-buster" auto`)
+	assert.Contains(t, text, `ExecStart="/opt/my \"tools\"/100%%/$$x/bilgie" auto`)
 	assert.Contains(t, text, "StandardOutput=append:/home/me/100%%/auto.log")
 }
 
@@ -121,7 +121,7 @@ func TestRenderSystemd_RejectsBadInput(t *testing.T) {
 }
 
 func TestRenderCronLine_Golden(t *testing.T) {
-	line, err := RenderCronLine(posixExe, "/home/me", "/home/me/.local/state/cache-buster/auto.log", 30*time.Minute)
+	line, err := RenderCronLine(posixExe, "/home/me", "/home/me/.local/state/bilgie/auto.log", 30*time.Minute)
 	require.NoError(t, err)
 
 	assertGolden(t, "cron.line", line)
@@ -144,9 +144,9 @@ func TestRenderCronLine_QuotesAndSchedules(t *testing.T) {
 		assert.True(t, strings.HasPrefix(line, tt.want), "%s: %s", tt.interval, line)
 	}
 
-	line, err := RenderCronLine("/opt/it's 100%/cache-buster", "/home/me", "/log", time.Hour)
+	line, err := RenderCronLine("/opt/it's 100%/bilgie", "/home/me", "/log", time.Hour)
 	require.NoError(t, err)
-	assert.Contains(t, line, `'/opt/it'\''s 100\%/cache-buster'`)
+	assert.Contains(t, line, `'/opt/it'\''s 100\%/bilgie'`)
 }
 
 func TestRenderCronLine_RejectsIntervalsCronCannotRepeatEvenly(t *testing.T) {
@@ -164,7 +164,7 @@ func TestRenderTaskXML_Golden(t *testing.T) {
 
 	plain, err := RenderTaskXML(windowsExe, 45*time.Minute, start)
 	require.NoError(t, err)
-	special, err := RenderTaskXML(`C:\Program Files\a&b\cache-buster.exe`, 90*time.Minute, start)
+	special, err := RenderTaskXML(`C:\Program Files\a&b\bilgie.exe`, 90*time.Minute, start)
 	require.NoError(t, err)
 
 	assertGolden(t, "task.xml", plain)
@@ -214,13 +214,15 @@ func TestSystemdInstall_WritesUnitsAndEnablesTimer(t *testing.T) {
 	require.NoError(t, a.Install(t.Context()))
 
 	assert.Equal(t, []string{
+		"systemctl --user disable --now cache-buster.timer",
+		"crontab -l",
 		"systemctl --user show-environment",
 		"systemctl --user daemon-reload",
-		"systemctl --user enable cache-buster.timer",
-		"systemctl --user restart cache-buster.timer",
+		"systemctl --user enable bilgie.timer",
+		"systemctl --user restart bilgie.timer",
 		"crontab -l",
 	}, s.commands())
-	assert.Equal(t, filepath.Join(a.Home, ".config", "systemd", "user", "cache-buster.timer"), a.TimerPath())
+	assert.Equal(t, filepath.Join(a.Home, ".config", "systemd", "user", "bilgie.timer"), a.TimerPath())
 	service, err := os.ReadFile(a.ServicePath())
 	require.NoError(t, err)
 	assert.Contains(t, string(service), `ExecStart="`+posixExe+`" auto`)
@@ -280,6 +282,8 @@ func TestSystemdUninstall_RemovesUnitsAndMarker(t *testing.T) {
 	assert.False(t, FirstRunPending(a.StateDir))
 	assert.Equal(t, []string{
 		"systemctl --user disable --now cache-buster.timer",
+		"crontab -l",
+		"systemctl --user disable --now bilgie.timer",
 		"systemctl --user daemon-reload",
 		"crontab -l",
 	}, s.commands())
@@ -290,7 +294,7 @@ func TestSystemdUninstall_NotInstalledIsNotAnError(t *testing.T) {
 	s := &scriptedExec{respond: func(name string, args []string) ([]byte, error) {
 		switch {
 		case name == "systemctl" && args[1] == "disable":
-			return []byte("Failed to disable unit: Unit file cache-buster.timer does not exist."), errors.New("exit status 1")
+			return []byte("Failed to disable unit: Unit file bilgie.timer does not exist."), errors.New("exit status 1")
 		case name == "systemctl" && args[1] == "show":
 			return []byte("not-found\n"), nil
 		}
@@ -304,6 +308,9 @@ func TestSystemdUninstall_NotInstalledIsNotAnError(t *testing.T) {
 	assert.Equal(t, []string{
 		"systemctl --user disable --now cache-buster.timer",
 		"systemctl --user show --property=LoadState --value cache-buster.timer",
+		"crontab -l",
+		"systemctl --user disable --now bilgie.timer",
+		"systemctl --user show --property=LoadState --value bilgie.timer",
 		"crontab -l",
 	}, s.commands())
 }
@@ -373,10 +380,11 @@ func TestLinuxInstall_FallsBackToCronWithoutUserManager(t *testing.T) {
 
 	require.NoError(t, a.Install(t.Context()))
 
-	assert.Equal(t, "crontab", s.calls[2][0])
-	assert.NotEqual(t, "-l", s.calls[2][1])
+	last := s.calls[len(s.calls)-1]
+	assert.Equal(t, "crontab", last[0])
+	assert.NotEqual(t, "-l", last[1])
 	assert.True(t, strings.HasPrefix(loaded, "MAILTO=me@example.com\n0 3 * * * backup.sh\n*/30 * * * * env PATH="), loaded)
-	assert.True(t, strings.HasSuffix(loaded, " # cache-buster\n"), loaded)
+	assert.True(t, strings.HasSuffix(loaded, " # bilgie\n"), loaded)
 	assert.NoFileExists(t, filepath.Join(a.StateDir, "crontab.new"))
 	assert.NoFileExists(t, a.TimerPath())
 	assert.True(t, FirstRunPending(a.StateDir))
@@ -390,7 +398,7 @@ func TestCronInstall_ReplacesItsOwnEntryAndKeepsOthers(t *testing.T) {
 		case name == "systemctl":
 			return nil, errors.New("exit status 1")
 		case name == "crontab" && args[0] == "-l":
-			return []byte("0 3 * * * backup.sh\n*/10 * * * * old auto # cache-buster\n"), nil
+			return []byte("0 3 * * * backup.sh\n*/10 * * * * old auto # bilgie\n"), nil
 		case name == "crontab":
 			data, err := os.ReadFile(args[0])
 			loaded = string(data)
@@ -403,7 +411,7 @@ func TestCronInstall_ReplacesItsOwnEntryAndKeepsOthers(t *testing.T) {
 
 	require.NoError(t, a.Install(t.Context()))
 
-	assert.Equal(t, 1, strings.Count(loaded, "# cache-buster"), loaded)
+	assert.Equal(t, 1, strings.Count(loaded, "# bilgie"), loaded)
 	assert.Contains(t, loaded, "0 3 * * * backup.sh\n")
 	assert.NotContains(t, loaded, "old auto")
 }
@@ -451,7 +459,7 @@ func cronUninstallExec(crontab string, loaded *string) *scriptedExec {
 
 func TestCronUninstall_KeepsOtherEntries(t *testing.T) {
 	var loaded string
-	s := cronUninstallExec("0 3 * * * backup.sh\n*/45 * * * * x auto # cache-buster\n", &loaded)
+	s := cronUninstallExec("0 3 * * * backup.sh\n*/45 * * * * x auto # bilgie\n", &loaded)
 	a := newOSAgent(t, "linux", posixExe, s)
 	require.NoError(t, MarkFirstRunPending(a.StateDir))
 
@@ -464,7 +472,7 @@ func TestCronUninstall_KeepsOtherEntries(t *testing.T) {
 
 func TestCronUninstall_RemovesWholeCrontabWhenOnlyOurs(t *testing.T) {
 	var loaded string
-	s := cronUninstallExec("*/45 * * * * x auto # cache-buster\n", &loaded)
+	s := cronUninstallExec("*/45 * * * * x auto # bilgie\n", &loaded)
 	a := newOSAgent(t, "linux", posixExe, s)
 
 	require.NoError(t, a.Uninstall(t.Context()))
@@ -483,6 +491,9 @@ func TestCronUninstall_NoEntryLeavesCrontabAlone(t *testing.T) {
 	assert.Equal(t, []string{
 		"systemctl --user disable --now cache-buster.timer",
 		"systemctl --user show --property=LoadState --value cache-buster.timer",
+		"crontab -l",
+		"systemctl --user disable --now bilgie.timer",
+		"systemctl --user show --property=LoadState --value bilgie.timer",
 		"crontab -l",
 	}, s.commands())
 	assert.Contains(t, output(a), "agent was not installed")
@@ -557,7 +568,10 @@ func TestTaskInstall_WritesDefinitionAndCreatesTask(t *testing.T) {
 
 	require.NoError(t, a.Install(t.Context()))
 
-	assert.Equal(t, []string{"schtasks /Create /TN cache-buster /XML " + a.TaskXMLPath() + " /F"}, s.commands())
+	assert.Equal(t, []string{
+		"schtasks /Delete /TN cache-buster /F",
+		"schtasks /Create /TN bilgie /XML " + a.TaskXMLPath() + " /F",
+	}, s.commands())
 	raw, err := os.ReadFile(a.TaskXMLPath())
 	require.NoError(t, err)
 	assert.Equal(t, EncodeTaskXML(mustTaskXML(t, a)), raw)
@@ -572,7 +586,10 @@ func mustTaskXML(t *testing.T, a Agent) string {
 }
 
 func TestTaskInstall_CreateFailureIsReturned(t *testing.T) {
-	s := &scriptedExec{respond: func(string, []string) ([]byte, error) {
+	s := &scriptedExec{respond: func(_ string, args []string) ([]byte, error) {
+		if args[0] != "/Create" {
+			return nil, nil
+		}
 		return []byte("ERROR: Access is denied."), errors.New("exit status 1")
 	}}
 	a := newOSAgent(t, "windows", windowsExe, s)
@@ -591,7 +608,10 @@ func TestTaskUninstall_DeletesTaskAndDefinition(t *testing.T) {
 
 	require.NoError(t, a.Uninstall(t.Context()))
 
-	assert.Equal(t, []string{"schtasks /Delete /TN cache-buster /F"}, s.commands())
+	assert.Equal(t, []string{
+		"schtasks /Delete /TN cache-buster /F",
+		"schtasks /Delete /TN bilgie /F",
+	}, s.commands())
 	assert.NoFileExists(t, a.TaskXMLPath())
 	assert.False(t, FirstRunPending(a.StateDir))
 	assert.NotContains(t, output(a), "not installed")
@@ -612,12 +632,14 @@ func TestTaskUninstall_NotInstalledIsConfirmedByListing(t *testing.T) {
 	assert.Equal(t, []string{
 		"schtasks /Delete /TN cache-buster /F",
 		"schtasks /Query /FO CSV /NH",
+		"schtasks /Delete /TN bilgie /F",
+		"schtasks /Query /FO CSV /NH",
 	}, s.commands())
 }
 
 func TestTaskUninstall_DeleteFailureNotConfirmedAbsentKeepsState(t *testing.T) {
 	tests := map[string]func() ([]byte, error){
-		"task still listed": func() ([]byte, error) { return []byte("\"\\cache-buster\",\"N/A\",\"Ready\"\r\n"), nil },
+		"task still listed": func() ([]byte, error) { return []byte("\"\\bilgie\",\"N/A\",\"Ready\"\r\n"), nil },
 		"listing fails":     func() ([]byte, error) { return nil, errors.New("exit status 1") },
 	}
 	for name, list := range tests {
@@ -657,7 +679,7 @@ func TestLinuxUninstall_CronFallbackWorksWithoutUserManager(t *testing.T) {
 		case name == "systemctl":
 			return []byte("Failed to connect to bus"), errors.New("exit status 1")
 		case name == "crontab" && args[0] == "-l":
-			return []byte("0 3 * * * backup.sh\n*/30 * * * * x auto # cache-buster\n"), nil
+			return []byte("0 3 * * * backup.sh\n*/30 * * * * x auto # bilgie\n"), nil
 		case name == "crontab":
 			data, err := os.ReadFile(args[0])
 			loaded = string(data)
@@ -684,7 +706,7 @@ func TestLinuxUninstall_SystemdFailureStillCleansCron(t *testing.T) {
 		case name == "systemctl":
 			return []byte("Access denied"), errors.New("exit status 1")
 		case name == "crontab" && args[0] == "-l":
-			return []byte("*/30 * * * * x auto # cache-buster\n0 3 * * * backup.sh\n"), nil
+			return []byte("*/30 * * * * x auto # bilgie\n0 3 * * * backup.sh\n"), nil
 		case name == "crontab":
 			data, err := os.ReadFile(args[0])
 			loaded = string(data)
@@ -705,7 +727,7 @@ func TestSystemdInstall_RemovesAnEarlierCronEntry(t *testing.T) {
 	s.respond = func(name string, args []string) ([]byte, error) {
 		switch {
 		case name == "crontab" && args[0] == "-l":
-			return []byte("*/30 * * * * x auto # cache-buster\n0 3 * * * backup.sh\n"), nil
+			return []byte("*/30 * * * * x auto # bilgie\n0 3 * * * backup.sh\n"), nil
 		case name == "crontab":
 			data, err := os.ReadFile(args[0])
 			loaded = string(data)
@@ -732,12 +754,12 @@ func TestSystemdUnits_FollowTheConfigDir(t *testing.T) {
 			if wantDir == "" {
 				wantDir = filepath.Join(a.Home, ".config")
 			}
-			wantTimer := filepath.Join(wantDir, "systemd", "user", "cache-buster.timer")
+			wantTimer := filepath.Join(wantDir, "systemd", "user", "bilgie.timer")
 
 			require.NoError(t, a.Install(t.Context()))
 			assert.Equal(t, wantTimer, a.TimerPath())
 			assert.FileExists(t, wantTimer)
-			assert.FileExists(t, filepath.Join(wantDir, "systemd", "user", "cache-buster.service"))
+			assert.FileExists(t, filepath.Join(wantDir, "systemd", "user", "bilgie.service"))
 			if configDir != "" {
 				assert.NoDirExists(t, filepath.Join(a.Home, ".config"))
 			}

@@ -46,7 +46,7 @@ jobs:
         run: |
           NILAWAY_BASELINE=0
           set +e
-          nilaway -include-pkgs="github.com/Automaat/cache-buster" ./... > nilaway.out 2>&1
+          nilaway -include-pkgs="github.com/smykla-skalski/bilgie" ./... > nilaway.out 2>&1
           NILAWAY_EXIT=$?
           FINDING_COUNT=$(grep -c '^/' nilaway.out)
           set -e
@@ -166,14 +166,14 @@ jobs:
 
       - name: Build binary
         run: |
-          BIN=./cache-buster
-          if [ "${{ runner.os }}" = "Windows" ]; then BIN=./cache-buster.exe; fi
-          go build -v -o "$BIN" ./cmd/cache-buster
+          BIN=./bilgie
+          if [ "${{ runner.os }}" = "Windows" ]; then BIN=./bilgie.exe; fi
+          go build -v -o "$BIN" ./cmd/bilgie
 
       - name: Verify binary
         run: |
-          BIN=./cache-buster
-          if [ "${{ runner.os }}" = "Windows" ]; then BIN=./cache-buster.exe; fi
+          BIN=./bilgie
+          if [ "${{ runner.os }}" = "Windows" ]; then BIN=./bilgie.exe; fi
           "$BIN" --version || "$BIN" --help
 
   test:

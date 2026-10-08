@@ -9,8 +9,6 @@ import (
 	"time"
 )
 
-const cronMarker = " # " + CronTag
-
 // cronSchedule maps an interval onto the five cron fields. Cron fires on
 // fixed minute and hour marks, so only whole-minute intervals that divide an
 // hour or a day evenly keep every gap equal; anything else is rejected
@@ -49,7 +47,7 @@ func RenderCronLine(exe, home, logPath string, interval time.Duration) (string, 
 	}
 	command := fmt.Sprintf("env PATH=%s nice -n 10 %s auto >> %s 2>&1",
 		shellQuote(systemdPath(home)), shellQuote(exe), shellQuote(logPath))
-	return schedule + " " + strings.ReplaceAll(command, "%", `\%`) + cronMarker + "\n", nil
+	return schedule + " " + strings.ReplaceAll(command, "%", `\%`) + cronMarker(CronTag) + "\n", nil
 }
 
 // currentCrontab returns the user's crontab; a missing crontab is empty.
@@ -64,11 +62,16 @@ func (a Agent) currentCrontab(ctx context.Context) (string, error) {
 	return "", fmt.Errorf("crontab -l: %w: %s", err, strings.TrimSpace(string(out)))
 }
 
-func withoutCronEntry(crontab string) (string, bool) {
+func cronMarker(tag string) string {
+	return " # " + tag
+}
+
+func withoutCronEntry(crontab, tag string) (string, bool) {
+	marker := cronMarker(tag)
 	var kept []string
 	found := false
 	for line := range strings.SplitSeq(strings.TrimRight(crontab, "\n"), "\n") {
-		if strings.HasSuffix(line, cronMarker) {
+		if strings.HasSuffix(line, marker) {
 			found = true
 			continue
 		}
@@ -107,7 +110,7 @@ func (a Agent) installCron(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	rest, _ := withoutCronEntry(current)
+	rest, _ := withoutCronEntry(current, a.id().cronTag)
 	if err := a.loadCrontab(ctx, rest+line); err != nil {
 		return err
 	}
@@ -127,7 +130,7 @@ func (a Agent) uninstallCron(ctx context.Context) (bool, error) {
 		}
 		return false, err
 	}
-	rest, found := withoutCronEntry(current)
+	rest, found := withoutCronEntry(current, a.id().cronTag)
 	if !found {
 		return false, nil
 	}

@@ -1,14 +1,14 @@
 version: 2
 
-project_name: cache-buster
+project_name: bilgie
 
 before:
   hooks:
     - go mod tidy
 
 builds:
-  - main: ./cmd/cache-buster
-    binary: cache-buster
+  - main: ./cmd/bilgie
+    binary: bilgie
     ldflags:
       - -s -w -X main.version={{.Version}}
     env:
@@ -46,7 +46,7 @@ changelog:
       - Merge branch
 
 brews:
-  - name: cache-buster
+  - name: bilgie
     repository:
       owner: Automaat
       name: homebrew-tap
@@ -54,15 +54,15 @@ brews:
     commit_author:
       name: goreleaser-bot
       email: bot@goreleaser.com
-    homepage: "https://github.com/Automaat/cache-buster"
+    homepage: "https://github.com/smykla-skalski/bilgie"
     description: "Developer cache manager with configurable size limits"
     license: "MIT"
     install: |
-      bin.install "cache-buster"
+      bin.install "bilgie"
     test: |
-      system "#{bin}/cache-buster --version"
+      system "#{bin}/bilgie --version"
 
 release:
   github:
-    owner: Automaat
-    name: cache-buster
+    owner: smykla-skalski
+    name: bilgie

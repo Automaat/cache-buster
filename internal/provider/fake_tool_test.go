@@ -14,7 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-const fakeToolEnv = "CACHE_BUSTER_FAKE_TOOL"
+const fakeToolEnv = "BILGIE_FAKE_TOOL"
 
 // fakeReply is what a fake tool prints and returns for one invocation.
 // SleepMS delays the reply so a timeout test has something to kill, Touch
