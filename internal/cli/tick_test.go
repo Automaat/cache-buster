@@ -247,7 +247,9 @@ func TestTick_FallingTrendStartsAPassBeforeTheThreshold(t *testing.T) {
 	r.tick(62*autoGiB, 8*time.Minute)
 
 	assert.Equal(t, 1, r.passes())
-	assert.Equal(t, "low", readRecords(t, r.autoFixture)[0].Tier)
+	runs := readRecords(t, r.autoFixture)
+	require.Len(t, runs, 1)
+	assert.Equal(t, "low", runs[0].Tier)
 	state, err := auto.ReadTickState(r.env.stateDir)
 	require.NoError(t, err)
 	assert.Equal(t, "ok", state.Tier)
@@ -337,6 +339,9 @@ func TestTick_RechecksTheCooldownAfterTakingTheLock(t *testing.T) {
 	require.NoError(t, runTickWithLoader(t.Context(), r.loader, r.env, false))
 
 	assert.Zero(t, r.passes(), "another pass finished first, so this tick is inside its cooldown")
+	state, err := auto.ReadTickState(r.env.stateDir)
+	require.NoError(t, err)
+	assert.Equal(t, auto.ActionIdle, state.Action)
 }
 
 func TestTick_RefreshesTheTickTimeAfterALongPass(t *testing.T) {

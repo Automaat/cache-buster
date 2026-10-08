@@ -368,3 +368,11 @@ func TestDecide_RoutinePassStillRunsInsideTheHysteresisBand(t *testing.T) {
 	assert.True(t, d.Run, d.Reason)
 	assert.Equal(t, "routine pass is due", d.Reason)
 }
+
+func TestDecide_FutureTickStateIsNotTierMemory(t *testing.T) {
+	d := decide(t, 11*gib, func(in *TickInput) {
+		in.Tick = TickState{Time: t0.Add(time.Hour), Tier: "emergency"}
+		in.Pass = PassState{Time: t0.Add(-5 * time.Minute), Tier: "low"}
+	})
+	assert.Equal(t, TierLow, d.Tier)
+}

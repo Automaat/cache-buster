@@ -125,6 +125,10 @@ func runTickWithLoader(ctx context.Context, loader *config.Loader, env autoEnv, 
 	}
 	d = auto.Decide(auto.TickInput{Now: now, Free: fs, Limits: limits, Tick: tick, Pass: pass})
 	if !d.Run {
+		state.Action, state.Reason = auto.ActionIdle, d.Reason
+		if !dryRun {
+			env.saveTick(state)
+		}
 		env.explainf("tick: %s", d.Reason)
 		return nil
 	}

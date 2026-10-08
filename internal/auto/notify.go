@@ -164,6 +164,9 @@ const notifyWorsenBytes int64 = 10 << 30
 // dropped by more than notifyWorsenBytes since then. A tier with no earlier
 // notification (a worse tier than before) is always allowed.
 func (p *PassState) NotifyAllowed(tier Tier, free int64, now time.Time, cooldown time.Duration) bool {
+	if p == nil {
+		return true
+	}
 	rec, ok := p.Notified[tier.String()]
 	if !ok || now.Sub(rec.Time) >= cooldown || rec.Time.After(now) {
 		return true
@@ -173,6 +176,9 @@ func (p *PassState) NotifyAllowed(tier Tier, free int64, now time.Time, cooldown
 
 // NoteNotified records a sent notification.
 func (p *PassState) NoteNotified(tier Tier, free int64, now time.Time) {
+	if p == nil {
+		return
+	}
 	if p.Notified == nil {
 		p.Notified = make(map[string]NotifyRecord)
 	}

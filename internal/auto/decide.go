@@ -55,7 +55,7 @@ type Decision struct {
 func Decide(in TickInput) Decision {
 	th := ThresholdsFor(in.Free.Total, in.Limits)
 	prev := TierOK
-	if !in.Tick.Time.IsZero() && in.Now.Sub(in.Tick.Time) < staleTierMemory {
+	if !in.Tick.Time.IsZero() && !in.Tick.Time.After(in.Now) && in.Now.Sub(in.Tick.Time) < staleTierMemory {
 		prev = ParseTier(in.Tick.Tier)
 	}
 	tier := th.Settle(prev, in.Free.Free)
