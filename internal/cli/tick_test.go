@@ -1,9 +1,11 @@
 package cli
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
@@ -357,4 +359,233 @@ func TestTick_RefreshesTheTickTimeAfterALongPass(t *testing.T) {
 	state, err := auto.ReadTickState(r.env.stateDir)
 	require.NoError(t, err)
 	assert.False(t, state.Time.Before(tickStart.Add(20*time.Minute)))
+}
+
+func TestTick_StaleClockDoesNotStartASecondPass(t *testing.T) {
+	r := newTickRig(t, "")
+	calls := 0
+	r.env.now = func() time.Time {
+		calls++
+		if calls == 1 {
+			require.NoError(t, auto.WritePassState(r.env.stateDir, auto.PassState{Time: tickStart.Add(2 * time.Second), Tier: "low"}))
+			return tickStart
+		}
+		return tickStart.Add(10 * time.Second)
+	}
+	r.env.free = func() (auto.FreeSpace, error) {
+		return auto.FreeSpace{Free: 40 * autoGiB, Total: 1000 * autoGiB}, nil
+	}
+
+	require.NoError(t, runTickWithLoader(t.Context(), r.loader, r.env, false))
+
+	assert.Zero(t, r.passes(), "the stamp is in the past once the clock is read under the lock")
+}
+
+func TestTick_UnusableStateFilesSelfHeal(t *testing.T) {
+	for _, name := range []string{auto.TickStateName, auto.PassStateName} {
+		t.Run(name+" directory", func(t *testing.T) {
+			r := newTickRig(t, "")
+			require.NoError(t, os.MkdirAll(filepath.Join(r.env.stateDir, name, "inner"), 0o750))
+
+			r.tick(40*autoGiB, 0)
+
+			assert.Contains(t, r.out.String(), "warning:")
+			assert.Contains(t, r.out.String(), name+" is not a regular file")
+			assert.DirExists(t, filepath.Join(r.env.stateDir, name+".bad"))
+			assert.Equal(t, 1, r.passes(), "the tick carries on with empty state")
+			_, err := auto.ReadTickState(r.env.stateDir)
+			require.NoError(t, err)
+			_, err = auto.ReadPassState(r.env.stateDir)
+			require.NoError(t, err)
+		})
+		t.Run(name+" corrupt", func(t *testing.T) {
+			r := newTickRig(t, "")
+			require.NoError(t, os.MkdirAll(r.env.stateDir, 0o750))
+			require.NoError(t, os.WriteFile(filepath.Join(r.env.stateDir, name), []byte("{torn"), 0o600))
+
+			r.tick(400*autoGiB, 0)
+
+			assert.Contains(t, r.out.String(), name+" is corrupt")
+			assert.FileExists(t, filepath.Join(r.env.stateDir, name+".bad"))
+			_, err := auto.ReadTickState(r.env.stateDir)
+			require.NoError(t, err)
+		})
+	}
+}
+
+func TestTick_UnreadableStateFileSelfHeals(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("file modes do not make a file unreadable on Windows")
+	}
+	r := newTickRig(t, "")
+	path := filepath.Join(r.env.stateDir, auto.TickStateName)
+	require.NoError(t, os.MkdirAll(r.env.stateDir, 0o750))
+	require.NoError(t, os.WriteFile(path, []byte("{}"), 0o000))
+	if _, err := os.ReadFile(path); err == nil {
+		t.Skip("running as a user that ignores file modes")
+	}
+
+	r.tick(400*autoGiB, 0)
+
+	assert.Contains(t, r.out.String(), "moved aside")
+	assert.FileExists(t, path+".bad")
+	_, err := auto.ReadTickState(r.env.stateDir)
+	require.NoError(t, err)
+}
+
+func TestAuto_UnusablePassStateDoesNotFailTheRun(t *testing.T) {
+	f := newAutoFixture(t, 40*autoGiB, "")
+	require.NoError(t, os.MkdirAll(filepath.Join(f.env.stateDir, auto.PassStateName, "inner"), 0o750))
+
+	require.NoError(t, runAutoWithLoader(t.Context(), f.loader, f.env, false))
+
+	assert.Contains(t, f.out.String(), "pass.json is not a regular file")
+	_, err := auto.ReadPassState(f.env.stateDir)
+	require.NoError(t, err)
+}
+
+func TestTick_ForcedFirstRunDoesNotStartTheCooldown(t *testing.T) {
+	r := newTickRig(t, "")
+	require.NoError(t, auto.MarkFirstRunPending(r.env.stateDir))
+
+	r.tick(40*autoGiB, 0)
+	require.False(t, r.cleaned())
+	require.False(t, auto.FirstRunPending(r.env.stateDir))
+
+	r.tick(40*autoGiB, 2*time.Minute)
+	assert.True(t, r.cleaned(), "the first real pass is not held back by the dry-run")
+}
+
+func TestTick_CancelledPassIsNotRecordedAsDone(t *testing.T) {
+	r := newTickRig(t, "")
+	r.seedPass(-time.Hour, "ok")
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	r.now = tickStart
+	r.free = 40 * autoGiB
+
+	err := runTickWithLoader(ctx, r.loader, r.env, false)
+
+	require.ErrorIs(t, err, context.Canceled)
+	pass, err := auto.ReadPassState(r.env.stateDir)
+	require.NoError(t, err)
+	assert.Equal(t, tickStart.Add(-time.Hour), pass.Time, "the next tick may retry at once")
+}
+
+func TestTick_ConfigAndFreeSpaceErrorsFailTheTick(t *testing.T) {
+	t.Run("config cannot load", func(t *testing.T) {
+		r := newTickRig(t, "")
+		path := filepath.Join(t.TempDir(), "broken.yaml")
+		require.NoError(t, os.WriteFile(path, []byte("version: [unclosed"), 0o600))
+		r.loader.SetConfigPath(path)
+		require.ErrorContains(t, runTickWithLoader(t.Context(), r.loader, r.env, false), "load config")
+	})
+
+	t.Run("invalid limits", func(t *testing.T) {
+		r := newTickRig(t, "auto:\n  tick_interval: soon\n")
+		require.ErrorContains(t, runTickWithLoader(t.Context(), r.loader, r.env, false), "tick_interval")
+	})
+
+	t.Run("free space unreadable", func(t *testing.T) {
+		r := newTickRig(t, "")
+		r.env.free = func() (auto.FreeSpace, error) { return auto.FreeSpace{}, errors.New("statfs failed") }
+		err := runTickWithLoader(t.Context(), r.loader, r.env, false)
+		require.ErrorContains(t, err, "read free space")
+		require.ErrorContains(t, err, "statfs failed")
+	})
+}
+
+func TestTick_UnwritableStateDir(t *testing.T) {
+	blocker := filepath.Join(t.TempDir(), "state")
+	require.NoError(t, os.WriteFile(blocker, []byte("x"), 0o600))
+
+	t.Run("an idle tick only warns", func(t *testing.T) {
+		if runtime.GOOS == "windows" {
+			t.Skip("directory modes do not block writes on Windows")
+		}
+		r := newTickRig(t, "")
+		r.seedPass(-time.Minute, "ok")
+		require.NoError(t, os.Chmod(r.env.stateDir, 0o500))
+		t.Cleanup(func() { _ = os.Chmod(r.env.stateDir, 0o700) })
+		if probe, err := os.Create(filepath.Join(r.env.stateDir, "probe")); err == nil {
+			_ = probe.Close()
+			t.Skip("running as a user that ignores directory modes")
+		}
+
+		r.tick(400*autoGiB, 0)
+
+		assert.Contains(t, r.out.String(), "warning: record tick")
+	})
+
+	t.Run("a due pass cannot take the lock", func(t *testing.T) {
+		r := newTickRig(t, "")
+		r.env.stateDir = blocker
+
+		err := runTickWithLoader(t.Context(), r.loader, r.env, false)
+
+		require.Error(t, err)
+		assert.Zero(t, r.providers)
+	})
+}
+
+func TestAssumedFree_RejectsAnUnparsableSize(t *testing.T) {
+	_, err := assumedFree("lots", func() (auto.FreeSpace, error) { return auto.FreeSpace{}, nil })
+	require.ErrorContains(t, err, "--assume-free")
+
+	free, err := assumedFree("3G", func() (auto.FreeSpace, error) { return auto.FreeSpace{}, errors.New("boom") })
+	require.NoError(t, err)
+	_, err = free()
+	require.ErrorContains(t, err, "boom")
+}
+
+func TestTick_PendingFirstRunOnAHealthyDiskWaitsForTheInterval(t *testing.T) {
+	r := newTickRig(t, "")
+	require.NoError(t, auto.MarkFirstRunPending(r.env.stateDir))
+
+	for _, minutes := range []int{0, 2, 4, 6} {
+		r.tick(400*autoGiB, time.Duration(minutes)*time.Minute)
+	}
+
+	assert.Equal(t, 1, r.passes(), "the stamped dry-run holds the routine pass back for the interval")
+	assert.True(t, auto.FirstRunPending(r.env.stateDir))
+}
+
+func TestTick_DryRunLeavesBadStateFilesInPlace(t *testing.T) {
+	r := newTickRig(t, "")
+	path := filepath.Join(r.env.stateDir, auto.TickStateName)
+	require.NoError(t, os.MkdirAll(path, 0o750))
+
+	require.NoError(t, runTickWithLoader(t.Context(), r.loader, r.env, true))
+
+	assert.DirExists(t, path)
+	assert.NoDirExists(t, path+".bad")
+	assert.Contains(t, r.out.String(), "left in place")
+}
+
+func TestHealState_KeepsAFileThatIsUsableAgain(t *testing.T) {
+	r := newTickRig(t, "")
+	require.NoError(t, auto.WritePassState(r.env.stateDir, auto.PassState{Time: tickStart, Tier: "low"}))
+
+	r.env.healState(auto.PassStateName, errors.New("stale read error"), false)
+
+	assert.FileExists(t, filepath.Join(r.env.stateDir, auto.PassStateName))
+	assert.NoFileExists(t, filepath.Join(r.env.stateDir, auto.PassStateName+".bad"))
+	assert.Empty(t, r.out.String())
+}
+
+func TestTick_WrongShapeStateFilesAreMovedAside(t *testing.T) {
+	for _, name := range []string{auto.TickStateName, auto.PassStateName} {
+		for _, content := range []string{"[]", `"x"`, `{"time":123}`} {
+			t.Run(name+" "+content, func(t *testing.T) {
+				r := newTickRig(t, "")
+				require.NoError(t, os.MkdirAll(r.env.stateDir, 0o750))
+				require.NoError(t, os.WriteFile(filepath.Join(r.env.stateDir, name), []byte(content), 0o600))
+
+				r.tick(400*autoGiB, 0)
+
+				assert.Contains(t, r.out.String(), "moved aside")
+				assert.FileExists(t, filepath.Join(r.env.stateDir, name+".bad"))
+			})
+		}
+	}
 }

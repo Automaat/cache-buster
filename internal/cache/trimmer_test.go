@@ -254,3 +254,162 @@ func TestTrim_ReportsRemovedFiles(t *testing.T) {
 		assert.Equal(t, int64(700), result.Removed[0].Size)
 	}
 }
+
+func linkOrSkip(t *testing.T, oldname, newname string) {
+	t.Helper()
+	if err := os.Link(oldname, newname); err != nil {
+		t.Skipf("hard links unsupported here: %v", err)
+	}
+	mtime := time.Now().Add(-40 * 24 * time.Hour)
+	require.NoError(t, os.Chtimes(newname, mtime, mtime))
+}
+
+func TestTrim_CreditsSharedInodeOnceWhenAllLinksGo(t *testing.T) {
+	for _, dry := range []bool{true, false} {
+		dir := t.TempDir()
+		first := filepath.Join(dir, "a.bin")
+		createTestFile(t, first, 1000, 40*24*time.Hour)
+		linkOrSkip(t, first, filepath.Join(dir, "b.bin"))
+
+		result, err := Trim(context.Background(), []string{dir}, TrimOptions{
+			MaxSize: 10000, MaxAge: 30 * 24 * time.Hour, DryRun: dry,
+		})
+
+		require.NoError(t, err)
+		assert.Equal(t, int64(1000), result.FreedBytes, "dry=%v", dry)
+		assert.Equal(t, int64(2), result.DeletedCount, "dry=%v", dry)
+	}
+}
+
+func TestTrim_LinkOutsideTheCacheKeepsTheBytes(t *testing.T) {
+	dir, elsewhere := t.TempDir(), t.TempDir()
+	first := filepath.Join(dir, "a.bin")
+	createTestFile(t, first, 1000, 40*24*time.Hour)
+	linkOrSkip(t, first, filepath.Join(elsewhere, "keep.bin"))
+
+	result, err := Trim(context.Background(), []string{dir}, TrimOptions{
+		MaxSize: 10000, MaxAge: 30 * 24 * time.Hour,
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, int64(0), result.FreedBytes)
+	assert.Equal(t, int64(1), result.DeletedCount)
+}
+
+func TestTrim_SizeTrimCountsSharedInodeOnce(t *testing.T) {
+	dir := t.TempDir()
+	first := filepath.Join(dir, "a.bin")
+	createTestFile(t, first, 1000, 40*24*time.Hour)
+	linkOrSkip(t, first, filepath.Join(dir, "b.bin"))
+	createTestFile(t, filepath.Join(dir, "new.bin"), 1000, time.Hour)
+
+	result, err := Trim(context.Background(), []string{dir}, TrimOptions{
+		MaxSize: 1500, MaxAge: 90 * 24 * time.Hour,
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, int64(1000), result.FreedBytes)
+	assert.Equal(t, int64(2), result.DeletedCount)
+	assert.FileExists(t, filepath.Join(dir, "new.bin"))
+}
+
+func TestTrim_OverlappingPathsListEachFileOnce(t *testing.T) {
+	dir, elsewhere := t.TempDir(), t.TempDir()
+	first := filepath.Join(dir, "sub", "a.bin")
+	createTestFile(t, first, 1000, 40*24*time.Hour)
+	linkOrSkip(t, first, filepath.Join(elsewhere, "keep.bin"))
+
+	result, err := Trim(context.Background(), []string{dir, filepath.Join(dir, "sub")}, TrimOptions{
+		MaxSize: 10000, MaxAge: 30 * 24 * time.Hour, DryRun: true,
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, int64(0), result.FreedBytes, "the outside link keeps the inode")
+	assert.Equal(t, int64(1), result.DeletedCount)
+}
+
+func TestTrim_SizeTrimLeavesInodesItCannotFree(t *testing.T) {
+	dir, elsewhere := t.TempDir(), t.TempDir()
+	big := filepath.Join(dir, "big.bin")
+	createTestFile(t, big, 8000, 20*24*time.Hour)
+	linkOrSkip(t, big, filepath.Join(elsewhere, "keep.bin"))
+	for i, name := range []string{"a", "b", "c"} {
+		createTestFile(t, filepath.Join(dir, name), 1000, time.Duration(10-i)*24*time.Hour)
+	}
+
+	result, err := Trim(context.Background(), []string{dir}, TrimOptions{
+		MaxSize: 10500, MaxAge: 90 * 24 * time.Hour,
+	})
+
+	require.NoError(t, err)
+	assert.FileExists(t, big, "removing the link frees nothing")
+	assert.Equal(t, int64(2000), result.FreedBytes)
+	assert.Equal(t, int64(2), result.DeletedCount)
+}
+
+func TestCalculateSize_OverlappingAndAliasedPathsCountOnce(t *testing.T) {
+	root := t.TempDir()
+	createTestFile(t, filepath.Join(root, "a", "x.bin"), 100, time.Hour)
+	createTestFile(t, filepath.Join(root, "a", "b", "y.bin"), 50, time.Hour)
+	alias := filepath.Join(t.TempDir(), "alias")
+	if err := os.Symlink(root, alias); err != nil {
+		t.Skipf("symlinks unsupported here: %v", err)
+	}
+
+	res, err := CalculateSize([]string{root, filepath.Join(root, "a"), filepath.Join(alias, "a", "b")})
+
+	require.NoError(t, err)
+	assert.Equal(t, int64(150), res.Size)
+	list, err := ListFiles([]string{filepath.Join(alias, "a"), filepath.Join(root, "a", "b"), root})
+	require.NoError(t, err)
+	assert.Len(t, list.Files, 2)
+}
+
+func TestTrim_RemovesSharedInodeWholeOrNotAtAll(t *testing.T) {
+	dir := t.TempDir()
+	a1 := filepath.Join(dir, "a1")
+	b1 := filepath.Join(dir, "b1")
+	createTestFile(t, a1, 1000, 20*24*time.Hour)
+	createTestFile(t, b1, 1000, 15*24*time.Hour)
+	for _, l := range []struct {
+		from, to string
+		age      time.Duration
+	}{{a1, "a2", 10 * 24 * time.Hour}, {b1, "b2", 5 * 24 * time.Hour}} {
+		to := filepath.Join(dir, l.to)
+		linkOrSkip(t, l.from, to)
+		mtime := time.Now().Add(-l.age)
+		require.NoError(t, os.Chtimes(to, mtime, mtime))
+	}
+
+	result, err := Trim(context.Background(), []string{dir}, TrimOptions{
+		MaxSize: 1200, MaxAge: 90 * 24 * time.Hour,
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, int64(1000), result.FreedBytes)
+	assert.Equal(t, int64(2), result.DeletedCount)
+	assert.FileExists(t, b1, "an inode is not left with some links removed")
+	assert.FileExists(t, filepath.Join(dir, "b2"))
+}
+
+func TestCalculateSize_DuplicateFileRootsCountOnce(t *testing.T) {
+	root := t.TempDir()
+	file := filepath.Join(root, "f.bin")
+	createTestFile(t, file, 300, time.Hour)
+
+	res, err := CalculateSize([]string{file, file, filepath.Join(root, "..", filepath.Base(root), "f.bin")})
+	require.NoError(t, err)
+	assert.Equal(t, int64(300), res.Size)
+	list, err := ListFiles([]string{file, file})
+	require.NoError(t, err)
+	assert.Len(t, list.Files, 1)
+}
+
+func TestDistinctRoots_FilesystemRootAbsorbsChildren(t *testing.T) {
+	root := string(filepath.Separator)
+	if v := filepath.VolumeName(t.TempDir()); v != "" {
+		root = v + root
+	}
+	got := distinctRoots([]string{filepath.Join(root, "definitely-missing-x"), root, t.TempDir()})
+	assert.Equal(t, []string{root}, got)
+}

@@ -68,8 +68,8 @@ func runDoctorWithLoader(ctx context.Context, loader *config.Loader, env autoEnv
 
 	in.Runs, in.Corrupt, in.RunsErr = auto.ReadRuns(env.stateDir, 0)
 	in.FirstRunPending = auto.FirstRunPending(env.stateDir)
-	in.Tick, _ = auto.ReadTickState(env.stateDir)
-	in.Pass, _ = auto.ReadPassState(env.stateDir)
+	in.Tick, in.TickErr = auto.ReadTickState(env.stateDir)
+	in.Pass, in.PassErr = auto.ReadPassState(env.stateDir)
 
 	in.Free, in.FreeErr = env.free()
 	if p := pendingLegacyConfig(env.home); p != nil {

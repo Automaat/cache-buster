@@ -1,11 +1,15 @@
 package auto
 
 import (
+	"bytes"
 	"context"
 	"encoding/csv"
+	"encoding/xml"
 	"fmt"
+	"io"
 	"slices"
 	"strings"
+	"unicode/utf16"
 
 	"github.com/smykla-skalski/bilgie/internal/config"
 	"github.com/smykla-skalski/bilgie/internal/provider"
@@ -100,13 +104,48 @@ func (a Agent) statusTask(ctx context.Context) (AgentState, error) {
 			continue
 		}
 		st := AgentState{Backend: BackendTask, Installed: true, Loaded: true}
-		if len(rec) > 2 && strings.EqualFold(strings.TrimSpace(rec[2]), "Disabled") {
+		if a.taskDisabled(ctx, rec) {
 			st.Loaded = false
 			st.Detail = "task is disabled"
 		}
 		return st, nil
 	}
 	return AgentState{Backend: BackendTask}, nil
+}
+
+// taskDisabled reads the Enabled setting from the task definition, which is
+// the same in every Windows language. Only when the definition cannot be read
+// does it fall back to the English status text of the listing row.
+func (a Agent) taskDisabled(ctx context.Context, row []string) bool {
+	out, err := a.Exec(ctx, "schtasks", "/Query", "/TN", a.id().task, "/XML")
+	if err == nil {
+		if enabled, ok := taskEnabled(out); ok {
+			return !enabled
+		}
+	}
+	return len(row) > 2 && strings.EqualFold(strings.TrimSpace(row[2]), "Disabled")
+}
+
+// taskEnabled extracts Settings/Enabled from a task definition. ok is false
+// when the text is not a task definition.
+func taskEnabled(definition []byte) (enabled, ok bool) {
+	if len(definition) >= 2 && definition[0] == 0xFF && definition[1] == 0xFE {
+		units := make([]uint16, 0, len(definition)/2)
+		for i := 2; i+1 < len(definition); i += 2 {
+			units = append(units, uint16(definition[i])|uint16(definition[i+1])<<8)
+		}
+		definition = []byte(string(utf16.Decode(units)))
+	}
+	var task struct {
+		XMLName xml.Name `xml:"Task"`
+		Enabled *bool    `xml:"Settings>Enabled"`
+	}
+	dec := xml.NewDecoder(bytes.NewReader(definition))
+	dec.CharsetReader = func(_ string, r io.Reader) (io.Reader, error) { return r, nil }
+	if err := dec.Decode(&task); err != nil {
+		return false, false
+	}
+	return task.Enabled == nil || *task.Enabled, true
 }
 
 func cmpOr(s, fallback string) string {
@@ -136,6 +175,9 @@ func NotifierProgram(goos string) string {
 type Conflict struct {
 	Provider string
 	Reason   string
+	// Incomplete marks a finding that is not a conflict: the check was
+	// cancelled at Provider, so it and every later provider were not verified.
+	Incomplete bool
 }
 
 // ProtectionConflicts lists the enabled providers whose paths are protected,
@@ -166,8 +208,21 @@ func ProtectionConflicts(
 		if _, aware := p.(provider.ProtectionAware); aware {
 			continue
 		}
-		reason, ctxErr := protectedReason(ctx, p, pc.Type == config.TypeDirPattern, home, protected)
+		var (
+			reason string
+			ctxErr error
+		)
+		if g, guarded := p.(provider.PathGuarded); guarded {
+			reason, ctxErr = guardPaths(ctx, p, g, home, protected)
+		} else {
+			reason, ctxErr = protectedReason(ctx, p, pc.Type == config.TypeDirPattern, home, protected)
+		}
 		if ctxErr != nil {
+			out = append(out, Conflict{
+				Provider:   name,
+				Reason:     "protection check cancelled before this provider and the ones after it were verified",
+				Incomplete: true,
+			})
 			break
 		}
 		if reason != "" {

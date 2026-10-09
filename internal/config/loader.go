@@ -38,6 +38,11 @@ func (l *Loader) SkipDefaults() {
 	l.skipDefaults = true
 }
 
+// Path returns the config file path this loader reads and writes.
+func (l *Loader) Path() (string, error) {
+	return l.path()
+}
+
 func (l *Loader) path() (string, error) {
 	if l.configPath != "" {
 		return l.configPath, nil
@@ -137,6 +142,10 @@ func (l *Loader) Load() (*Config, error) {
 			merged.SkipPrefixes = unionStrings(defaultP.SkipPrefixes, userP.SkipPrefixes)
 		}
 		cfg.Providers[name] = merged
+	}
+
+	if err := cfg.ValidateAges(); err != nil {
+		return nil, err
 	}
 
 	return cfg, nil

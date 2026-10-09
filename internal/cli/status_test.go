@@ -43,7 +43,7 @@ func TestScanProvider(t *testing.T) {
 
 	cfg := &config.Config{
 		Providers: map[string]config.Provider{
-			"cargo": {
+			"gh": {
 				Paths:   []string{tmpDir},
 				MaxSize: "1GB",
 				Enabled: true,
@@ -51,9 +51,9 @@ func TestScanProvider(t *testing.T) {
 		},
 	}
 
-	status := scanProvider(t.Context(), cfg, "cargo")
+	status := scanProvider(t.Context(), cfg, "gh")
 
-	assert.Equal(t, "cargo", status.Name)
+	assert.Equal(t, "gh", status.Name)
 	assert.Equal(t, int64(5), status.Current)
 	assert.Equal(t, "5 B", status.CurrentFmt)
 	assert.Equal(t, int64(1073741824), status.Max)
@@ -69,7 +69,7 @@ func TestScanProvider_OverLimit(t *testing.T) {
 
 	cfg := &config.Config{
 		Providers: map[string]config.Provider{
-			"cargo": {
+			"gh": {
 				Paths:   []string{tmpDir},
 				MaxSize: "5B",
 				Enabled: true,
@@ -77,7 +77,7 @@ func TestScanProvider_OverLimit(t *testing.T) {
 		},
 	}
 
-	status := scanProvider(t.Context(), cfg, "cargo")
+	status := scanProvider(t.Context(), cfg, "gh")
 
 	assert.True(t, status.OverLimit)
 	assert.Greater(t, status.Current, status.Max)
@@ -128,17 +128,17 @@ func TestScanProviders_Parallel(t *testing.T) {
 
 	cfg := &config.Config{
 		Providers: map[string]config.Provider{
-			"cargo":  {Paths: []string{tmpDir1}, MaxSize: "1GB", Enabled: true},
-			"gradle": {Paths: []string{tmpDir2}, MaxSize: "1GB", Enabled: true},
+			"gh":   {Paths: []string{tmpDir1}, MaxSize: "1GB", Enabled: true},
+			"edge": {Paths: []string{tmpDir2}, MaxSize: "1GB", Enabled: true},
 		},
 	}
 
-	statuses := scanProviders(t.Context(), cfg, []string{"cargo", "gradle"})
+	statuses := scanProviders(t.Context(), cfg, []string{"gh", "edge"})
 
 	assert.Len(t, statuses, 2)
-	assert.Equal(t, "cargo", statuses[0].Name)
+	assert.Equal(t, "gh", statuses[0].Name)
 	assert.Equal(t, int64(3), statuses[0].Current)
-	assert.Equal(t, "gradle", statuses[1].Name)
+	assert.Equal(t, "edge", statuses[1].Name)
 	assert.Equal(t, int64(5), statuses[1].Current)
 }
 

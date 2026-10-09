@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -32,8 +33,12 @@ type DirPatternProvider struct {
 	protected []string
 	// keep holds directories a match must neither equal nor contain, so a
 	// sweep never removes the temp dir the process itself runs in.
-	keep []string
+	keep  []string
+	guard func(path string) string
 }
+
+// SetPathGuard implements PathGuarded.
+func (p *DirPatternProvider) SetPathGuard(guard func(path string) string) { p.guard = guard }
 
 // NewDirPatternProvider creates a provider that removes stale directories matching cfg.Paths.
 func NewDirPatternProvider(name string, cfg config.Provider) (*DirPatternProvider, error) {
@@ -114,21 +119,11 @@ func (p *DirPatternProvider) Clean(ctx context.Context, opts CleanOptions) (Clea
 		out    strings.Builder
 		result CleanResult
 		errs   []error
-		evals  = make([]evaluated, 0, len(p.paths))
-		seen   = make(map[string]bool, len(p.paths))
 	)
 
-	for _, dir := range p.paths {
-		if err := ctx.Err(); err != nil {
-			result.Output = out.String()
-			return result, err
-		}
-		if seen[dir] {
-			continue
-		}
-		seen[dir] = true
-		sc, reason := p.evaluate(ctx, dir)
-		evals = append(evals, evaluated{dir: dir, sc: sc, reason: reason})
+	evals, err := p.evaluateAll(ctx)
+	if err != nil {
+		return result, err
 	}
 	freed := newFreedLinks(evals)
 	eligible := 0
@@ -147,8 +142,13 @@ func (p *DirPatternProvider) Clean(ctx context.Context, opts CleanOptions) (Clea
 		dir, sc, reason := ev.dir, ev.sc, ev.reason
 		if reason == "" && !opts.DryRun && eligible > 1 {
 			// Other directories were evaluated since this one; confirm it
-			// is still idle and clean of .git before deleting.
-			sc, reason = p.recheck(ctx, dir, sc)
+			// is still idle, clean of .git and free of open files.
+			sc, reason = p.recheckBeforeRemoval(ctx, dir, sc)
+		}
+		if reason == "" && !opts.DryRun {
+			if _, statErr := os.Lstat(dir); errors.Is(statErr, fs.ErrNotExist) {
+				reason = "already removed"
+			}
 		}
 		if reason != "" {
 			fmt.Fprintf(&out, "skip: %s (%s)\n", dir, reason)
@@ -156,9 +156,9 @@ func (p *DirPatternProvider) Clean(ctx context.Context, opts CleanOptions) (Clea
 			continue
 		}
 
-		sc.size = ev.sc.size + freed.bytesFor(ev.sc)
 		idle := p.now().Sub(sc.newest).Round(time.Second)
 		if opts.DryRun {
+			sc.size = ev.sc.size + freed.remove(ev.sc)
 			fmt.Fprintf(&out, "would remove: %s (%s, idle %s)\n", dir, size.FormatSize(sc.size), idle)
 			result.BytesCleaned += sc.size
 			result.FilesDeleted += sc.files
@@ -172,6 +172,7 @@ func (p *DirPatternProvider) Clean(ctx context.Context, opts CleanOptions) (Clea
 			continue
 		}
 
+		sc.size = ev.sc.size + freed.remove(ev.sc)
 		fmt.Fprintf(&out, "removed: %s (%s, idle %s)\n", dir, size.FormatSize(sc.size), idle)
 		result.BytesCleaned += sc.size
 		result.FilesDeleted += sc.files
@@ -182,16 +183,78 @@ func (p *DirPatternProvider) Clean(ctx context.Context, opts CleanOptions) (Clea
 	return result, errors.Join(errs...)
 }
 
+// evaluateAll evaluates every distinct matched directory. Two spellings of one
+// directory (case variants, symlinked parents) count once, and a directory
+// below an eligible match is dropped: the match's own scan covers it.
+func (p *DirPatternProvider) evaluateAll(ctx context.Context) ([]evaluated, error) {
+	var (
+		evals = make([]evaluated, 0, len(p.paths))
+		seen  = make(map[string]bool, len(p.paths))
+		infos []fs.FileInfo
+	)
+	for _, dir := range p.paths {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		if seen[dir] {
+			continue
+		}
+		seen[dir] = true
+		if info, err := os.Lstat(dir); err == nil {
+			if slices.ContainsFunc(infos, func(o fs.FileInfo) bool { return os.SameFile(o, info) }) {
+				continue
+			}
+			infos = append(infos, info)
+		}
+		sc, reason := p.evaluate(ctx, dir)
+		evals = append(evals, evaluated{dir: dir, sc: sc, reason: reason})
+	}
+
+	var roots []string
+	for _, ev := range evals {
+		if ev.reason == "" {
+			roots = append(roots, resolveParent(ev.dir))
+		}
+	}
+	return slices.DeleteFunc(evals, func(ev evaluated) bool {
+		self := resolveParent(ev.dir)
+		return slices.ContainsFunc(roots, func(root string) bool { return isProperAncestor(root, self) })
+	}), nil
+}
+
+func isProperAncestor(ancestor, path string) bool {
+	rel, err := filepath.Rel(ancestor, path)
+	return err == nil && rel != "." && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
+
+// recheckBeforeRemoval repeats every check that can change while other
+// directories are being processed, open files included.
+func (p *DirPatternProvider) recheckBeforeRemoval(ctx context.Context, dir string, before dirScan) (sc dirScan, skipReason string) {
+	sc, skipReason = p.recheck(ctx, dir, before)
+	if skipReason != "" || !p.skipIfOpen {
+		return sc, skipReason
+	}
+	open, err := p.openCheck(ctx, dir)
+	switch {
+	case err != nil:
+		return sc, "open-file check failed: " + err.Error()
+	case open:
+		return sc, "has open files"
+	}
+	return sc, ""
+}
+
 // freedLinks tracks hard-linked inodes across the directories about to be
-// removed. An inode counts as freed once, in the first directory holding it,
-// and only when every link to it lies inside those directories.
+// removed. An inode counts as freed once, in the last directory holding it to
+// be removed, and only when every holder was removed and every link to it
+// lies inside those directories.
 type freedLinks struct {
 	total   map[osshim.FileID]uint64
-	claimed map[osshim.FileID]bool
+	removed map[osshim.FileID]uint64
 }
 
 func newFreedLinks(evals []evaluated) *freedLinks {
-	f := &freedLinks{total: make(map[osshim.FileID]uint64), claimed: make(map[osshim.FileID]bool)}
+	f := &freedLinks{total: make(map[osshim.FileID]uint64), removed: make(map[osshim.FileID]uint64)}
 	for _, ev := range evals {
 		if ev.reason != "" {
 			continue
@@ -203,14 +266,15 @@ func newFreedLinks(evals []evaluated) *freedLinks {
 	return f
 }
 
-func (f *freedLinks) bytesFor(sc dirScan) int64 {
+// remove records that sc's directory is gone and returns the bytes of the
+// shared inodes that this removal frees.
+func (f *freedLinks) remove(sc dirScan) int64 {
 	var n int64
 	for id, li := range sc.links {
-		if f.claimed[id] || f.total[id] < li.nlink {
-			continue
+		f.removed[id] += li.seen
+		if f.removed[id] == f.total[id] && f.total[id] >= li.nlink {
+			n += li.size
 		}
-		f.claimed[id] = true
-		n += li.size
 	}
 	return n
 }
@@ -220,6 +284,11 @@ func (f *freedLinks) bytesFor(sc dirScan) int64 {
 func (p *DirPatternProvider) evaluate(ctx context.Context, dir string) (sc dirScan, skipReason string) {
 	if p.isProtected(dir) || p.isProtected(resolveParent(dir)) {
 		return sc, "protected path"
+	}
+	if p.guard != nil {
+		if reason := p.guard(dir); reason != "" {
+			return sc, reason
+		}
 	}
 
 	if p.containsKept(dir) || p.containsKept(resolveParent(dir)) {

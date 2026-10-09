@@ -458,6 +458,7 @@ func TestFileProvider_ContextCancellation(t *testing.T) {
 }
 
 func TestDockerProvider_CleanNotAvailable(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
 	cfg := config.Provider{
 		Paths:    []string{t.TempDir()},
 		MaxSize:  "50G",
@@ -471,7 +472,7 @@ func TestDockerProvider_CleanNotAvailable(t *testing.T) {
 	}
 
 	if p.Available() {
-		t.Skip("docker is available, skipping unavailable test")
+		t.Fatal("docker must be unavailable with an empty PATH")
 	}
 
 	result, err := p.Clean(context.Background(), provider.CleanOptions{})

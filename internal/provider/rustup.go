@@ -35,7 +35,7 @@ func NewRustupProvider(name string, cfg config.Provider) (*RustupProvider, error
 	}
 	timeout := DefaultCleanTimeout
 	if cfg.CleanTimeout != "" {
-		timeout, err = config.ParseDuration(cfg.CleanTimeout)
+		timeout, err = config.ParseBudget(cfg.CleanTimeout)
 		if err != nil {
 			return nil, fmt.Errorf("parse clean_timeout: %w", err)
 		}

@@ -60,6 +60,14 @@ type ProtectionAware interface {
 	SetProtected(paths []string)
 }
 
+// PathGuarded is implemented by providers that work through many matched
+// paths and can skip single ones. The guard returns why a path is off
+// limits, or "" when it is clear. A guarded provider skips the protected
+// matches and still cleans the rest, instead of being skipped whole.
+type PathGuarded interface {
+	SetPathGuard(guard func(path string) string)
+}
+
 // CleanOptions configures cleaning behavior.
 type CleanOptions struct {
 	DryRun bool

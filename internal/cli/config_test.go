@@ -33,13 +33,17 @@ func TestConfigInit_New(t *testing.T) {
 	loader := config.NewLoader()
 	loader.SetConfigPath(configPath)
 
-	err := runConfigInitWithLoader(loader)
-	if err != nil {
-		t.Fatalf("runConfigInitWithLoader failed: %v", err)
-	}
+	out := captureStdout(t, func() {
+		if err := runConfigInitWithLoader(loader); err != nil {
+			t.Fatalf("runConfigInitWithLoader failed: %v", err)
+		}
+	})
 
 	if _, err := os.Stat(configPath); os.IsNotExist(err) {
 		t.Error("config file not created")
+	}
+	if want := "Created " + configPath + "\n"; out != want {
+		t.Errorf("output = %q, want %q", out, want)
 	}
 }
 
@@ -56,9 +60,13 @@ func TestConfigInit_Exists(t *testing.T) {
 	}
 
 	// Run again - should not error
-	err := runConfigInitWithLoader(loader)
-	if err != nil {
-		t.Fatalf("runConfigInitWithLoader failed on existing: %v", err)
+	out := captureStdout(t, func() {
+		if err := runConfigInitWithLoader(loader); err != nil {
+			t.Fatalf("runConfigInitWithLoader failed on existing: %v", err)
+		}
+	})
+	if want := "Config already exists: " + configPath + "\n"; out != want {
+		t.Errorf("output = %q, want %q", out, want)
 	}
 }
 

@@ -92,6 +92,10 @@ type Input struct {
 
 	Tick auto.TickState
 	Pass auto.PassState
+	// TickErr and PassErr are set when the state file exists but cannot be
+	// used (corrupt, unreadable, not a regular file).
+	TickErr error
+	PassErr error
 
 	NotifierProgram string
 	NotifierErr     error
@@ -192,6 +196,10 @@ func cadenceFindings(in Input) []Finding {
 
 	tick := Finding{Area: "last tick"}
 	switch {
+	case in.TickErr != nil:
+		tick.Level = Warn
+		tick.Message = in.TickErr.Error()
+		tick.Hint = "the next tick moves it aside (" + auto.TickStateName + ".bad) and carries on; or delete it"
 	case (in.Tick.Time.IsZero() || in.Tick.Time.After(in.Now)) && in.Agent.Installed:
 		tick.Level = Warn
 		tick.Message = "no tick recorded: the installed agent may still run the old 30-minute auto cadence"
@@ -208,8 +216,36 @@ func cadenceFindings(in Input) []Finding {
 			tick.Hint = hintLog(in.LogPath, "run: bilgie install-agent to reinstall it")
 		}
 	}
-	out = append(out, tick, Finding{Area: "next full pass", Message: nextPass(in, limits.Interval)})
+	next := Finding{Area: "next full pass", Message: nextPass(in, limits.Interval)}
+	if in.PassErr != nil {
+		next.Level = Warn
+		next.Message = in.PassErr.Error()
+		next.Hint = "the next pass moves it aside (" + auto.PassStateName + ".bad) and carries on; or delete it"
+	}
+	out = append(out, tick, next)
+	if f, ok := capFinding(in); ok {
+		out = append(out, f)
+	}
 	return out
+}
+
+// capFinding notes when min_free_cap keeps min_free_pct from taking effect,
+// so an explicit percentage is not silently lowered.
+func capFinding(in Input) (Finding, bool) {
+	limits, err := in.Cfg.Auto.Limits()
+	if err != nil || in.FreeErr != nil || limits.MinFreePct <= 0 || in.Free.Total <= 0 {
+		return Finding{}, false
+	}
+	pct := int64(float64(in.Free.Total) * limits.MinFreePct / 100)
+	if pct <= limits.MinFreeCap {
+		return Finding{}, false
+	}
+	return Finding{
+		Area: "min free", Level: Note,
+		Message: fmt.Sprintf("min_free_pct %g%% of this volume is %s, lowered to min_free_cap %s",
+			limits.MinFreePct, size.FormatSize(pct), size.FormatSize(limits.MinFreeCap)),
+		Hint: "raise auto.min_free_cap to apply the full percentage",
+	}, true
 }
 
 func nextPass(in Input, interval time.Duration) string {
@@ -278,7 +314,7 @@ func lastRunFindings(in Input) []Finding {
 		if f, ok := staleFinding(in, last); ok {
 			out = append(out, f)
 		}
-	case in.Agent.Installed && !in.FirstRunPending:
+	case in.Agent.Installed && !in.FirstRunPending && onlyDryRunsStale(in, last):
 		out = append(out, Finding{
 			Area: "schedule", Level: Warn,
 			Message: "only dry-runs are recorded: the agent has not completed a deleting run",
@@ -287,6 +323,20 @@ func lastRunFindings(in Input) []Finding {
 	}
 	out = append(out, freedFinding(in))
 	return append(out, extraRunNotes(in)...)
+}
+
+// onlyDryRunsStale holds back the dry-runs-only warning until the newest
+// dry-run is older than staleFactor intervals: right after the forced first
+// run the real pass is simply not due yet.
+func onlyDryRunsStale(in Input, last auto.RunRecord) bool {
+	if in.Cfg == nil {
+		return true
+	}
+	interval, err := in.Cfg.Auto.IntervalDuration()
+	if err != nil || interval <= 0 {
+		return true
+	}
+	return in.Now.Sub(last.Time) > staleFactor*interval
 }
 
 func newestRun(runs []auto.RunRecord) (auto.RunRecord, bool) {
@@ -474,6 +524,14 @@ func configFindings(in Input) []Finding {
 
 	conflicted := make(map[string]bool)
 	for _, c := range in.Conflicts {
+		if c.Incomplete {
+			out = append(out, Finding{
+				Area: "config", Level: Warn,
+				Message: "protection check incomplete: " + c.Reason,
+				Hint:    "run doctor again to verify the remaining providers",
+			})
+			continue
+		}
 		conflicted[c.Provider] = true
 		out = append(out, Finding{
 			Area: "config", Level: Warn,

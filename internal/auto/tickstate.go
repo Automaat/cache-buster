@@ -13,11 +13,14 @@ import (
 // touches the tick file) never races the pass holder (which owns the pass
 // file under the run lock). Both are replaced atomically.
 const (
-	tickStateName = "tick.json"
-	passStateName = "pass.json"
+	TickStateName = "tick.json"
+	PassStateName = "pass.json"
 )
 
-var errCorruptState = errors.New("corrupt state file")
+// ErrBadState marks a state file that cannot be used: corrupt content, a read
+// error, or something that is not a regular file. The readers return the
+// empty state with it so callers decide how loudly to heal.
+var ErrBadState = errors.New("unusable state file")
 
 // Sample is one free-space reading kept for the trend forecast.
 type Sample struct {
@@ -52,17 +55,47 @@ type PassState struct {
 }
 
 func readJSON(stateDir, name string, v any) error {
-	data, err := os.ReadFile(filepath.Join(stateDir, name))
+	path := filepath.Join(stateDir, name)
+	info, err := os.Lstat(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil
 	}
 	if err != nil {
-		return fmt.Errorf("read %s: %w", name, err)
+		return fmt.Errorf("%w: read %s: %w", ErrBadState, name, err)
+	}
+	if !info.Mode().IsRegular() {
+		return fmt.Errorf("%w: %s is not a regular file", ErrBadState, name)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("%w: read %s: %w", ErrBadState, name, err)
 	}
 	if err := json.Unmarshal(data, v); err != nil {
-		return fmt.Errorf("%w: %s: %w", errCorruptState, name, err)
+		return fmt.Errorf("%w: %s is corrupt: %w", ErrBadState, name, err)
 	}
 	return nil
+}
+
+// CheckState reports whether the named state file is still unusable, judged
+// by the shape the reader expects.
+func CheckState(stateDir, name string) error {
+	if name == TickStateName {
+		_, err := ReadTickState(stateDir)
+		return err
+	}
+	_, err := ReadPassState(stateDir)
+	return err
+}
+
+// QuarantineState moves a bad state file (or directory) aside to
+// <name>.bad so the next write can replace it, and returns the new path.
+func QuarantineState(stateDir, name string) (string, error) {
+	from := filepath.Join(stateDir, name)
+	to := from + ".bad"
+	if err := os.RemoveAll(to); err != nil {
+		return "", err
+	}
+	return to, os.Rename(from, to)
 }
 
 func writeJSON(stateDir, name string, v any) error {
@@ -73,14 +106,11 @@ func writeJSON(stateDir, name string, v any) error {
 	return writeFileAtomic(filepath.Join(stateDir, name), data)
 }
 
-// ReadTickState loads the tick state. A missing or torn file is the empty
-// state, so a bad write never wedges the agent.
+// ReadTickState loads the tick state. A missing file is the empty state. A
+// bad file also returns the empty state, with an error wrapping ErrBadState.
 func ReadTickState(stateDir string) (TickState, error) {
 	var s TickState
-	if err := readJSON(stateDir, tickStateName, &s); err != nil {
-		if errors.Is(err, errCorruptState) {
-			return TickState{}, nil
-		}
+	if err := readJSON(stateDir, TickStateName, &s); err != nil {
 		return TickState{}, err
 	}
 	return s, nil
@@ -88,16 +118,13 @@ func ReadTickState(stateDir string) (TickState, error) {
 
 // WriteTickState stores the tick state.
 func WriteTickState(stateDir string, s TickState) error {
-	return writeJSON(stateDir, tickStateName, s)
+	return writeJSON(stateDir, TickStateName, s)
 }
 
-// ReadPassState loads the pass state, with the same tolerance as ReadTickState.
+// ReadPassState loads the pass state, with the same contract as ReadTickState.
 func ReadPassState(stateDir string) (PassState, error) {
 	var s PassState
-	if err := readJSON(stateDir, passStateName, &s); err != nil {
-		if errors.Is(err, errCorruptState) {
-			return PassState{}, nil
-		}
+	if err := readJSON(stateDir, PassStateName, &s); err != nil {
 		return PassState{}, err
 	}
 	return s, nil
@@ -105,5 +132,5 @@ func ReadPassState(stateDir string) (PassState, error) {
 
 // WritePassState stores the pass state.
 func WritePassState(stateDir string, s PassState) error {
-	return writeJSON(stateDir, passStateName, s)
+	return writeJSON(stateDir, PassStateName, s)
 }

@@ -32,6 +32,11 @@ func TestParseDuration(t *testing.T) {
 		{"60S", 60 * time.Second, false},
 		{"100", 100 * time.Second, false}, // No unit defaults to seconds
 
+		// Milliseconds are rejected by the default parser
+		{"500ms", 0, true},
+		{"50MS", 0, true},
+		{"5m", 5 * time.Minute, false},
+
 		// Empty string returns default
 		{"", DefaultMaxAge, false},
 		{"  ", DefaultMaxAge, false},
@@ -57,4 +62,26 @@ func TestParseDuration(t *testing.T) {
 			assert.Equal(t, tt.expected, got)
 		})
 	}
+}
+
+func TestParseBudget(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected time.Duration
+	}{
+		{"500ms", 500 * time.Millisecond},
+		{"50MS", 50 * time.Millisecond},
+		{"10s", 10 * time.Second},
+		{"2m", 2 * time.Minute},
+		{"30d", 30 * 24 * time.Hour},
+	}
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			got, err := ParseBudget(tt.input)
+			require.NoError(t, err)
+			assert.Equal(t, tt.expected, got)
+		})
+	}
+	_, err := ParseBudget("abc")
+	require.Error(t, err)
 }

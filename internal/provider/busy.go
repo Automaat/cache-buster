@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"runtime"
 	"slices"
@@ -23,6 +24,7 @@ var busyProcesses = map[string][]string{
 	"gradle":   {"gradle", "gradlew"},
 	"rustup":   {"rustup", "cargo", "rustc"},
 	"uv":       {"uv"},
+	"yarn":     {"yarn"},
 }
 
 // busyLockFiles maps a provider name to a lock file name, relative to each
@@ -138,7 +140,7 @@ type invocation struct {
 
 func newInvocation(text string, windows bool) invocation {
 	norm := normalizeSeparators(text, windows)
-	fields := strings.Fields(norm)
+	fields := plainFields(norm)
 	if windows {
 		if flat, ok := flattenCommand(norm, 0); ok {
 			fields = flat
@@ -151,27 +153,30 @@ func newInvocation(text string, windows bool) invocation {
 }
 
 func keepAncestor(p *osshim.Process, inv invocation, wanted []string, windows bool) bool {
-	if matchProcess(firstToken(p.CommandLine), wanted) != "" {
+	if matchProcessFor(firstToken(p.CommandLine), wanted, windows) != "" {
 		return true
 	}
-	return !wrapsInvocation(commandText(p), inv, wanted, windows) && matchProcess(p.CommandLine, wanted) != ""
+	return !wrapsInvocation(commandText(p), inv, wanted, windows) && matchProcessFor(p.CommandLine, wanted, windows) != ""
 }
 
 // wrapsInvocation reports whether a command line launches bilgie with its own
 // arguments, directly or through any depth of shell -c strings, with no wanted
 // tool before it ("sudo cargo run -- bilgie clean"). A string that
-// does not parse reports false, which keeps the ancestor and so errs busy.
+// does not parse (ps drops the quotes around a path with an apostrophe) falls
+// back to plain whitespace-separated fields; the run of executable and
+// arguments must still be found, so a truly broken string errs busy.
 func wrapsInvocation(text string, inv invocation, wanted []string, windows bool) bool {
 	if inv.exe == "" {
 		return false
 	}
-	tokens, ok := flattenCommand(normalizeSeparators(text, windows), 0)
+	norm := normalizeSeparators(text, windows)
+	tokens, ok := flattenCommand(norm, 0)
 	if !ok {
-		return false
+		tokens = plainFields(norm)
 	}
 	for i := 1; i+len(inv.args) <= len(tokens); i++ {
 		if slices.Equal(tokens[i:i+len(inv.args)], inv.args) && exeName(tokens[i-1], windows) == inv.exe {
-			return matchProcess(strings.Join(tokens[:i-1], " "), wanted) == ""
+			return matchProcessFor(strings.Join(tokens[:i-1], " "), wanted, windows) == ""
 		}
 	}
 	return false
@@ -194,9 +199,7 @@ func flattenCommand(text string, depth int) ([]string, bool) {
 	out := make([]string, 0, len(words))
 	for _, w := range words {
 		if len(strings.Fields(w)) <= 1 {
-			if t := strings.Trim(w, " \t\n;&|()"); t != "" {
-				out = append(out, t)
-			}
+			out = append(out, splitOperators(w)...)
 			continue
 		}
 		inner, ok := flattenCommand(w, depth+1)
@@ -206,6 +209,33 @@ func flattenCommand(text string, depth int) ([]string, bool) {
 		out = append(out, inner...)
 	}
 	return out, true
+}
+
+// plainFields splits text on whitespace only, with shell operators trimmed
+// off each word, for command lines that shell quoting cannot parse.
+func plainFields(text string) []string {
+	out := make([]string, 0, 8)
+	for w := range strings.FieldsSeq(text) {
+		out = append(out, splitOperators(w)...)
+	}
+	return out
+}
+
+// isShellOperator reports a character that separates commands in a shell.
+func isShellOperator(r rune) bool {
+	return r == ';' || r == '&' || r == '|'
+}
+
+// splitOperators cuts a word at command separators glued to it
+// ("hi;bilgie") and trims grouping characters off the pieces.
+func splitOperators(w string) []string {
+	out := make([]string, 0, 2)
+	for part := range strings.FieldsFuncSeq(w, isShellOperator) {
+		if t := strings.Trim(part, " \t\n()"); t != "" {
+			out = append(out, t)
+		}
+	}
+	return out
 }
 
 // normalizeSeparators turns Windows backslashes into slashes, which shell
@@ -270,6 +300,11 @@ func (g *busyGuard) busyReason(ctx context.Context) string {
 // toolAliases maps a sibling binary to the tool it belongs to.
 var toolAliases = map[string]string{
 	"uvx":                             "uv",
+	"yarn.js":                         "yarn",
+	"yarn.cjs":                        "yarn",
+	"yarn.cmd":                        "yarn",
+	"yarnpkg":                         "yarn",
+	"yarnpkg.cmd":                     "yarn",
 	"gradle.bat":                      "gradle",
 	"gradle.cmd":                      "gradle",
 	"gradlew.bat":                     "gradlew",
@@ -280,15 +315,29 @@ var toolAliases = map[string]string{
 
 const gradleDaemonMain = "org.gradle.launcher.daemon.bootstrap.GradleDaemon"
 
-// matchProcess reports which wanted tool a process command line involves.
+// matchProcess reports which wanted tool a process command line involves,
+// by the rules of the running OS.
+func matchProcess(commandLine string, wanted []string) string {
+	return matchProcessFor(commandLine, wanted, runtime.GOOS == "windows")
+}
+
+// matchProcessFor is matchProcess with the OS rules chosen by the caller, so
+// Windows-style lines can be tested on any host.
 // Any token whose basename is the tool counts, wherever it sits (wrappers,
 // "sh -c" strings, "xargs go vet"). It errs toward busy: a spurious skip only
 // delays a clean, while a missed process could break a live build.
-func matchProcess(commandLine string, wanted []string) string {
+func matchProcessFor(commandLine string, wanted []string, windows bool) string {
 	for field := range strings.FieldsSeq(commandLine) {
-		base := filepath.Base(strings.Trim(field, `"';&|()`))
-		if runtime.GOOS == "windows" && strings.HasSuffix(strings.ToLower(base), ".exe") {
-			base = strings.ToLower(base[:len(base)-len(".exe")])
+		field = strings.Trim(field, `"';&|()`)
+		if windows {
+			field = strings.ReplaceAll(field, `\`, "/")
+		}
+		base := filepath.Base(field)
+		if windows {
+			base = strings.TrimSuffix(strings.ToLower(path.Base(field)), ".exe")
+		}
+		if strings.HasPrefix(base, "yarn-") && strings.HasSuffix(base, ".cjs") {
+			base = "yarn"
 		}
 		if alias, ok := toolAliases[base]; ok {
 			base = alias
