@@ -77,3 +77,31 @@ func TestRealCleanShowsWarningsInTextAndJSON(t *testing.T) {
 	require.NotNil(t, parsed.Providers[0].Summary)
 	assert.Len(t, parsed.Providers[0].Summary.Warnings, 1)
 }
+
+func TestRealCleanConciseShowsSkippedCount(t *testing.T) {
+	result := scriptedResult()
+	result.SkippedEntries = 2
+	var err error
+	out := captureStdout(t, func() {
+		err = executeClean(context.Background(), []provider.Provider{scriptedProvider{result}}, nil,
+			cleanOptions{force: true}, provider.CleanModeFull)
+	})
+	require.NoError(t, err)
+	assert.Contains(t, out, "done (freed 80 B, 8 entries, 2 skipped)")
+}
+
+func TestRealCleanVerboseListsEntriesTheOutputOmits(t *testing.T) {
+	result := provider.CleanResult{
+		Output:       "removed 2 entries, deleted 0 files",
+		Entries:      []provider.Entry{{Path: "/x/a", Size: 10}, {Path: "/x/b", Size: 20}},
+		BytesCleaned: 30,
+	}
+	var err error
+	out := captureStdout(t, func() {
+		err = executeClean(context.Background(), []provider.Provider{scriptedProvider{result}}, nil,
+			cleanOptions{force: true, verbose: true}, provider.CleanModeFull)
+	})
+	require.NoError(t, err)
+	assert.Contains(t, out, "removed: /x/a")
+	assert.Contains(t, out, "removed: /x/b")
+}

@@ -47,6 +47,13 @@ func TestMatchProcess(t *testing.T) {
 	}
 }
 
+func TestMatchProcessFor_WindowsRulesOnAnyHost(t *testing.T) {
+	assert.Equal(t, "cargo", matchProcessFor(`C:\Tools\CARGO.EXE build`, []string{"cargo"}, true))
+	assert.Equal(t, "go", matchProcessFor(`"C:\Program Files\Go\bin\go.exe" test`, []string{"go"}, true))
+	assert.Empty(t, matchProcessFor(`C:\Tools\cargo-edit.exe`, []string{"cargo"}, true))
+	assert.Empty(t, matchProcessFor(`C:\Tools\cargo.exe`, []string{"cargo"}, false), "a backslash is part of a name on POSIX")
+}
+
 func TestMatchProcess_WindowsImageNames(t *testing.T) {
 	if runtime.GOOS != "windows" {
 		t.Skip("image-name suffix handling is windows-only")
@@ -162,6 +169,13 @@ func TestExcludeSelf_WrapperForms(t *testing.T) {
 		{"trailing backslash stays busy", `sh -c "bilgie clean cargo" \`, "bilgie clean cargo", false, true},
 		{"windows backslash path", `cmd /c "C:\Tools\bilgie.exe" --config "C:\x y\c.yaml" clean cargo`, `C:\Tools\bilgie.exe --config C:\x y\c.yaml clean cargo`, true, false},
 		{"windows exe suffix", `cmd /c bilgie.exe clean cargo`, `bilgie clean cargo`, true, false},
+		{"operator glued before bilgie", "sh -c 'echo hi;bilgie clean cargo'", "bilgie clean cargo", false, false},
+		{"and-operator glued before bilgie", "sh -c 'make&&bilgie clean cargo'", "bilgie clean cargo", false, false},
+		{"tool glued before bilgie stays busy", "sh -c 'cargo build;bilgie clean cargo'", "bilgie clean cargo", false, true},
+		{"apostrophe in exe path", `sh -c /Users/o'brien/bin/bilgie clean cargo`, `/Users/o'brien/bin/bilgie clean cargo`, false, false},
+		{"apostrophe path with tool before stays busy", `sh -c cargo run /Users/o'brien/bin/bilgie clean cargo`, `/Users/o'brien/bin/bilgie clean cargo`, false, true},
+		{"apostrophe without exe and args stays busy", `sh -c /Users/o'brien/run clean cargo`, `/Users/o'brien/bilgie clean cargo`, false, true},
+		{"windows tool path before bilgie stays busy", `cmd /c C:\Tools\cargo.exe run -- bilgie.exe clean cargo`, `bilgie clean cargo`, true, true},
 	}
 
 	for _, tt := range tests {
@@ -360,13 +374,15 @@ func TestCommandProvider_CleanTimeout(t *testing.T) {
 }
 
 func TestCommandProvider_TimeoutKillsDescendants(t *testing.T) {
-	marker := filepath.Join(t.TempDir(), "survivor")
-	script := "(sleep 3; touch " + marker + ") & wait"
+	beat := filepath.Join(t.TempDir(), "heartbeat")
+	// The grandchild appends to the file until killed, so a survivor shows up
+	// as growth after the clean returned, whatever the machine's speed.
+	script := "(while :; do echo x >> '" + filepath.ToSlash(beat) + "'; sleep 0.05; done) & wait"
 	p, err := NewCommandProvider("group-test", config.Provider{
 		Enabled:      true,
 		Paths:        []string{t.TempDir()},
 		MaxSize:      "1G",
-		CleanCmd:     "sh -c '" + script + "'",
+		CleanCmd:     "sh -c \"" + script + "\"",
 		CleanTimeout: "1s",
 	})
 	require.NoError(t, err)
@@ -374,8 +390,20 @@ func TestCommandProvider_TimeoutKillsDescendants(t *testing.T) {
 	_, err = p.Clean(context.Background(), CleanOptions{})
 	require.Error(t, err)
 
-	time.Sleep(3500 * time.Millisecond)
-	assert.NoFileExists(t, marker, "grandchild must die with the timed-out command")
+	if _, statErr := os.Stat(beat); statErr != nil {
+		t.Skip("the descendant never started before the timeout")
+	}
+	time.Sleep(200 * time.Millisecond)
+	settled := fileSize(t, beat)
+	time.Sleep(500 * time.Millisecond)
+	assert.Equal(t, settled, fileSize(t, beat), "grandchild must die with the timed-out command")
+}
+
+func fileSize(t *testing.T, path string) int64 {
+	t.Helper()
+	info, err := os.Stat(path)
+	require.NoError(t, err)
+	return info.Size()
 }
 
 func TestCommandProvider_ParentCancelIsNotTimeout(t *testing.T) {

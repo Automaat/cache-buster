@@ -58,7 +58,7 @@ func runConfigShowWithLoader(loader *config.Loader) error {
 		return fmt.Errorf("marshal config: %w", err)
 	}
 
-	configPath, _ := config.Path()
+	configPath, _ := loader.Path()
 	fmt.Printf("# %s\n", configPath)
 	fmt.Print(string(out))
 	for _, note := range defaultDriftNotes(cfg) {
@@ -94,7 +94,7 @@ func runConfigInitWithLoader(loader *config.Loader) error {
 		return fmt.Errorf("init config: %w", err)
 	}
 
-	configPath, _ := config.Path()
+	configPath, _ := loader.Path()
 	if created {
 		fmt.Printf("Created %s\n", configPath)
 	} else {
@@ -117,7 +117,7 @@ func runConfigEditWithLoader(loader *config.Loader, editor string) error {
 		return fmt.Errorf("init config: %w", err)
 	}
 
-	configPath, err := config.Path()
+	configPath, err := loader.Path()
 	if err != nil {
 		return fmt.Errorf("get config path: %w", err)
 	}
