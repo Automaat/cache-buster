@@ -204,8 +204,11 @@ func distinctRoots(paths []string) []string {
 		if resolved, err := filepath.EvalSymlinks(p); err == nil {
 			key = resolved
 		}
-		info, err := os.Lstat(p)
-		roots = append(roots, root{path: p, key: foldCase(key), dir: err == nil && info.IsDir()})
+		isDir := false
+		if info, err := os.Lstat(p); err == nil && info != nil {
+			isDir = info.IsDir()
+		}
+		roots = append(roots, root{path: p, key: foldCase(key), dir: isDir})
 	}
 	slices.SortFunc(roots, func(a, b root) int {
 		return cmp.Or(cmp.Compare(len(a.key), len(b.key)), strings.Compare(a.key, b.key), strings.Compare(a.path, b.path))
