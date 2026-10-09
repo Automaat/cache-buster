@@ -150,3 +150,18 @@ func TestDoctor_ReportsAPendingConfigMigrationWithTheManualStep(t *testing.T) {
 	assert.Equal(t, oldCfg, p.Old)
 	assert.Nil(t, pendingLegacyConfig(""))
 }
+
+func TestBeforeCommand_ConfigInitAndEditRefuseWhileTheMigrationIsPending(t *testing.T) {
+	blockedHome(t)
+	root := &cobra.Command{Use: "bilgie"}
+	cfg := &cobra.Command{Use: "config"}
+	root.AddCommand(cfg)
+	for _, name := range []string{"init", "edit"} {
+		c := &cobra.Command{Use: name}
+		cfg.AddCommand(c)
+		require.Error(t, BeforeCommand(c), name)
+	}
+	show := &cobra.Command{Use: "show"}
+	cfg.AddCommand(show)
+	require.NoError(t, BeforeCommand(show))
+}

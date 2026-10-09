@@ -70,6 +70,9 @@ func isDestructive(cmd *cobra.Command) bool {
 	switch cmd.Name() {
 	case "install-agent":
 		return true
+	case "init", "edit":
+		// they write a default config.yaml, which would hide the pending one
+		return cmd.Parent() != nil && cmd.Parent().Name() == "config"
 	case "clean", "interactive":
 		return !flagSet(cmd, "dry-run")
 	case "auto", "tick":

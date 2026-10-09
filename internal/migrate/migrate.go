@@ -123,21 +123,19 @@ func merge(oldDir, newDir string) (bool, error) {
 	var kept []string
 	for _, e := range entries {
 		src, dst := filepath.Join(oldDir, e.Name()), filepath.Join(newDir, e.Name())
-		if pathExists(dst) {
+		did, err := moveEntry(src, dst)
+		switch {
+		case errors.Is(err, os.ErrExist):
 			if emptyFile(src) {
 				_ = os.Remove(src)
 				continue
 			}
 			kept = append(kept, e.Name())
-			continue
-		}
-		if err := rename(src, dst); err != nil {
-			if tolerateLostRace(err, src) == nil {
-				continue
-			}
+		case err != nil:
 			return moved, err
+		default:
+			moved = moved || did
 		}
-		moved = true
 	}
 	if len(kept) == 0 {
 		_ = os.Remove(oldDir)
@@ -145,6 +143,40 @@ func merge(oldDir, newDir string) (bool, error) {
 	}
 	return moved, fmt.Errorf("%w (%s): %s in %s also exist there; move what you still need by hand, then remove them",
 		ErrNewDirExists, newDir, strings.Join(kept, ", "), oldDir)
+}
+
+// moveEntry moves src to dst without ever replacing dst: a plain rename
+// overwrites a file a concurrent run created a moment ago. A regular file is
+// hard-linked first, which fails with ErrExist instead; if the file system has
+// no hard links, or src is a dir, it falls back to a rename after a check.
+// moved is false when a concurrent run took the entry first.
+func moveEntry(src, dst string) (moved bool, err error) {
+	info, err := os.Lstat(src)
+	if err != nil {
+		return false, tolerateLostRace(err, src)
+	}
+	if info.Mode().IsRegular() {
+		err = link(src, dst)
+		switch {
+		case err == nil:
+			if rmErr := os.Remove(src); rmErr != nil && pathExists(src) {
+				return false, rmErr
+			}
+			return true, nil
+		case errors.Is(err, os.ErrExist):
+			if dstInfo, statErr := os.Lstat(dst); statErr == nil && os.SameFile(info, dstInfo) {
+				return false, nil
+			}
+			return false, err
+		}
+	}
+	if pathExists(dst) {
+		return false, os.ErrExist
+	}
+	if err := rename(src, dst); err != nil {
+		return false, tolerateLostRace(err, src)
+	}
+	return true, nil
 }
 
 func emptyFile(path string) bool {
@@ -185,7 +217,10 @@ func newDirExists(oldDir, newDir string) error {
 		ErrNewDirExists, newDir, oldDir)
 }
 
-var rename = os.Rename
+var (
+	rename = os.Rename
+	link   = os.Link
+)
 
 // tolerateLostRace drops a not-exist error once oldDir is gone, whether a
 // concurrent run moved it or the user deleted it; any other failure is

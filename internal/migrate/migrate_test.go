@@ -458,3 +458,39 @@ func TestDir_JunctionLikeIrregularModeIsTreatedAsALink(t *testing.T) {
 	assert.True(t, moved)
 	assert.Equal(t, "1", readFile(t, filepath.Join(target, "f")))
 }
+
+func TestMerge_NeverReplacesAFileCreatedByAConcurrentRun(t *testing.T) {
+	root := t.TempDir()
+	oldDir := filepath.Join(root, "old")
+	newDir := filepath.Join(root, "new")
+	writeFile(t, filepath.Join(oldDir, "history.json"), "OLD")
+	require.NoError(t, os.Mkdir(newDir, 0o750))
+	t.Cleanup(func() { link = os.Link })
+	link = func(src, dst string) error {
+		writeFile(t, dst, "NEWER-DATA")
+		return os.Link(src, dst)
+	}
+
+	moved, err := Dir(oldDir, newDir)
+
+	require.ErrorIs(t, err, ErrNewDirExists)
+	assert.False(t, moved)
+	assert.Equal(t, "NEWER-DATA", readFile(t, filepath.Join(newDir, "history.json")))
+	assert.Equal(t, "OLD", readFile(t, filepath.Join(oldDir, "history.json")))
+}
+
+func TestMerge_FallsBackToARenameWithoutHardLinks(t *testing.T) {
+	root := t.TempDir()
+	oldDir := filepath.Join(root, "old")
+	newDir := filepath.Join(root, "new")
+	writeFile(t, filepath.Join(oldDir, "a"), "1")
+	require.NoError(t, os.Mkdir(newDir, 0o750))
+	t.Cleanup(func() { link = os.Link })
+	link = func(string, string) error { return os.ErrPermission }
+
+	moved, err := Dir(oldDir, newDir)
+
+	require.NoError(t, err)
+	assert.True(t, moved)
+	assert.Equal(t, "1", readFile(t, filepath.Join(newDir, "a")))
+}
