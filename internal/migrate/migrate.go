@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/smykla-skalski/bilgie/internal/appname"
 )
@@ -40,8 +41,14 @@ type Issue struct {
 // aborts the command. The returned issues list every dir left behind, whether
 // or not it was warned about.
 func Legacy(home string, out io.Writer) []Issue {
+	pairs := Dirs(home)
+	if !anyExists(pairs) {
+		return nil
+	}
+	unlock, _ := lockFile(filepath.Join(home, ".cache", "bilgie", "migration.lock"), migrateWait)
+	defer unlock()
 	var issues []Issue
-	for _, pair := range Dirs(home) {
+	for _, pair := range pairs {
 		moved, err := Dir(pair[0], pair[1])
 		if moved {
 			fmt.Fprintf(out, "migrated %s to %s\n", pair[0], pair[1])
@@ -56,6 +63,19 @@ func Legacy(home string, out io.Writer) []Issue {
 		}
 	}
 	return issues
+}
+
+// migrateWait bounds how long a run waits for a concurrent migration, so that
+// it sees the finished result rather than a half-moved one.
+const migrateWait = 5 * time.Second
+
+func anyExists(pairs [][2]string) bool {
+	for _, pair := range pairs {
+		if pathExists(pair[0]) {
+			return true
+		}
+	}
+	return false
 }
 
 // ErrNewDirExists reports that entries of the legacy dir were left in place
@@ -181,7 +201,10 @@ func moveEntry(src, dst string) (moved bool, err error) {
 
 func emptyFile(path string) bool {
 	info, err := os.Lstat(path)
-	return err == nil && info.Mode().IsRegular() && info.Size() == 0
+	if err != nil {
+		return false
+	}
+	return info.Mode().IsRegular() && info.Size() == 0
 }
 
 // skipOrWarn settles a legacy path next to an existing newDir: silent unless

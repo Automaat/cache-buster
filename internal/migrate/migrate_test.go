@@ -502,7 +502,9 @@ func TestPendingStep_SetsAsideAFileAtTheNewPath(t *testing.T) {
 	writeFile(t, filepath.Join(dirs[0][0], "config.yaml"), "x")
 	writeFile(t, dirs[0][1], "in the way")
 
-	step := PendingConfig(home).Step()
+	p := PendingConfig(home)
+	require.NotNil(t, p)
+	step := p.Step()
 
 	assert.Contains(t, step, dirs[0][1]+".bak")
 	assert.Contains(t, step, dirs[0][0])
@@ -537,7 +539,9 @@ func TestPendingStep_NeverReusesAnExistingBackupName(t *testing.T) {
 	writeFile(t, dirs[0][1], "in the way")
 	writeFile(t, dirs[0][1]+".bak", "older")
 
-	assert.Contains(t, PendingConfig(home).Step(), dirs[0][1]+".bak.2")
+	p := PendingConfig(home)
+	require.NotNil(t, p)
+	assert.Contains(t, p.Step(), dirs[0][1]+".bak.2")
 }
 
 func TestPendingStep_QuotesPathsLiterally(t *testing.T) {

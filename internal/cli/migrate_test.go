@@ -85,7 +85,7 @@ func TestBeforeCommand_RefusesDestructiveCommandsWhileTheConfigMigrationIsPendin
 		require.Error(t, err, name)
 		assert.ErrorContains(t, err, "refusing to run", name)
 		assert.ErrorContains(t, err, oldCfg, name)
-		assert.ErrorContains(t, err, "mv", name)
+		assert.Regexp(t, `mv |Move-Item`, err.Error(), name)
 	}
 }
 

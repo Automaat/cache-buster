@@ -76,32 +76,45 @@ func ShouldReport(home, key, sig string) bool {
 // lockStale is how long a lock file may sit before a crashed holder is assumed.
 const lockStale = 10 * time.Second
 
+func noop() {}
+
 // lockMarker serializes the read-decide-write of the marker. ok is false when
 // another run holds the lock: it is deciding right now, so it reports for both.
-// A marker dir that cannot be created yields a no-op lock, so the failure is
-// reported each time rather than hidden.
 func lockMarker(home string) (unlock func(), ok bool) {
-	path := markerPath(home) + ".lock"
+	return lockFile(markerPath(home)+".lock", 0)
+}
+
+// lockFile takes an exclusive lock by creating path. It waits up to wait for a
+// holder to finish and reports ok=false if the lock stays taken. A lock that
+// cannot be created at all (read-only cache dir) is a no-op so the caller
+// proceeds unserialized instead of failing; a stale or future-dated lock left
+// by a crashed holder is broken.
+func lockFile(path string, wait time.Duration) (unlock func(), ok bool) {
 	if os.MkdirAll(filepath.Dir(path), 0o750) != nil {
-		return func() {}, true
+		return noop, true
 	}
-	for range 2 {
+	deadline := time.Now().Add(wait)
+	for {
 		f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 		if err == nil {
 			_ = f.Close()
 			return func() { _ = os.Remove(path) }, true
 		}
 		if !errors.Is(err, os.ErrExist) {
-			return func() {}, true
+			return noop, true
 		}
-		info, statErr := os.Stat(path)
-		if statErr != nil || (now().Sub(info.ModTime()) >= 0 && now().Sub(info.ModTime()) < lockStale) {
-			return nil, false
+		if info, statErr := os.Stat(path); statErr != nil || staleLock(now().Sub(info.ModTime())) {
+			_ = os.Remove(path)
+			continue
 		}
-		_ = os.Remove(path)
+		if !time.Now().Before(deadline) {
+			return noop, false
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
-	return nil, false
 }
+
+func staleLock(age time.Duration) bool { return age < 0 || age >= lockStale }
 
 // Resolved forgets key once its failure is gone, so a later one is reported at once.
 func Resolved(home, key string) {
