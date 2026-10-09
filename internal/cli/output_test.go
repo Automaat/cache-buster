@@ -234,3 +234,13 @@ func TestCleanDryRun_QuietPrintsTheByteTotal(t *testing.T) {
 	require.NoError(t, err)
 	assert.Regexp(t, `^\d+(\.\d+)? [KMG]?i?B\n$`, out)
 }
+
+func TestFinishClean_CancelledDryRunIsNotAFailure(t *testing.T) {
+	results := []ProviderCleanResult{{Name: "go", Status: statusError, Error: "boom"}}
+	var err error
+	out := captureStdout(t, func() {
+		err = finishClean(results, 0, cleanOptions{dryRun: true}, []string{"go: boom"}, true)
+	})
+	require.NoError(t, err)
+	assert.Contains(t, out, "total: would free")
+}

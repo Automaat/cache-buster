@@ -460,6 +460,9 @@ func finishClean(results []ProviderCleanResult, totalCleaned int64, opts cleanOp
 		}
 	case !opts.quiet && opts.dryRun && !opts.verbose:
 		report.WriteTotal(os.Stdout, overallOf(results, true))
+		if cancelled {
+			return nil
+		}
 	case cancelled:
 		return nil
 	case !opts.quiet && !opts.dryRun:

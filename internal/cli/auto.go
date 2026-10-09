@@ -211,7 +211,7 @@ func (e autoEnv) pass(ctx context.Context, cfg *config.Config, dryRun bool, opts
 		MinTier:     opts.minTier,
 		Predicted:   opts.predicted,
 	})
-	clearsFirstRun := forced && report.Previewed() && report.Err() == nil
+	clearsFirstRun := forced && err == nil && report.Previewed() && report.Err() == nil
 	e.recordRun(ctx, cfg.Auto, report, err, opts.preview, clearsFirstRun)
 	if err != nil {
 		return err
