@@ -171,7 +171,7 @@ func otherProviders(p Platform) map[string]Provider {
 				[]string{p.cache("uv/cache")}),
 			MaxSize:  "4G",
 			MaxAge:   "30d",
-			CleanCmd: "",
+			CleanCmd: "uv cache clean",
 		},
 		"jetbrains": {
 			Enabled:  true,

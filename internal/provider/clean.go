@@ -26,6 +26,19 @@ func runMeasuredCleanTimeout(
 	sizeFn func(context.Context) (int64, error),
 	timeout time.Duration,
 ) (CleanResult, error) {
+	return runMeasuredCleanEnv(ctx, name, args, nil, sizeFn, timeout)
+}
+
+// runMeasuredCleanEnv is runMeasuredCleanTimeout with an explicit child
+// environment; nil inherits bilgie's own.
+func runMeasuredCleanEnv(
+	ctx context.Context,
+	name string,
+	args []string,
+	env []string,
+	sizeFn func(context.Context) (int64, error),
+	timeout time.Duration,
+) (CleanResult, error) {
 	if len(args) == 0 {
 		return CleanResult{}, nil
 	}
@@ -40,6 +53,7 @@ func runMeasuredCleanTimeout(
 	}
 
 	cmd := exec.CommandContext(cmdCtx, args[0], args[1:]...)
+	cmd.Env = env
 	if timeout > 0 {
 		// A group or tree lets the timeout kill descendants. It is skipped for
 		// unbounded commands so they keep the terminal's foreground group.

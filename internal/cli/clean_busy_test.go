@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
@@ -14,10 +15,24 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// stubUVOnPath puts a placeholder uv first on PATH so the provider counts as
+// available; a busy uv is skipped before the binary would ever run.
+func stubUVOnPath(t *testing.T) {
+	t.Helper()
+	dir := t.TempDir()
+	name := "uv"
+	if runtime.GOOS == "windows" {
+		name = "uv.exe"
+	}
+	require.NoError(t, os.WriteFile(filepath.Join(dir, name), nil, 0o700))
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+}
+
 // busyUVLoader returns a config whose uv cache holds a live flock, plus an
 // idle command provider, so uv is deterministically busy.
 func busyUVLoader(t *testing.T, extra string) (loader *config.Loader, lockPath string) {
 	t.Helper()
+	stubUVOnPath(t)
 
 	uvDir := t.TempDir()
 	lockPath = filepath.Join(uvDir, ".lock")
