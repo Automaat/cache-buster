@@ -58,7 +58,7 @@ func (a Agent) currentCrontab(ctx context.Context) (string, error) {
 	}
 	lower := strings.ToLower(string(out))
 	// BusyBox crontab reports a missing file instead of "no crontab for user".
-	if strings.Contains(lower, "no crontab") || strings.Contains(lower, "no such file or directory") {
+	if strings.Contains(lower, "no crontab") || (strings.Contains(lower, "can't open") && strings.Contains(lower, "no such file or directory")) {
 		return "", nil
 	}
 	return "", fmt.Errorf("crontab -l: %w: %s", err, strings.TrimSpace(string(out)))

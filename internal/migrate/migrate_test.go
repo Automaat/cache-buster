@@ -286,3 +286,31 @@ func TestDir_CreatesMissingParentOfTheNewDir(t *testing.T) {
 	assert.True(t, moved)
 	assert.Equal(t, "1", readFile(t, filepath.Join(newDir, "f")))
 }
+
+func TestDir_LinkBetweenOldAndNewIsSilent(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlinks need a privilege on Windows")
+	}
+	root := t.TempDir()
+	newDir := filepath.Join(root, "new")
+	writeFile(t, filepath.Join(newDir, "f"), "1")
+	oldDir := filepath.Join(root, "old")
+	require.NoError(t, os.Symlink(newDir, oldDir))
+
+	moved, err := Dir(oldDir, newDir)
+
+	require.NoError(t, err)
+	assert.False(t, moved)
+}
+
+func TestDir_StrayLegacyFileNextToANewDirIsSilent(t *testing.T) {
+	root := t.TempDir()
+	oldDir := filepath.Join(root, "old")
+	writeFile(t, oldDir, "stray")
+	require.NoError(t, os.Mkdir(filepath.Join(root, "new"), 0o750))
+
+	moved, err := Dir(oldDir, filepath.Join(root, "new"))
+
+	require.NoError(t, err)
+	assert.False(t, moved)
+}

@@ -61,20 +61,25 @@ func Dir(oldDir, newDir string) (bool, error) {
 		return false, err
 	}
 	isLink := info.Mode()&os.ModeSymlink != 0
+	var statErr error
 	if isLink {
-		if info, err = os.Stat(oldDir); err != nil {
-			return false, fmt.Errorf("symlink does not lead to a directory: %w", err)
-		}
-	}
-	if !info.IsDir() {
-		return false, errors.New("not a directory")
+		info, statErr = os.Stat(oldDir)
 	}
 	_, err = os.Lstat(newDir)
 	if err == nil {
+		if statErr != nil || !info.IsDir() {
+			return false, nil
+		}
 		return false, newDirExists(oldDir, newDir)
 	}
 	if !errors.Is(err, os.ErrNotExist) {
 		return false, err
+	}
+	if statErr != nil {
+		return false, fmt.Errorf("symlink does not lead to a directory: %w", statErr)
+	}
+	if !info.IsDir() {
+		return false, errors.New("not a directory")
 	}
 	if isLink {
 		return moveLink(oldDir, newDir)
@@ -94,6 +99,11 @@ func Dir(oldDir, newDir string) (bool, error) {
 // newDirExists is nil for an empty oldDir, which holds nothing to lose, and
 // an actionable error otherwise.
 func newDirExists(oldDir, newDir string) error {
+	oldInfo, oldErr := os.Stat(oldDir)
+	newInfo, newErr := os.Stat(newDir)
+	if oldErr == nil && newErr == nil && os.SameFile(oldInfo, newInfo) {
+		return nil
+	}
 	entries, err := os.ReadDir(oldDir)
 	if err == nil && len(entries) == 0 {
 		return nil
@@ -116,9 +126,15 @@ func moveLink(oldDir, newDir string) (bool, error) {
 		return false, err
 	}
 	if err := os.Symlink(target, newDir); err != nil {
-		return false, err
+		if errors.Is(err, os.ErrExist) && !pathExists(oldDir) {
+			return false, nil
+		}
+		return false, tolerateLostRace(err, oldDir)
 	}
 	if err := os.Remove(oldDir); err != nil {
+		if !pathExists(oldDir) {
+			return true, nil
+		}
 		_ = os.Remove(newDir)
 		return false, err
 	}

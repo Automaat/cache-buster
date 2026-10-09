@@ -90,11 +90,11 @@ func (l *Loader) Load() (*Config, error) {
 		defaultP, hasDefault := cfg.Providers[name]
 		if !hasDefault {
 			// New provider not in defaults: use as-is; do not auto-enable when `enabled` is omitted.
-			foreign, isForeign := l.otherOSDefault(name)
-			if len(userP.Paths) == 0 {
-				userP.Paths = foreign.Paths
+			foreign := l.otherOSDefaults(name)
+			if len(userP.Paths) == 0 && len(foreign) > 0 {
+				userP.Paths = foreign[0].Paths
 			}
-			if isForeign && customizesBuiltin(userP, foreign) {
+			if len(foreign) > 0 && !slices.ContainsFunc(foreign, func(b Provider) bool { return !customizesBuiltin(userP, b) }) {
 				cfg.custom = append(cfg.custom, name)
 			}
 			cfg.Providers[name] = userP
@@ -355,10 +355,11 @@ func (l *Loader) portableProviders(providers map[string]Provider) map[string]Pro
 	return out
 }
 
-// otherOSDefault returns the built-in provider of that name on another OS.
-// A config saved there lists it with its paths omitted; they are restored
-// to keep the entry valid here.
-func (l *Loader) otherOSDefault(name string) (Provider, bool) {
+// otherOSDefaults returns the built-in provider of that name on each other
+// OS that has one. A config saved there lists it with its paths omitted; they
+// are restored from the first to keep the entry valid here.
+func (l *Loader) otherOSDefaults(name string) []Provider {
+	var out []Provider
 	for _, goos := range []string{OSDarwin, OSLinux, OSWindows} {
 		if goos == l.platform.OS {
 			continue
@@ -366,14 +367,14 @@ func (l *Loader) otherOSDefault(name string) (Provider, bool) {
 		p := l.platform
 		p.OS = goos
 		if def, ok := DefaultProvidersFor(p)[name]; ok {
-			return def, true
+			out = append(out, def)
 		}
 	}
-	return Provider{}, false
+	return out
 }
 
 // customizesBuiltin reports whether a user provider that shares its name
-// with a built-in of another OS is the user's own definition rather than the
+// with a built-in of another OS differs from that built-in, so it is the user's own definition rather than the
 // copy a synced config carries. A copy keeps the built-in's paths and clean
 // command; any other path or command makes it custom, so it runs here
 // instead of being dropped as an entry for a different OS.

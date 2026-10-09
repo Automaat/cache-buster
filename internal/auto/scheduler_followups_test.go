@@ -24,6 +24,17 @@ func TestCurrentCrontab_BusyBoxMissingFileIsAnEmptyCrontab(t *testing.T) {
 	assert.Empty(t, got)
 }
 
+func TestCurrentCrontab_OtherMissingFileFailuresStayErrors(t *testing.T) {
+	s := &scriptedExec{respond: func(string, []string) ([]byte, error) {
+		return []byte("crontab: /var/spool/cron/crontabs: No such file or directory"), errors.New("exit status 1")
+	}}
+	a := newOSAgent(t, "linux", posixExe, s)
+
+	_, err := a.currentCrontab(t.Context())
+
+	require.Error(t, err)
+}
+
 func TestCurrentCrontab_OtherFailuresStayErrors(t *testing.T) {
 	s := &scriptedExec{respond: func(string, []string) ([]byte, error) {
 		return []byte("crontab: you are not allowed to use this program"), errors.New("exit status 1")

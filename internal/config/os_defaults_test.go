@@ -314,6 +314,26 @@ providers:
 	assert.False(t, wcfg.Applies("lima"), "a synced copy of the built-in stays out")
 }
 
+func TestLoader_SyncedCopyOfAMultiOSBuiltinStaysOutElsewhere(t *testing.T) {
+	path := savedConfig(t, `version: "1"
+providers:
+  lima:
+    enabled: true
+    max_size: 1G
+    paths:
+      - ~/.cache/lima
+`)
+	loader := NewLoader()
+	loader.SetConfigPath(path)
+	loader.SetPlatform(winPlatform)
+	loader.pathsExist = func([]string) bool { return false }
+
+	cfg, err := loader.Load()
+	require.NoError(t, err)
+
+	assert.False(t, cfg.Applies("lima"), "the Linux copy of a Mac and Linux built-in is not custom on Windows")
+}
+
 func TestLoader_CustomPathsSurviveOnEveryOS(t *testing.T) {
 	path := savedConfig(t, `version: "1"
 providers:
