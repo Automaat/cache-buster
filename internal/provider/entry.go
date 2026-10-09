@@ -142,8 +142,8 @@ func (p *EntryProvider) listEntries(ctx context.Context) (entries []cacheEntry, 
 			}
 			// Newest file wins: a directory mtime misses writes below it.
 			e := cacheEntry{path: path, modTime: info.ModTime()}
+			e.size = cache.UniqueSize(listing.Files)
 			for _, f := range listing.Files {
-				e.size += f.Size
 				if f.ModTime.After(e.modTime) {
 					e.modTime = f.ModTime
 				}

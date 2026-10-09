@@ -86,6 +86,7 @@ func (p *FileProvider) fullClean(ctx context.Context, opts CleanOptions) (CleanR
 		return files[i].ModTime.Before(files[j].ModTime)
 	})
 
+	ledger := cache.NewLinkLedger(files)
 	var (
 		bytesToDelete = currentSize - p.maxSize
 		bytesDeleted  int64
@@ -115,7 +116,7 @@ func (p *FileProvider) fullClean(ctx context.Context, opts CleanOptions) (CleanR
 
 		if opts.DryRun {
 			fmt.Fprintf(&output, "would delete: %s (%s)\n", f.Path, size.FormatSize(f.Size))
-			bytesDeleted += f.Size
+			bytesDeleted += ledger.Remove(f)
 			filesDeleted++
 			entries = append(entries, Entry{Path: f.Path, Size: f.Size})
 			continue
@@ -126,7 +127,7 @@ func (p *FileProvider) fullClean(ctx context.Context, opts CleanOptions) (CleanR
 			continue
 		}
 
-		bytesDeleted += f.Size
+		bytesDeleted += ledger.Remove(f)
 		filesDeleted++
 		entries = append(entries, Entry{Path: f.Path, Size: f.Size})
 	}

@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -586,4 +587,114 @@ func TestDirPatternDuplicatePatternsCountOnce(t *testing.T) {
 
 	assert.Equal(t, int64(1300), res.BytesCleaned)
 	assert.Len(t, res.Entries, 2)
+}
+
+func TestDirPatternSkippedByRecheckDoesNotCreditSharedInode(t *testing.T) {
+	root := t.TempDir()
+	first := makeDir(t, root, "sail-a", 1000, 5*time.Hour)
+	require.NoError(t, os.WriteFile(filepath.Join(first, "own.bin"), make([]byte, 50), 0o600))
+	second := makeDir(t, root, "sail-b", 10, 5*time.Hour)
+	linkOrSkip(t, filepath.Join(first, "sub", "data.bin"), filepath.Join(second, "shared.bin"))
+	ageTree(t, first, 5*time.Hour)
+	ageTree(t, second, 5*time.Hour)
+
+	p := newTestDirProvider(t, root, nil)
+	var calls int
+	p.openCheck = func(context.Context, string) (bool, error) {
+		calls++
+		if calls == 3 {
+			return false, os.WriteFile(filepath.Join(second, "late.txt"), []byte("x"), 0o600)
+		}
+		return false, nil
+	}
+	res, err := p.Clean(t.Context(), CleanOptions{})
+	require.NoError(t, err)
+
+	assert.False(t, exists(first))
+	assert.True(t, exists(second))
+	assert.Equal(t, int64(50), res.BytesCleaned, "the inode still linked from the kept sibling frees nothing")
+	assert.Contains(t, res.Output, "skip: "+second+" (modified during checks)")
+}
+
+func TestDirPatternRecheckRepeatsTheOpenFilesCheck(t *testing.T) {
+	root := t.TempDir()
+	first := makeDir(t, root, "sail-a", 10, 5*time.Hour)
+	second := makeDir(t, root, "sail-b", 10, 5*time.Hour)
+
+	p := newTestDirProvider(t, root, nil)
+	var calls int
+	p.openCheck = func(context.Context, string) (bool, error) {
+		calls++
+		return calls == 3, nil
+	}
+	res, err := p.Clean(t.Context(), CleanOptions{})
+	require.NoError(t, err)
+
+	assert.True(t, exists(first), "opened between evaluation and removal")
+	assert.False(t, exists(second))
+	assert.Contains(t, res.Output, "skip: "+first+" (has open files)")
+}
+
+func TestDirPatternNestedMatchesAreScannedOnce(t *testing.T) {
+	root := t.TempDir()
+	outer := makeDir(t, root, "sail-a", 1000, 5*time.Hour)
+	inner := filepath.Join(outer, "sail-inner")
+	require.NoError(t, os.MkdirAll(inner, 0o750))
+	require.NoError(t, os.WriteFile(filepath.Join(inner, "x.bin"), make([]byte, 500), 0o600))
+	linkOrSkip(t, filepath.Join(inner, "x.bin"), filepath.Join(outer, "x-link.bin"))
+	ageTree(t, outer, 5*time.Hour)
+
+	p := newTestDirProvider(t, root, func(c *config.Provider) {
+		c.Paths = []string{filepath.Join(root, "sail*"), filepath.Join(root, "sail*", "sail*")}
+	})
+	require.Len(t, p.paths, 2)
+	res, err := p.Clean(t.Context(), CleanOptions{})
+	require.NoError(t, err)
+
+	assert.Equal(t, int64(1500), res.BytesCleaned)
+	require.Len(t, res.Entries, 1)
+	assert.Equal(t, outer, res.Entries[0].Path)
+	assert.NotContains(t, res.Output, "skip:")
+	assert.False(t, exists(outer))
+}
+
+func TestDirPatternTwoSpellingsOfOneDirectoryCountOnce(t *testing.T) {
+	root := t.TempDir()
+	makeDir(t, root, "sail-a", 1000, 5*time.Hour)
+	alias := filepath.Join(t.TempDir(), "alias")
+	if err := os.Symlink(root, alias); err != nil {
+		t.Skipf("symlinks unsupported here: %v", err)
+	}
+
+	p := newTestDirProvider(t, root, func(c *config.Provider) {
+		c.Paths = []string{filepath.Join(root, "sail*"), filepath.Join(alias, "sail*")}
+	})
+	require.Len(t, p.paths, 2)
+	res, err := p.Clean(t.Context(), CleanOptions{})
+	require.NoError(t, err)
+
+	assert.Equal(t, int64(1000), res.BytesCleaned)
+	assert.Len(t, res.Entries, 1)
+	assert.Equal(t, 1, strings.Count(res.Output, "removed:"), res.Output)
+}
+
+func TestDirPatternVanishedDirectoryIsSkippedNotRemoved(t *testing.T) {
+	root := t.TempDir()
+	first := makeDir(t, root, "sail-a", 10, 5*time.Hour)
+	makeDir(t, root, "sail-b", 10, 5*time.Hour)
+
+	p := newTestDirProvider(t, root, nil)
+	var calls int
+	p.openCheck = func(context.Context, string) (bool, error) {
+		calls++
+		if calls == 3 {
+			return false, os.RemoveAll(first)
+		}
+		return false, nil
+	}
+	res, err := p.Clean(t.Context(), CleanOptions{})
+	require.NoError(t, err)
+
+	assert.NotContains(t, res.Output, "removed: "+first)
+	assert.Len(t, res.Entries, 1)
 }

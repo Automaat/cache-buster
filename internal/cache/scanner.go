@@ -20,6 +20,11 @@ type FileInfo struct {
 	ModTime time.Time
 	Path    string
 	Size    int64
+	// ID and Nlink identify the inode of a hard-linked file; Shared is false
+	// for a file with a single link or an unreadable identity.
+	ID     osshim.FileID
+	Nlink  uint64
+	Shared bool
 }
 
 // ScanResult contains size calculation results with access warnings.
@@ -157,6 +162,7 @@ func ListFilesContext(ctx context.Context, paths []string) (ListResult, error) {
 					Size:    info.Size(),
 					ModTime: info.ModTime(),
 				}
+				fi.ID, fi.Nlink, fi.Shared = osshim.SharedFileID(path, info)
 				mu.Lock()
 				files = append(files, fi)
 				mu.Unlock()

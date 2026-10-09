@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/smykla-skalski/bilgie/internal/osshim"
 	"github.com/smykla-skalski/bilgie/pkg/size"
 )
 
@@ -30,6 +31,52 @@ type TrimResult struct {
 
 const trimBufferFactor = 0.9 // Keep 10% headroom below max_size
 
+// LinkLedger credits the bytes of a hard-linked inode once, when the last of
+// its links is removed, and only if every link on disk was in the listing:
+// a link outside it keeps the data alive, so removing the rest frees nothing.
+type LinkLedger struct {
+	listed  map[osshim.FileID]uint64
+	removed map[osshim.FileID]uint64
+}
+
+func NewLinkLedger(files []FileInfo) *LinkLedger {
+	l := &LinkLedger{listed: map[osshim.FileID]uint64{}, removed: map[osshim.FileID]uint64{}}
+	for _, f := range files {
+		if f.Shared {
+			l.listed[f.ID]++
+		}
+	}
+	return l
+}
+
+// UniqueSize is the size of files with each hard-linked inode counted once.
+func UniqueSize(files []FileInfo) int64 {
+	var total int64
+	seen := map[osshim.FileID]bool{}
+	for _, f := range files {
+		if f.Shared {
+			if seen[f.ID] {
+				continue
+			}
+			seen[f.ID] = true
+		}
+		total += f.Size
+	}
+	return total
+}
+
+// Remove records that f's link is gone and returns the bytes that freed.
+func (l *LinkLedger) Remove(f FileInfo) int64 {
+	if !f.Shared {
+		return f.Size
+	}
+	l.removed[f.ID]++
+	if l.removed[f.ID] == l.listed[f.ID] && l.listed[f.ID] >= f.Nlink {
+		return f.Size
+	}
+	return 0
+}
+
 // Trim deletes files that are:
 // - older than MaxAge, OR
 // - oldest files until total ≤ MaxSize (with 10% buffer).
@@ -51,7 +98,6 @@ func Trim(ctx context.Context, paths []string, opts TrimOptions) (TrimResult, er
 	})
 
 	var (
-		totalSize     int64
 		result        TrimResult
 		deleteErrors  []AccessError
 		output        strings.Builder
@@ -64,16 +110,16 @@ func Trim(ctx context.Context, paths []string, opts TrimOptions) (TrimResult, er
 	// Carry forward scan warnings
 	deleteErrors = append(deleteErrors, listResult.Warnings...)
 
-	for _, f := range files {
-		totalSize += f.Size
-	}
+	// Hard links share data: sizes count each inode once and a link frees
+	// bytes only when the last one goes.
+	planned := NewLinkLedger(files)
+	remainingSize = UniqueSize(files)
 
 	// Phase 1: mark files older than MaxAge for deletion
 	for _, f := range files {
 		if f.ModTime.Before(cutoff) {
 			toDelete = append(toDelete, f)
-		} else {
-			remainingSize += f.Size
+			remainingSize -= planned.Remove(f)
 		}
 	}
 
@@ -92,9 +138,10 @@ func Trim(ctx context.Context, paths []string, opts TrimOptions) (TrimResult, er
 				break
 			}
 			toDelete = append(toDelete, f)
-			remainingSize -= f.Size
+			remainingSize -= planned.Remove(f)
 		}
 	}
+	freed := NewLinkLedger(files)
 
 	// Execute deletions
 	for _, f := range toDelete {
@@ -108,7 +155,7 @@ func Trim(ctx context.Context, paths []string, opts TrimOptions) (TrimResult, er
 		if opts.DryRun {
 			age := time.Since(f.ModTime).Truncate(time.Hour)
 			fmt.Fprintf(&output, "would delete: %s (%s, age: %s)\n", f.Path, size.FormatSize(f.Size), age)
-			result.FreedBytes += f.Size
+			result.FreedBytes += freed.Remove(f)
 			result.DeletedCount++
 			result.Removed = append(result.Removed, f)
 			continue
@@ -119,7 +166,7 @@ func Trim(ctx context.Context, paths []string, opts TrimOptions) (TrimResult, er
 			continue
 		}
 
-		result.FreedBytes += f.Size
+		result.FreedBytes += freed.Remove(f)
 		result.DeletedCount++
 		result.Removed = append(result.Removed, f)
 	}

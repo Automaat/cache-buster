@@ -254,3 +254,61 @@ func TestTrim_ReportsRemovedFiles(t *testing.T) {
 		assert.Equal(t, int64(700), result.Removed[0].Size)
 	}
 }
+
+func linkOrSkip(t *testing.T, oldname, newname string) {
+	t.Helper()
+	if err := os.Link(oldname, newname); err != nil {
+		t.Skipf("hard links unsupported here: %v", err)
+	}
+	mtime := time.Now().Add(-40 * 24 * time.Hour)
+	require.NoError(t, os.Chtimes(newname, mtime, mtime))
+}
+
+func TestTrim_CreditsSharedInodeOnceWhenAllLinksGo(t *testing.T) {
+	for _, dry := range []bool{true, false} {
+		dir := t.TempDir()
+		first := filepath.Join(dir, "a.bin")
+		createTestFile(t, first, 1000, 40*24*time.Hour)
+		linkOrSkip(t, first, filepath.Join(dir, "b.bin"))
+
+		result, err := Trim(context.Background(), []string{dir}, TrimOptions{
+			MaxSize: 10000, MaxAge: 30 * 24 * time.Hour, DryRun: dry,
+		})
+
+		require.NoError(t, err)
+		assert.Equal(t, int64(1000), result.FreedBytes, "dry=%v", dry)
+		assert.Equal(t, int64(2), result.DeletedCount, "dry=%v", dry)
+	}
+}
+
+func TestTrim_LinkOutsideTheCacheKeepsTheBytes(t *testing.T) {
+	dir, elsewhere := t.TempDir(), t.TempDir()
+	first := filepath.Join(dir, "a.bin")
+	createTestFile(t, first, 1000, 40*24*time.Hour)
+	linkOrSkip(t, first, filepath.Join(elsewhere, "keep.bin"))
+
+	result, err := Trim(context.Background(), []string{dir}, TrimOptions{
+		MaxSize: 10000, MaxAge: 30 * 24 * time.Hour,
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, int64(0), result.FreedBytes)
+	assert.Equal(t, int64(1), result.DeletedCount)
+}
+
+func TestTrim_SizeTrimCountsSharedInodeOnce(t *testing.T) {
+	dir := t.TempDir()
+	first := filepath.Join(dir, "a.bin")
+	createTestFile(t, first, 1000, 40*24*time.Hour)
+	linkOrSkip(t, first, filepath.Join(dir, "b.bin"))
+	createTestFile(t, filepath.Join(dir, "new.bin"), 1000, time.Hour)
+
+	result, err := Trim(context.Background(), []string{dir}, TrimOptions{
+		MaxSize: 1500, MaxAge: 90 * 24 * time.Hour,
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, int64(1000), result.FreedBytes)
+	assert.Equal(t, int64(2), result.DeletedCount)
+	assert.FileExists(t, filepath.Join(dir, "new.bin"))
+}
