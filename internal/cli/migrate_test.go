@@ -165,3 +165,32 @@ func TestBeforeCommand_ConfigInitAndEditRefuseWhileTheMigrationIsPending(t *test
 	cfg.AddCommand(show)
 	require.NoError(t, BeforeCommand(show))
 }
+
+func TestBeforeCommand_ConfigInitThroughADanglingLinkIsRefused(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlinks need a privilege on Windows")
+	}
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	oldCfg := filepath.Join(home, ".config", "cache-buster")
+	newCfg := filepath.Join(home, ".config", "bilgie")
+	outside := filepath.Join(home, "elsewhere", "config.yaml")
+	require.NoError(t, os.MkdirAll(oldCfg, 0o750))
+	require.NoError(t, os.MkdirAll(newCfg, 0o750))
+	require.NoError(t, os.WriteFile(filepath.Join(oldCfg, "config.yaml"), []byte("providers: {}\n"), 0o600))
+	require.NoError(t, os.Symlink(outside, filepath.Join(newCfg, "config.yaml")))
+	root := &cobra.Command{Use: "bilgie"}
+	cfg := &cobra.Command{Use: "config"}
+	root.AddCommand(cfg)
+	initCmd := &cobra.Command{Use: "init"}
+	cfg.AddCommand(initCmd)
+	tick := guardTree("tick")["tick"]
+
+	err := BeforeCommand(initCmd)
+
+	require.Error(t, err)
+	assert.ErrorContains(t, err, ".bak")
+	assert.NoFileExists(t, outside)
+	assert.Error(t, BeforeCommand(tick))
+}

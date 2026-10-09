@@ -45,8 +45,7 @@ func Legacy(home string, out io.Writer) []Issue {
 	if !anyExists(pairs) {
 		return nil
 	}
-	unlock, _ := lockFile(filepath.Join(home, ".cache", "bilgie", "migration.lock"), migrateWait)
-	defer unlock()
+	defer lockFile(filepath.Join(home, ".cache", "bilgie", "migration.lock"), migrateWait)()
 	var issues []Issue
 	for _, pair := range pairs {
 		moved, err := Dir(pair[0], pair[1])
@@ -67,7 +66,7 @@ func Legacy(home string, out io.Writer) []Issue {
 
 // migrateWait bounds how long a run waits for a concurrent migration, so that
 // it sees the finished result rather than a half-moved one.
-const migrateWait = 5 * time.Second
+const migrateWait = 2 * time.Second
 
 func anyExists(pairs [][2]string) bool {
 	for _, pair := range pairs {
@@ -185,6 +184,8 @@ func moveEntry(src, dst string) (moved bool, err error) {
 			return true, nil
 		case errors.Is(err, os.ErrExist):
 			if dstInfo, statErr := os.Lstat(dst); statErr == nil && os.SameFile(info, dstInfo) {
+				// a run died between link and unlink, or a racer is mid-move
+				_ = os.Remove(src)
 				return false, nil
 			}
 			return false, err

@@ -3,6 +3,7 @@ package migrate
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"time"
@@ -59,11 +60,6 @@ func writeMarker(home string, m map[string]reported) {
 // failure on every run. An unwritable marker means the failure is
 // reported each time rather than hidden.
 func ShouldReport(home, key, sig string) bool {
-	unlock, ok := lockMarker(home)
-	if !ok {
-		return false
-	}
-	defer unlock()
 	m := readMarker(home)
 	if prev, ok := m[key]; ok && prev.Sig == sig && now().Sub(prev.At) < reportEvery && !prev.At.After(now()) {
 		return false
@@ -78,39 +74,41 @@ const lockStale = 10 * time.Second
 
 func noop() {}
 
-// lockMarker serializes the read-decide-write of the marker. ok is false when
-// another run holds the lock: it is deciding right now, so it reports for both.
-func lockMarker(home string) (unlock func(), ok bool) {
-	return lockFile(markerPath(home)+".lock", 0)
-}
-
-// lockFile takes an exclusive lock by creating path. It waits up to wait for a
-// holder to finish and reports ok=false if the lock stays taken. A lock that
-// cannot be created at all (read-only cache dir) is a no-op so the caller
-// proceeds unserialized instead of failing; a stale or future-dated lock left
-// by a crashed holder is broken.
-func lockFile(path string, wait time.Duration) (unlock func(), ok bool) {
+// lockFile takes an advisory lock by creating path and returns its unlock. It
+// never fails or blocks past wait: when the lock stays taken, or cannot be
+// created at all, the caller proceeds unlocked, because the lock only keeps
+// concurrent runs from announcing the same move twice. A lock older than
+// lockStale, or dated in the future, belongs to a crashed holder and is
+// broken. Unlock removes the file only while it still holds this run's token.
+func lockFile(path string, wait time.Duration) (unlock func()) {
 	if os.MkdirAll(filepath.Dir(path), 0o750) != nil {
-		return noop, true
+		return noop
 	}
+	token := fmt.Sprintf("%d-%d", os.Getpid(), time.Now().UnixNano())
 	deadline := time.Now().Add(wait)
 	for {
 		f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 		if err == nil {
+			_, _ = f.WriteString(token)
 			_ = f.Close()
-			return func() { _ = os.Remove(path) }, true
+			return func() { releaseLock(path, token) }
 		}
 		if !errors.Is(err, os.ErrExist) {
-			return noop, true
+			return noop
 		}
-		if info, statErr := os.Stat(path); statErr != nil || staleLock(now().Sub(info.ModTime())) {
+		if info, statErr := os.Lstat(path); statErr != nil || staleLock(now().Sub(info.ModTime())) {
 			_ = os.Remove(path)
-			continue
 		}
 		if !time.Now().Before(deadline) {
-			return noop, false
+			return noop
 		}
 		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+func releaseLock(path, token string) {
+	if data, err := os.ReadFile(path); err == nil && string(data) == token {
+		_ = os.Remove(path)
 	}
 }
 
@@ -121,11 +119,6 @@ func Resolved(home, key string) {
 	if _, ok := readMarker(home)[key]; !ok {
 		return
 	}
-	unlock, ok := lockMarker(home)
-	if !ok {
-		return
-	}
-	defer unlock()
 	m := readMarker(home)
 	if _, ok := m[key]; !ok {
 		return

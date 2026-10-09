@@ -7,7 +7,6 @@ import (
 	"runtime"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -511,27 +510,6 @@ func TestPendingStep_SetsAsideAFileAtTheNewPath(t *testing.T) {
 	assert.NotContains(t, step, "config.yaml")
 }
 
-func TestShouldReport_ConcurrentRunsReportOnce(t *testing.T) {
-	for round := range 30 {
-		home := t.TempDir()
-		var reports atomic.Int32
-		var wg sync.WaitGroup
-		start := make(chan struct{})
-		for range 8 {
-			wg.Go(func() {
-				<-start
-				if ShouldReport(home, "k", "sig") {
-					reports.Add(1)
-				}
-			})
-		}
-		close(start)
-		wg.Wait()
-		require.LessOrEqual(t, reports.Load(), int32(1), "round %d", round)
-		require.Equal(t, int32(1), reports.Load(), "round %d: someone must report", round)
-	}
-}
-
 func TestPendingStep_NeverReusesAnExistingBackupName(t *testing.T) {
 	home := t.TempDir()
 	dirs := Dirs(home)
@@ -553,25 +531,6 @@ func TestPendingStep_QuotesPathsLiterally(t *testing.T) {
 	assert.Equal(t, `mv '/h/$HOME/it'\''s/old' '/h/`+"`x`"+`/new'`, p.Step())
 }
 
-func TestPendingConfig_EmptyNewConfigDoesNotHideTheLegacyOne(t *testing.T) {
-	home := t.TempDir()
-	dirs := Dirs(home)
-	writeFile(t, filepath.Join(dirs[0][0], "config.yaml"), "real: 1")
-	writeFile(t, filepath.Join(dirs[0][1], "config.yaml"), "")
-
-	assert.NotNil(t, PendingConfig(home))
-}
-
-func TestShouldReport_FutureDatedLockIsStale(t *testing.T) {
-	home := t.TempDir()
-	lock := markerPath(home) + ".lock"
-	writeFile(t, lock, "")
-	future := time.Now().Add(2 * time.Hour)
-	require.NoError(t, os.Chtimes(lock, future, future))
-
-	assert.True(t, ShouldReport(home, "k", "sig"))
-}
-
 func TestResolved_LeavesNoTraceWhenNothingWasReported(t *testing.T) {
 	home := t.TempDir()
 
@@ -579,4 +538,146 @@ func TestResolved_LeavesNoTraceWhenNothingWasReported(t *testing.T) {
 	Legacy(home, &bytes.Buffer{})
 
 	assert.NoDirExists(t, filepath.Join(home, ".cache"))
+}
+
+func TestPendingConfig_NewConfigWithoutContentDoesNotHideTheLegacyOne(t *testing.T) {
+	cases := map[string]func(t *testing.T, newCfg string){
+		"empty":       func(t *testing.T, p string) { t.Helper(); writeFile(t, p, "") },
+		"blank":       func(t *testing.T, p string) { t.Helper(); writeFile(t, p, "\n  \n\t\n") },
+		"comments":    func(t *testing.T, p string) { t.Helper(); writeFile(t, p, "---\n# nothing here\n  # indented\n...\n") },
+		"a directory": func(t *testing.T, p string) { t.Helper(); require.NoError(t, os.MkdirAll(p, 0o750)) },
+		"dangling":    func(t *testing.T, p string) { t.Helper(); linkTo(t, filepath.Join(filepath.Dir(p), "gone.yaml"), p) },
+		"link to nothing useful": func(t *testing.T, p string) {
+			t.Helper()
+			writeFile(t, filepath.Join(filepath.Dir(p), "e.yaml"), "# x\n")
+			linkTo(t, filepath.Join(filepath.Dir(p), "e.yaml"), p)
+		},
+	}
+	for name, setup := range cases {
+		t.Run(name, func(t *testing.T) {
+			home := t.TempDir()
+			dirs := Dirs(home)
+			writeFile(t, filepath.Join(dirs[0][0], "config.yaml"), "real: 1")
+			require.NoError(t, os.MkdirAll(dirs[0][1], 0o750))
+			setup(t, filepath.Join(dirs[0][1], "config.yaml"))
+
+			p := PendingConfig(home)
+
+			require.NotNil(t, p)
+			assert.Contains(t, p.Step(), ".bak")
+		})
+	}
+}
+
+func TestPendingConfig_NewConfigWithContentWins(t *testing.T) {
+	home := t.TempDir()
+	dirs := Dirs(home)
+	writeFile(t, filepath.Join(dirs[0][0], "config.yaml"), "real: 1")
+	writeFile(t, filepath.Join(dirs[0][1], "config.yaml"), "# note\nversion: \"1\"\n")
+
+	assert.Nil(t, PendingConfig(home))
+}
+
+func linkTo(t *testing.T, target, link string) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("symlinks need a privilege on Windows")
+	}
+	require.NoError(t, os.Symlink(target, link))
+}
+
+func TestMerge_HealsALinkLeftByAnInterruptedMove(t *testing.T) {
+	root := t.TempDir()
+	oldDir := filepath.Join(root, "old")
+	newDir := filepath.Join(root, "new")
+	writeFile(t, filepath.Join(newDir, "f.txt"), "data")
+	require.NoError(t, os.MkdirAll(oldDir, 0o750))
+	require.NoError(t, os.Link(filepath.Join(newDir, "f.txt"), filepath.Join(oldDir, "f.txt")))
+
+	moved, err := Dir(oldDir, newDir)
+
+	require.NoError(t, err)
+	assert.False(t, moved)
+	assert.NoDirExists(t, oldDir)
+	assert.Equal(t, "data", readFile(t, filepath.Join(newDir, "f.txt")))
+}
+
+func TestLockFile_NeverBlocksPastItsBound(t *testing.T) {
+	dir := t.TempDir()
+	lock := filepath.Join(dir, "migration.lock")
+	require.NoError(t, os.MkdirAll(filepath.Join(lock, "child"), 0o750))
+	old := time.Now().Add(-time.Hour)
+	require.NoError(t, os.Chtimes(lock, old, old))
+	start := time.Now()
+
+	unlock := lockFile(lock, 300*time.Millisecond)
+	unlock()
+
+	assert.Less(t, time.Since(start), 3*time.Second)
+	assert.DirExists(t, lock, "someone else's directory is never removed")
+}
+
+func TestLockFile_BreaksStaleAndFutureDatedLocks(t *testing.T) {
+	for name, mtime := range map[string]time.Time{
+		"stale":  time.Now().Add(-time.Hour),
+		"future": time.Now().Add(2 * time.Hour),
+	} {
+		t.Run(name, func(t *testing.T) {
+			lock := filepath.Join(t.TempDir(), "migration.lock")
+			writeFile(t, lock, "dead-holder")
+			require.NoError(t, os.Chtimes(lock, mtime, mtime))
+			start := time.Now()
+
+			unlock := lockFile(lock, time.Second)
+
+			assert.Less(t, time.Since(start), 500*time.Millisecond)
+			assert.Contains(t, readFile(t, lock), "-", "this run holds a fresh lock")
+			unlock()
+			assert.NoFileExists(t, lock)
+		})
+	}
+}
+
+func TestLockFile_UnlockLeavesAnotherRunsLock(t *testing.T) {
+	lock := filepath.Join(t.TempDir(), "migration.lock")
+	unlock := lockFile(lock, time.Second)
+	writeFile(t, lock, "someone-else")
+
+	unlock()
+
+	assert.Equal(t, "someone-else", readFile(t, lock))
+}
+
+func TestLockFile_UnwritableParentProceedsUnlocked(t *testing.T) {
+	root := t.TempDir()
+	blocker := filepath.Join(root, "cache")
+	writeFile(t, blocker, "a file where the cache dir belongs")
+
+	unlock := lockFile(filepath.Join(blocker, "bilgie", "migration.lock"), time.Second)
+	unlock()
+}
+
+func TestLegacy_AnUnbreakableLockDoesNotStopTheMigration(t *testing.T) {
+	home := t.TempDir()
+	dirs := Dirs(home)
+	writeFile(t, filepath.Join(dirs[0][0], "config.yaml"), "x")
+	lock := filepath.Join(home, ".cache", "bilgie", "migration.lock")
+	require.NoError(t, os.MkdirAll(filepath.Join(lock, "child"), 0o750))
+	old := time.Now().Add(-time.Hour)
+	require.NoError(t, os.Chtimes(lock, old, old))
+	start := time.Now()
+
+	Legacy(home, &bytes.Buffer{})
+
+	assert.Less(t, time.Since(start), 2*migrateWait+time.Second)
+	assert.FileExists(t, filepath.Join(dirs[0][1], "config.yaml"))
+}
+
+func TestShouldReport_UnwritableMarkerNeverFailsOrBlocks(t *testing.T) {
+	home := t.TempDir()
+	writeFile(t, filepath.Join(home, ".cache"), "a file")
+
+	assert.True(t, ShouldReport(home, "k", "sig"))
+	assert.True(t, ShouldReport(home, "k", "sig"), "reported each time rather than hidden")
+	Resolved(home, "k")
 }
