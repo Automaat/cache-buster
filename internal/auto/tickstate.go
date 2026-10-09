@@ -76,10 +76,15 @@ func readJSON(stateDir, name string, v any) error {
 	return nil
 }
 
-// CheckState reports whether the named state file is still unusable.
+// CheckState reports whether the named state file is still unusable, judged
+// by the shape the reader expects.
 func CheckState(stateDir, name string) error {
-	var v any
-	return readJSON(stateDir, name, &v)
+	if name == TickStateName {
+		_, err := ReadTickState(stateDir)
+		return err
+	}
+	_, err := ReadPassState(stateDir)
+	return err
 }
 
 // QuarantineState moves a bad state file (or directory) aside to

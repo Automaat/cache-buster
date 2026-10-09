@@ -572,3 +572,20 @@ func TestHealState_KeepsAFileThatIsUsableAgain(t *testing.T) {
 	assert.NoFileExists(t, filepath.Join(r.env.stateDir, auto.PassStateName+".bad"))
 	assert.Empty(t, r.out.String())
 }
+
+func TestTick_WrongShapeStateFilesAreMovedAside(t *testing.T) {
+	for _, name := range []string{auto.TickStateName, auto.PassStateName} {
+		for _, content := range []string{"[]", `"x"`, `{"time":123}`} {
+			t.Run(name+" "+content, func(t *testing.T) {
+				r := newTickRig(t, "")
+				require.NoError(t, os.MkdirAll(r.env.stateDir, 0o750))
+				require.NoError(t, os.WriteFile(filepath.Join(r.env.stateDir, name), []byte(content), 0o600))
+
+				r.tick(400*autoGiB, 0)
+
+				assert.Contains(t, r.out.String(), "moved aside")
+				assert.FileExists(t, filepath.Join(r.env.stateDir, name+".bad"))
+			})
+		}
+	}
+}
