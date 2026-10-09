@@ -537,3 +537,38 @@ func TestAssumedFree_RejectsAnUnparsableSize(t *testing.T) {
 	_, err = free()
 	require.ErrorContains(t, err, "boom")
 }
+
+func TestTick_PendingFirstRunOnAHealthyDiskWaitsForTheInterval(t *testing.T) {
+	r := newTickRig(t, "")
+	require.NoError(t, auto.MarkFirstRunPending(r.env.stateDir))
+
+	for _, minutes := range []int{0, 2, 4, 6} {
+		r.tick(400*autoGiB, time.Duration(minutes)*time.Minute)
+	}
+
+	assert.Equal(t, 1, r.passes(), "the stamped dry-run holds the routine pass back for the interval")
+	assert.True(t, auto.FirstRunPending(r.env.stateDir))
+}
+
+func TestTick_DryRunLeavesBadStateFilesInPlace(t *testing.T) {
+	r := newTickRig(t, "")
+	path := filepath.Join(r.env.stateDir, auto.TickStateName)
+	require.NoError(t, os.MkdirAll(path, 0o750))
+
+	require.NoError(t, runTickWithLoader(t.Context(), r.loader, r.env, true))
+
+	assert.DirExists(t, path)
+	assert.NoDirExists(t, path+".bad")
+	assert.Contains(t, r.out.String(), "left in place")
+}
+
+func TestHealState_KeepsAFileThatIsUsableAgain(t *testing.T) {
+	r := newTickRig(t, "")
+	require.NoError(t, auto.WritePassState(r.env.stateDir, auto.PassState{Time: tickStart, Tier: "low"}))
+
+	r.env.healState(auto.PassStateName, errors.New("stale read error"), false)
+
+	assert.FileExists(t, filepath.Join(r.env.stateDir, auto.PassStateName))
+	assert.NoFileExists(t, filepath.Join(r.env.stateDir, auto.PassStateName+".bad"))
+	assert.Empty(t, r.out.String())
+}

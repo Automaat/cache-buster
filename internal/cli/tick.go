@@ -81,9 +81,9 @@ func runTickWithLoader(ctx context.Context, loader *config.Loader, env autoEnv, 
 	now := env.clock()
 
 	tick, err := auto.ReadTickState(env.stateDir)
-	env.healState(auto.TickStateName, err)
+	env.healState(auto.TickStateName, err, dryRun)
 	pass, err := auto.ReadPassState(env.stateDir)
-	env.healState(auto.PassStateName, err)
+	env.healState(auto.PassStateName, err, dryRun)
 
 	d := auto.Decide(auto.TickInput{Now: now, Free: fs, Limits: limits, Tick: tick, Pass: pass})
 	state := auto.TickState{
@@ -118,7 +118,7 @@ func runTickWithLoader(ctx context.Context, loader *config.Loader, env autoEnv, 
 
 	now = env.clock()
 	pass, err = auto.ReadPassState(env.stateDir)
-	env.healState(auto.PassStateName, err)
+	env.healState(auto.PassStateName, err, dryRun)
 	d = auto.Decide(auto.TickInput{Now: now, Free: fs, Limits: limits, Tick: tick, Pass: pass})
 	if !d.Run {
 		state.Action, state.Reason = auto.ActionIdle, d.Reason
@@ -140,9 +140,18 @@ func runTickWithLoader(ctx context.Context, loader *config.Loader, env autoEnv, 
 
 // healState reports a state file that cannot be used and moves it aside, so
 // the unattended tick carries on with the empty state instead of failing on
-// the same file forever.
-func (e autoEnv) healState(name string, readErr error) {
+// the same file forever. The file is checked again first, because a pass
+// holding the run lock may have replaced it since it was read. A dry-run
+// only reports.
+func (e autoEnv) healState(name string, readErr error, dryRun bool) {
 	if readErr == nil {
+		return
+	}
+	if dryRun {
+		fmt.Fprintf(e.out, "warning: %v; left in place by the dry-run\n", readErr)
+		return
+	}
+	if auto.CheckState(e.stateDir, name) == nil {
 		return
 	}
 	moved, err := auto.QuarantineState(e.stateDir, name)
