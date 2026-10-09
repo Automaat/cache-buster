@@ -7,6 +7,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -506,4 +507,35 @@ func TestPendingStep_SetsAsideAFileAtTheNewPath(t *testing.T) {
 	assert.Contains(t, step, dirs[0][1]+".bak")
 	assert.Contains(t, step, dirs[0][0])
 	assert.NotContains(t, step, "config.yaml")
+}
+
+func TestShouldReport_ConcurrentRunsReportOnce(t *testing.T) {
+	for round := range 30 {
+		home := t.TempDir()
+		var reports atomic.Int32
+		var wg sync.WaitGroup
+		start := make(chan struct{})
+		for range 8 {
+			wg.Go(func() {
+				<-start
+				if ShouldReport(home, "k", "sig") {
+					reports.Add(1)
+				}
+			})
+		}
+		close(start)
+		wg.Wait()
+		require.LessOrEqual(t, reports.Load(), int32(1), "round %d", round)
+		require.Equal(t, int32(1), reports.Load(), "round %d: someone must report", round)
+	}
+}
+
+func TestPendingStep_NeverReusesAnExistingBackupName(t *testing.T) {
+	home := t.TempDir()
+	dirs := Dirs(home)
+	writeFile(t, filepath.Join(dirs[0][0], "config.yaml"), "x")
+	writeFile(t, dirs[0][1], "in the way")
+	writeFile(t, dirs[0][1]+".bak", "older")
+
+	assert.Contains(t, PendingConfig(home).Step(), dirs[0][1]+".bak.2")
 }

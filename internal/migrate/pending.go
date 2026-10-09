@@ -49,7 +49,7 @@ func (p Pending) Step() string {
 	case info.IsDir():
 		return move(filepath.Join(p.Old, configFile), filepath.Join(p.New, configFile))
 	default:
-		return move(p.New, p.New+".bak") + sep() + move(p.Old, p.New)
+		return move(p.New, freeName(p.New+".bak")) + sep() + move(p.Old, p.New)
 	}
 }
 
@@ -58,4 +58,14 @@ func sep() string {
 		return "; "
 	}
 	return " && "
+}
+
+// freeName appends a counter until nothing exists at the path, so setting a
+// file aside never replaces an earlier backup.
+func freeName(path string) string {
+	candidate := path
+	for i := 2; pathExists(candidate); i++ {
+		candidate = fmt.Sprintf("%s.%d", path, i)
+	}
+	return candidate
 }
