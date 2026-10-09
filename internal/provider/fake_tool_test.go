@@ -18,7 +18,8 @@ const fakeToolEnv = "BILGIE_FAKE_TOOL"
 
 // fakeReply is what a fake tool prints and returns for one invocation.
 // SleepMS delays the reply so a timeout test has something to kill, Touch
-// creates a file before replying, and IfExists switches to Then once that
+// creates a file before replying, Log appends the arguments and the uv cache
+// environment to a file, and IfExists switches to Then once that
 // file exists.
 type fakeReply struct {
 	Stdout   string     `json:"stdout"`
@@ -26,6 +27,7 @@ type fakeReply struct {
 	Exit     int        `json:"exit"`
 	SleepMS  int        `json:"sleep_ms"`
 	Touch    string     `json:"touch"`
+	Log      string     `json:"log"`
 	Remove   []string   `json:"remove"`
 	IfExists string     `json:"if_exists"`
 	Then     *fakeReply `json:"then"`
@@ -68,6 +70,20 @@ func runFakeTool(raw string, args []string, stdout, stderr io.Writer) int {
 	if reply.IfExists != "" && reply.Then != nil {
 		if _, err := os.Stat(reply.IfExists); err == nil {
 			reply = *reply.Then
+		}
+	}
+	if reply.Log != "" {
+		line := strings.Join(args, " ") + "\tUV_CACHE_DIR=" + os.Getenv("UV_CACHE_DIR") +
+			"\tUV_NO_CACHE=" + os.Getenv("UV_NO_CACHE") + "\n"
+		f, err := os.OpenFile(reply.Log, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+		if err != nil {
+			fmt.Fprintln(stderr, "fake tool log:", err)
+			return 2
+		}
+		_, werr := f.WriteString(line)
+		if cerr := f.Close(); werr != nil || cerr != nil {
+			fmt.Fprintln(stderr, "fake tool log write failed")
+			return 2
 		}
 	}
 	if reply.Touch != "" {

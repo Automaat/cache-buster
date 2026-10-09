@@ -289,48 +289,6 @@ func lockFile(t *testing.T, path string) {
 	t.Cleanup(release)
 }
 
-func newUVTestProvider(t *testing.T, cacheDir string) *FileProvider {
-	t.Helper()
-	p, err := NewFileProvider("uv", config.Provider{
-		Enabled: true,
-		Paths:   []string{cacheDir},
-		MaxSize: "1",
-	})
-	require.NoError(t, err)
-	return p
-}
-
-func TestFileProvider_SkipsWhenLockHeld(t *testing.T) {
-	cacheDir := t.TempDir()
-	require.NoError(t, os.WriteFile(filepath.Join(cacheDir, "blob"), make([]byte, 64), 0o600))
-	lockPath := filepath.Join(cacheDir, ".lock")
-	lockFile(t, lockPath)
-
-	p := newUVTestProvider(t, cacheDir)
-	p.busy.listProcesses = func(context.Context) ([]string, error) { return nil, nil }
-
-	for _, mode := range []CleanMode{CleanModeFull, CleanModeSmart} {
-		result, err := p.Clean(context.Background(), CleanOptions{Mode: mode})
-		require.NoError(t, err)
-		assert.Equal(t, "lock held: "+lockPath, result.SkipReason)
-		assert.Zero(t, result.BytesCleaned)
-	}
-	assert.FileExists(t, filepath.Join(cacheDir, "blob"), "busy provider must not delete files")
-}
-
-func TestFileProvider_CleansWhenIdle(t *testing.T) {
-	cacheDir := t.TempDir()
-	require.NoError(t, os.WriteFile(filepath.Join(cacheDir, "blob"), make([]byte, 64), 0o600))
-
-	p := newUVTestProvider(t, cacheDir)
-	p.busy.listProcesses = func(context.Context) ([]string, error) { return []string{"zsh"}, nil }
-
-	result, err := p.Clean(context.Background(), CleanOptions{Mode: CleanModeFull})
-	require.NoError(t, err)
-	assert.Empty(t, result.SkipReason)
-	assert.NoFileExists(t, filepath.Join(cacheDir, "blob"))
-}
-
 func TestCommandProvider_SkipsWhenToolRunning(t *testing.T) {
 	cacheDir := t.TempDir()
 	marker := filepath.Join(t.TempDir(), "ran")

@@ -164,14 +164,14 @@ func xcodeProviders() map[string]Provider {
 func otherProviders(p Platform) map[string]Provider {
 	return map[string]Provider{
 		"uv": {
-			Enabled: true,
+			Enabled: false,
 			Paths: perOS(p,
 				[]string{"~/.cache/uv"},
 				[]string{p.cache("uv")},
 				[]string{p.cache("uv/cache")}),
 			MaxSize:  "4G",
 			MaxAge:   "30d",
-			CleanCmd: "",
+			CleanCmd: "uv cache clean",
 		},
 		"jetbrains": {
 			Enabled:  true,

@@ -467,7 +467,7 @@ func (c *Config) EnabledProviders() []string {
 		p := c.Providers[name]
 		// A misconfigured dir-pattern provider stays listed so its load
 		// error is reported instead of the provider silently vanishing.
-		if p.Enabled && c.Applies(name) && (PathsExist(p.Paths) || p.DirPatternError() != nil) {
+		if p.Enabled && c.Applies(name) && (ProviderPathsExist(name, p) || p.DirPatternError() != nil) {
 			enabled = append(enabled, name)
 		}
 	}

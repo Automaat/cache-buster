@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
@@ -14,10 +15,24 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// stubUVOnPath puts a placeholder uv first on PATH so the provider counts as
+// available; a busy uv is skipped before the binary would ever run.
+func stubUVOnPath(t *testing.T) {
+	t.Helper()
+	dir := t.TempDir()
+	name := "uv"
+	if runtime.GOOS == "windows" {
+		name = "uv.exe"
+	}
+	require.NoError(t, os.WriteFile(filepath.Join(dir, name), nil, 0o700))
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+}
+
 // busyUVLoader returns a config whose uv cache holds a live flock, plus an
 // idle command provider, so uv is deterministically busy.
 func busyUVLoader(t *testing.T, extra string) (loader *config.Loader, lockPath string) {
 	t.Helper()
+	stubUVOnPath(t)
 
 	uvDir := t.TempDir()
 	lockPath = filepath.Join(uvDir, ".lock")
@@ -212,4 +227,52 @@ func TestClean_InterruptedCleanIsNotAnErrorInJSON(t *testing.T) {
 	require.Len(t, got.Providers, 1)
 	assert.Equal(t, "slow", got.Providers[0].Name)
 	assert.Equal(t, statusCancelled, got.Providers[0].Status)
+}
+
+func TestClean_NamedProviderWithoutCacheDirNamesThePath(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "no-such-uv-cache")
+	cfgPath := filepath.Join(t.TempDir(), "config.yaml")
+	require.NoError(t, os.WriteFile(cfgPath, []byte(`version: "1"
+providers:
+  uv:
+    enabled: true
+    paths:
+      - `+missing+`
+    max_size: 1
+`), 0o600))
+	loader := config.NewLoader()
+	loader.SetConfigPath(cfgPath)
+	loader.SkipDefaults()
+
+	err := runCleanWithLoader(loader, []string{"uv"}, false, false, true, false, false, os.Stdin)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "provider uv: no cache directory found (checked: "+missing+")")
+	assert.NotContains(t, err.Error(), "unknown providers")
+}
+
+func TestClean_MissingCacheAndTypoAreBothReported(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "no-such-uv-cache")
+	cfgPath := filepath.Join(t.TempDir(), "config.yaml")
+	require.NoError(t, os.WriteFile(cfgPath, []byte(`version: "1"
+providers:
+  uv:
+    enabled: true
+    paths:
+      - `+missing+`
+    max_size: 1
+`), 0o600))
+
+	for _, args := range [][]string{{"uv", "typo"}, {"typo", "uv"}} {
+		loader := config.NewLoader()
+		loader.SetConfigPath(cfgPath)
+		loader.SkipDefaults()
+
+		err := runCleanWithLoader(loader, args, false, false, true, false, false, os.Stdin)
+
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "provider uv: no cache directory found (checked: "+missing+")")
+		assert.Contains(t, err.Error(), "unknown providers: typo")
+		assert.NotContains(t, err.Error(), "unknown providers: uv")
+	}
 }

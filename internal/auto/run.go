@@ -247,7 +247,7 @@ func candidates(cfg *config.Config, tier Tier) []candidate {
 
 	for name := range cfg.Providers {
 		pc := cfg.Providers[name]
-		if !cfg.Applies(name) || neverRun(name, pc) || (name != "docker" && pruneVolumes(pc.CleanCmd)) || !hasTargets(pc) {
+		if !cfg.Applies(name) || neverRun(name, pc) || (name != "docker" && pruneVolumes(pc.CleanCmd)) || !hasTargets(name, pc) {
 			continue
 		}
 		switch {
@@ -273,8 +273,8 @@ func candidates(cfg *config.Config, tier Tier) []candidate {
 // hasTargets reports whether a provider has paths on disk. An enabled
 // dir-pattern provider with a broken config counts, so its load error is
 // reported rather than the provider silently vanishing.
-func hasTargets(pc config.Provider) bool {
-	return config.PathsExist(pc.Paths) || pc.Enabled && pc.DirPatternError() != nil
+func hasTargets(name string, pc config.Provider) bool {
+	return config.ProviderPathsExist(name, pc) || pc.Enabled && pc.DirPatternError() != nil
 }
 
 // neverRun lists the providers auto must not touch, whatever they are named.

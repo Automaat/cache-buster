@@ -178,12 +178,38 @@ func resolveProviders(cfg *config.Config, args []string, allFlag, smart bool) ([
 	}
 
 	if len(invalid) > 0 {
-		available := cfg.EnabledProviders()
-		return nil, fmt.Errorf("unknown providers: %s\nAvailable: %s",
-			strings.Join(invalid, ", "), strings.Join(available, ", "))
+		missing, unknown := splitMissingCache(cfg, invalid)
+		lines := missing
+		if len(unknown) > 0 {
+			lines = append(lines, fmt.Sprintf("unknown providers: %s\nAvailable: %s",
+				strings.Join(unknown, ", "), strings.Join(cfg.EnabledProviders(), ", ")))
+		}
+		return nil, fmt.Errorf("%s", strings.Join(lines, "\n"))
 	}
 
 	return args, nil
+}
+
+// splitMissingCache separates the requested providers that are enabled but
+// hidden because their cache directory does not exist, which get a line that
+// names the path checked, from names that are not providers at all.
+func splitMissingCache(cfg *config.Config, requested []string) (missing, unknown []string) {
+	enabled := cfg.AllEnabledProviders()
+	for _, name := range requested {
+		if !slices.Contains(enabled, name) {
+			unknown = append(unknown, name)
+			continue
+		}
+		pc, _ := cfg.GetProvider(name)
+		checked := strings.Join(pc.Paths, ", ")
+		if name == "uv" {
+			if dir, err := config.ResolveUVCacheDir(pc.Paths); err == nil {
+				checked = dir
+			}
+		}
+		missing = append(missing, fmt.Sprintf("provider %s: no cache directory found (checked: %s)", name, checked))
+	}
+	return missing, unknown
 }
 
 // unavailableProvider is a provider that could not be loaded or is not installed.

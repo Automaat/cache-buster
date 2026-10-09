@@ -120,7 +120,7 @@ Providers are auto-detected — only tools installed on your system appear in th
 | yarn | 2G | smart: whole `v*/<package>` directories; full: `yarn cache clean` |
 | pnpm | 5G | smart: store files (content-addressed); full: `pnpm store prune` |
 | **Python** | | |
-| uv | 4G | file-based |
+| uv | 4G | opt-in (`enabled: false`); smart: `uv cache prune`; full: `uv cache clean`; see [uv](#uv) |
 | pip | 3G | `pip cache purge` |
 | **Rust** | | |
 | cargo | 5G | `registry/cache` `.crate` files by age, whole `registry/src/<index>/<crate>`, `git/checkouts/*/*` and `git/db/*` directories; `registry/index` untouched |
@@ -601,6 +601,38 @@ A tree is kept when it is the newest of its pattern, was modified in the last 2 
 on the command line of a running process. A tree is first renamed aside and then deleted, so it is
 whole or gone; a leftover `.bilgie-trash-*` directory from a failed delete is removed on the next run.
 Dot entries are ignored. In full mode providers with a `clean_cmd` run it.
+
+### uv
+
+`uv` is a command-managed provider: uv decides what goes, bilgie never deletes a file in the uv
+cache. The `wheels-v*` pointer files reference `archive-v0/<id>`, so removing either side makes
+the next install fail with `failed to read directory .../archive-v0/<id>`.
+
+`uv` is off by default until a few safety follow-ups land. Enable it with `providers.uv.enabled: true`.
+The old behavior of trimming uv cache files by age is gone for good because it could corrupt the cache.
+A config that already sets `enabled: true` for `uv` (for example one written by `config init`) keeps it
+on; a config that omits `enabled` follows the new default (off). bilgie cannot tell a saved default
+from a deliberate choice, so set `enabled: false` to turn it off in an existing config.
+
+- Smart mode (and `auto`) runs `uv cache prune`, which drops entries nothing refers to.
+- Full mode runs `uv cache clean`.
+- `--dry-run` prints the command and the current cache size and runs nothing, because uv has no
+  dry-run for prune. Freed bytes are the cache size before minus after.
+- uv is found on `PATH` at run time. If it is missing, fails or exceeds `clean_timeout`
+  (default `2m`), the provider is skipped with the reason and nothing is deleted.
+- The cache directory follows uv's own order when `paths` is left at the default: `UV_CACHE_DIR`,
+  then `$XDG_CACHE_HOME/uv` (macOS and Linux; a relative value is ignored; Windows ignores
+  `XDG_CACHE_HOME`), then `~/.cache/uv`
+  (macOS/Linux) or `%LOCALAPPDATA%\uv\cache` (Windows). A `paths` entry that is not the default
+  always wins over the environment; an entry spelled exactly like the default counts as the default. bilgie hands the chosen directory to uv as `UV_CACHE_DIR` and
+  clears `UV_NO_CACHE`; it also runs uv with `--no-config`, so a `no-cache` or `cache-dir` setting in a uv config file cannot redirect uv. uv cleans exactly the directory bilgie measured.
+- `paths` must name exactly one directory. A path that is, lies inside or contains a protected
+  root is skipped.
+- `max_size` and `max_age` do not bound uv: prune and clean decide. Existing configs without
+  `clean_cmd` keep working. `clean_cmd` may only be `uv cache clean`, `uv cache prune` or `uv cache prune --ci`
+  (a prune command also serves smart mode, so `--ci` applies there too; a clean command only replaces the full-mode default); anything else fails to load with
+  `provider uv: clean_cmd must be ...`, so remove it.
+- Busy guard: skipped while `<path>/.lock` is flock-held or a `uv` process runs.
 
 ### mise
 

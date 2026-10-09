@@ -10,8 +10,6 @@ import (
 
 // fileBasedProviders lists providers that clean by deleting files.
 var fileBasedProviders = map[string]bool{
-	"uv": true,
-
 	"edge":          true,
 	"vivaldi":       true,
 	"gh":            true,
@@ -82,6 +80,10 @@ func newProvider(name string, cfg config.Provider) (Provider, error) {
 
 	if entryBasedProviders[name] {
 		return NewEntryProvider(name, cfg)
+	}
+
+	if name == "uv" {
+		return NewUVProvider(name, cfg)
 	}
 
 	if name == "rustup" {
