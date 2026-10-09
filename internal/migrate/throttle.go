@@ -26,9 +26,9 @@ func markerPath(home string) string {
 }
 
 func readMarker(home string) map[string]reported {
-	m := map[string]reported{}
+	var m map[string]reported
 	data, err := os.ReadFile(markerPath(home))
-	if err != nil || json.Unmarshal(data, &m) != nil {
+	if err != nil || json.Unmarshal(data, &m) != nil || m == nil {
 		return map[string]reported{}
 	}
 	return m

@@ -681,3 +681,43 @@ func TestShouldReport_UnwritableMarkerNeverFailsOrBlocks(t *testing.T) {
 	assert.True(t, ShouldReport(home, "k", "sig"), "reported each time rather than hidden")
 	Resolved(home, "k")
 }
+
+func TestMarker_CorruptContentNeverPanicsAndHealsOnTheNextWrite(t *testing.T) {
+	for name, content := range map[string]string{
+		"null": "null", "array": "[]", "string": `"x"`, "number": "1", "empty object": "{}",
+		"truncated": `{"k":{"sig":"a","at":"2026-01`, "empty file": "", "binary": "\x00\xff\xfe",
+		"wrong types": `{"k":{"sig":1,"at":"x"}}`, "nested null": `{"k":null}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			home := t.TempDir()
+			writeFile(t, markerPath(home), content)
+
+			assert.NotPanics(t, func() {
+				assert.True(t, ShouldReport(home, "k", "sig"))
+				Resolved(home, "other")
+			})
+
+			assert.False(t, ShouldReport(home, "k", "sig"), "the marker healed")
+			Resolved(home, "k")
+		})
+	}
+}
+
+func TestMarker_DirectoryAtTheMarkerPathNeverPanics(t *testing.T) {
+	home := t.TempDir()
+	require.NoError(t, os.MkdirAll(markerPath(home), 0o750))
+
+	assert.NotPanics(t, func() {
+		ShouldReport(home, "k", "sig")
+		Resolved(home, "k")
+	})
+}
+
+func TestPendingConfig_BOMBeforeCommentsIsStillEmpty(t *testing.T) {
+	home := t.TempDir()
+	dirs := Dirs(home)
+	writeFile(t, filepath.Join(dirs[0][0], "config.yaml"), "real: 1")
+	writeFile(t, filepath.Join(dirs[0][1], "config.yaml"), "\xef\xbb\xbf# my notes\n")
+
+	assert.NotNil(t, PendingConfig(home))
+}

@@ -3,6 +3,7 @@ package cli
 import (
 	"errors"
 	"fmt"
+	"io"
 	"os"
 
 	"github.com/spf13/cobra"
@@ -19,32 +20,58 @@ var ErrReported = errors.New("already reported")
 // which must never touch the disk. While the legacy config has not reached the
 // current location it refuses the commands that delete or schedule deletion
 // rather than let them run on default config.
-func BeforeCommand(cmd *cobra.Command) error {
+func BeforeCommand(cmd *cobra.Command) (err error) {
 	if skipsMigration(cmd) {
 		return nil
 	}
 	out := cmd.ErrOrStderr()
-	home, err := os.UserHomeDir()
+	defer func() {
+		r := recover()
+		if r == nil {
+			return
+		}
+		fmt.Fprintf(out, "warning: the legacy migration check failed: %v\n", r)
+		err = nil
+		if isDestructive(cmd) {
+			cmd.SilenceUsage = true
+			err = fmt.Errorf("refusing to run %s: could not check whether the legacy config was migrated", cmd.CommandPath())
+		}
+	}()
+	return beforeCommand(cmd, out)
+}
+
+// Seams for tests.
+var (
+	runLegacy     = migrate.Legacy
+	checkPending  = migrate.PendingConfig
+	userHomeDir   = os.UserHomeDir
+	reportOnce    = migrate.ShouldReport
+	forgetFailure = migrate.Resolved
+)
+
+func beforeCommand(cmd *cobra.Command, out io.Writer) error {
+	home, err := userHomeDir()
 	if err != nil {
 		fmt.Fprintf(out, "warning: not migrating legacy dirs: %v\n", err)
 		return nil
 	}
-	migrate.Legacy(home, out)
+	runLegacy(home, out)
 
-	pending := migrate.PendingConfig(home)
+	pending := checkPending(home)
 	if pending == nil {
-		migrate.Resolved(home, pendingKey)
+		forgetFailure(home, pendingKey)
 		return nil
 	}
 	msg := fmt.Sprintf("the legacy config %s was not migrated to %s, so defaults would ignore your settings; run: %s (on a permission error, make both directories writable first)",
 		pending.Old, pending.New, pending.Step())
-	first := migrate.ShouldReport(home, pendingKey, msg)
+	first := reportOnce(home, pendingKey, msg)
 	if !isDestructive(cmd) {
 		if first {
 			fmt.Fprintf(out, "warning: running on default config: %s\n", msg)
 		}
 		return nil
 	}
+	cmd.SilenceUsage = true
 	if !first && cmd.Name() == "tick" {
 		return ErrReported
 	}

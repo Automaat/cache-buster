@@ -57,7 +57,7 @@ func hasContent(path string) bool {
 	if err != nil {
 		return true
 	}
-	for line := range strings.SplitSeq(string(data), "\n") {
+	for line := range strings.SplitSeq(strings.TrimPrefix(string(data), "\ufeff"), "\n") {
 		line = strings.TrimSpace(line)
 		if line != "" && !strings.HasPrefix(line, "#") && line != "---" && line != "..." {
 			return true
