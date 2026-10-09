@@ -211,12 +211,13 @@ func (e autoEnv) pass(ctx context.Context, cfg *config.Config, dryRun bool, opts
 		MinTier:     opts.minTier,
 		Predicted:   opts.predicted,
 	})
-	e.recordRun(ctx, cfg.Auto, report, err, opts.preview)
+	clearsFirstRun := forced && err == nil && report.Previewed() && report.Err() == nil
+	e.recordRun(ctx, cfg.Auto, report, err, opts.preview, clearsFirstRun)
 	if err != nil {
 		return err
 	}
 
-	if forced && report.Previewed() && report.Err() == nil {
+	if clearsFirstRun {
 		if clearErr := auto.ClearFirstRun(e.stateDir); clearErr != nil {
 			return clearErr
 		}
@@ -232,13 +233,13 @@ func (e autoEnv) clock() time.Time {
 }
 
 // recordRun notifies when space is still low, appends the run record and
-// stores the pass state the tick schedules from. None of these failures
+// stores the pass state the tick schedules from. The dry-run that completes
+// the first-run preview and a run that was interrupted or failed before
+// finishing are not stamped as done, so they never delay the next real pass. None of these failures
 // changes the run's outcome: they are reported and the run keeps its own result.
-func (e autoEnv) recordRun(ctx context.Context, cfg config.Auto, report auto.Report, runErr error, preview bool) {
+func (e autoEnv) recordRun(ctx context.Context, cfg config.Auto, report auto.Report, runErr error, preview, clearsFirstRun bool) {
 	pass, err := auto.ReadPassState(e.stateDir)
-	if err != nil {
-		fmt.Fprintf(e.out, "warning: %v\n", err)
-	}
+	e.healState(auto.PassStateName, err, preview)
 	notified := false
 	if runErr == nil {
 		notifyCtx, cancel := context.WithTimeout(ctx, auto.NotifyTimeout)
@@ -255,10 +256,12 @@ func (e autoEnv) recordRun(ctx context.Context, cfg config.Auto, report auto.Rep
 	if err := auto.AppendRun(e.stateDir, auto.NewRunRecord(report, now, runErr, notified)); err != nil {
 		fmt.Fprintf(e.out, "warning: record run: %v\n", err)
 	}
-	if preview {
+	if preview || (runErr != nil && !errors.Is(runErr, context.DeadlineExceeded)) {
 		return
 	}
-	pass.Time, pass.Tier, pass.DryRun = now.UTC(), report.Tier.String(), report.DryRun
+	if !clearsFirstRun {
+		pass.Time, pass.Tier, pass.DryRun = now.UTC(), report.Tier.String(), report.DryRun
+	}
 	if err := auto.WritePassState(e.stateDir, pass); err != nil {
 		fmt.Fprintf(e.out, "warning: record pass: %v\n", err)
 	}

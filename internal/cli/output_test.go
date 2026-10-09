@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -181,4 +182,65 @@ func TestCleanDryRun_ListsUnavailableProvidersAsSkipped(t *testing.T) {
 	require.NoError(t, err)
 	assert.Contains(t, out, "skipped (1):\n  ghost: ")
 	assert.Contains(t, out, "1 skipped")
+}
+
+const ghostProvider = "  ghost:\n    enabled: true\n    max_size: 1G\n    clean_cmd: \"bilgie-no-such-tool-xyz clean\"\n    paths:\n      - "
+
+func ghostLoader(t *testing.T) *config.Loader {
+	t.Helper()
+	cacheDir, _ := bigCacheFixture(t, 1)
+	_, loader := bigCacheFixtureWith(t, 3, ghostProvider+cacheDir+"\n")
+	return loader
+}
+
+func TestCleanRealRun_ListsUnavailableProvidersAsSkipped(t *testing.T) {
+	loader := ghostLoader(t)
+
+	var err error
+	out := captureStdout(t, func() {
+		err = runCleanWithOptions(loader, []string{"big", "ghost"}, cleanOptions{force: true, smart: true}, os.Stdin)
+	})
+
+	require.NoError(t, err)
+	assert.Contains(t, out, "skipped (1):\n  ghost: ")
+	assert.Less(t, strings.Index(out, "skipped (1):"), strings.Index(out, "Total:"))
+}
+
+func TestCleanDryRun_CancelledStillPrintsSkippedAndTotal(t *testing.T) {
+	loader := ghostLoader(t)
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	var err error
+	out := captureStdout(t, func() {
+		err = runCleanWithContext(func() (context.Context, context.CancelFunc) { return ctx, func() {} },
+			loader, []string{"big", "ghost"}, cleanOptions{dryRun: true, smart: true}, os.Stdin)
+	})
+
+	require.NoError(t, err)
+	assert.Contains(t, out, "Cancelled")
+	assert.Contains(t, out, "skipped (1):\n  ghost: ")
+	assert.Contains(t, out, "total: would free")
+}
+
+func TestCleanDryRun_QuietPrintsTheByteTotal(t *testing.T) {
+	_, loader := bigCacheFixture(t, 5)
+
+	var err error
+	out := captureStdout(t, func() {
+		err = runCleanWithOptions(loader, []string{"big"}, cleanOptions{dryRun: true, quiet: true, smart: true}, os.Stdin)
+	})
+
+	require.NoError(t, err)
+	assert.Regexp(t, `^\d+(\.\d+)? [KMG]?i?B\n$`, out)
+}
+
+func TestFinishClean_CancelledDryRunIsNotAFailure(t *testing.T) {
+	results := []ProviderCleanResult{{Name: "go", Status: statusError, Error: "boom"}}
+	var err error
+	out := captureStdout(t, func() {
+		err = finishClean(results, 0, cleanOptions{dryRun: true}, []string{"go: boom"}, true)
+	})
+	require.NoError(t, err)
+	assert.Contains(t, out, "total: would free")
 }

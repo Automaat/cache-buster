@@ -206,7 +206,7 @@ func (a Agent) Uninstall(ctx context.Context) error {
 	if err := ClearFirstRun(a.StateDir); err != nil {
 		return err
 	}
-	for _, name := range []string{tickStateName, passStateName} {
+	for _, name := range []string{TickStateName, PassStateName} {
 		if _, err := removeIfExists(filepath.Join(a.StateDir, name)); err != nil {
 			return fmt.Errorf("remove %s: %w", name, err)
 		}

@@ -283,7 +283,7 @@ func executeClean(
 	dryRun, quiet, jsonOut := opts.dryRun, opts.quiet, opts.json
 	text := !jsonOut
 	concise := !opts.verbose
-	var skippedBlocks []report.Block
+	skips := skipList{enabled: text && concise && !quiet, unavailable: unavailable}
 	var totalCleaned int64
 	var errors []string
 	results := make([]ProviderCleanResult, 0, len(providers)+len(unavailable))
@@ -298,6 +298,7 @@ func executeClean(
 			if !quiet && text {
 				fmt.Println("\nCancelled")
 			}
+			skips.flush()
 			return finishClean(results, totalCleaned, opts, errors, true)
 		default:
 		}
@@ -322,6 +323,7 @@ func executeClean(
 				fmt.Println("error")
 				fmt.Println("\nCancelled")
 			}
+			skips.flush()
 			return finishClean(results, totalCleaned, opts, errors, true)
 		}
 		entry := ProviderCleanResult{
@@ -345,9 +347,8 @@ func executeClean(
 		case result.SkipReason != "":
 			entry.Status = statusSkipped
 			entry.Reason = result.SkipReason
-			if text && concise && dryRun && !quiet {
-				skippedBlocks = append(skippedBlocks, report.Block{Name: p.Name(), Status: statusSkipped, Reason: result.SkipReason})
-			} else if text {
+			skips.add(p.Name(), result.SkipReason)
+			if text && (!skips.enabled || !dryRun) {
 				printSkipped(p.Name(), result.SkipReason, dryRun, quiet)
 			}
 		case dryRun:
@@ -368,13 +369,34 @@ func executeClean(
 		results = append(results, entry)
 	}
 
-	if concise && dryRun && !quiet && text {
-		for _, u := range unavailable {
-			skippedBlocks = append(skippedBlocks, report.Block{Name: u.Name, Status: statusUnavailable, Reason: u.Reason})
-		}
-		report.WriteSkipped(os.Stdout, skippedBlocks)
-	}
+	skips.flush()
 	return finishClean(results, totalCleaned, opts, errors, false)
+}
+
+// skipList gathers the providers that did not run for the closing
+// "skipped (N)" section of concise text output.
+type skipList struct {
+	blocks      []report.Block
+	unavailable []unavailableProvider
+	enabled     bool
+}
+
+func (l *skipList) add(name, reason string) {
+	if l.enabled {
+		l.blocks = append(l.blocks, report.Block{Name: name, Status: statusSkipped, Reason: reason})
+	}
+}
+
+func (l *skipList) flush() {
+	if !l.enabled {
+		return
+	}
+	for _, u := range l.unavailable {
+		l.blocks = append(l.blocks, report.Block{Name: u.Name, Status: statusUnavailable, Reason: u.Reason})
+	}
+	report.WriteSkipped(os.Stdout, l.blocks)
+	l.blocks = nil
+	l.unavailable = nil
 }
 
 func printDone(result provider.CleanResult, concise bool) {
@@ -477,13 +499,16 @@ func finishClean(results []ProviderCleanResult, totalCleaned int64, opts cleanOp
 		}); err != nil {
 			return fmt.Errorf("encode json: %w", err)
 		}
-	case cancelled:
-		return nil
 	case !opts.quiet && opts.dryRun && !opts.verbose:
 		report.WriteTotal(os.Stdout, overallOf(results, true))
+		if cancelled {
+			return nil
+		}
+	case cancelled:
+		return nil
 	case !opts.quiet && !opts.dryRun:
 		fmt.Printf("\nTotal: %s freed\n", size.FormatSize(totalCleaned))
-	case opts.quiet && !opts.dryRun:
+	case opts.quiet:
 		fmt.Println(size.FormatSize(totalCleaned))
 	}
 

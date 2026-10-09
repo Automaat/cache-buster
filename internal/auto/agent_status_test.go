@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 
@@ -108,33 +109,64 @@ func TestAgentStatus_Linux(t *testing.T) {
 	})
 }
 
+func taskXML(enabled string) string {
+	return "<?xml version=\"1.0\" encoding=\"UTF-16\"?>\r\n<Task version=\"1.2\" xmlns=\"http://schemas.microsoft.com/windows/2004/02/mit/task\">" +
+		"<Triggers><TimeTrigger><Enabled>true</Enabled></TimeTrigger></Triggers>" +
+		"<Settings><Enabled>" + enabled + "</Enabled></Settings></Task>"
+}
+
 func TestAgentStatus_Windows(t *testing.T) {
+	listing := func(status string) []byte {
+		return []byte("\"\\Other\",\"N/A\",\"Ready\"\r\n\"\\" + TaskName + "\",\"N/A\",\"" + status + "\"\r\n")
+	}
+	respond := func(csvOut []byte, xmlOut []byte, xmlErr error) func(string, []string) ([]byte, error) {
+		return func(_ string, args []string) ([]byte, error) {
+			if slices.Contains(args, "/XML") {
+				return xmlOut, xmlErr
+			}
+			return csvOut, nil
+		}
+	}
+
 	t.Run("task listed", func(t *testing.T) {
-		s := &scriptedExec{respond: func(string, []string) ([]byte, error) {
-			return []byte("\"\\Other\",\"N/A\",\"Ready\"\r\n\"\\" + TaskName + "\",\"N/A\",\"Ready\"\r\n"), nil
-		}}
+		s := &scriptedExec{respond: respond(listing("Ready"), []byte(taskXML("true")), nil)}
 		st, err := newOSAgent(t, "windows", `C:\bilgie.exe`, s).Status(t.Context())
 		require.NoError(t, err)
 		assert.Equal(t, AgentState{Backend: BackendTask, Installed: true, Loaded: true}, st)
-		assert.Equal(t, []string{"schtasks /Query /FO CSV /NH"}, s.commands())
+		assert.Equal(t, []string{"schtasks /Query /FO CSV /NH", "schtasks /Query /TN " + TaskName + " /XML"}, s.commands())
 	})
 
 	t.Run("task absent", func(t *testing.T) {
-		s := &scriptedExec{respond: func(string, []string) ([]byte, error) { return []byte("\"\\Other\",\"N/A\",\"Ready\"\r\n"), nil }}
+		s := &scriptedExec{respond: respond([]byte("\"\\Other\",\"N/A\",\"Ready\"\r\n"), nil, nil)}
 		st, err := newOSAgent(t, "windows", `C:\bilgie.exe`, s).Status(t.Context())
 		require.NoError(t, err)
 		assert.False(t, st.Installed)
 	})
 
-	t.Run("task disabled", func(t *testing.T) {
-		s := &scriptedExec{respond: func(string, []string) ([]byte, error) {
-			return []byte("\"\\" + TaskName + "\",\"N/A\",\"Disabled\"\r\n"), nil
-		}}
+	for name, tc := range map[string]struct {
+		csv, xml []byte
+		xmlErr   error
+	}{
+		"definition says disabled":            {csv: listing("Ready"), xml: []byte(taskXML("false"))},
+		"localized status, utf-16 definition": {csv: listing("Deaktiviert"), xml: EncodeTaskXML(taskXML("false"))},
+		"definition unreadable, English":      {csv: listing("Disabled"), xmlErr: errors.New("access denied")},
+		"definition garbled, English":         {csv: listing("Disabled"), xml: []byte("not xml")},
+	} {
+		t.Run("task disabled: "+name, func(t *testing.T) {
+			s := &scriptedExec{respond: respond(tc.csv, tc.xml, tc.xmlErr)}
+			st, err := newOSAgent(t, "windows", `C:\bilgie.exe`, s).Status(t.Context())
+			require.NoError(t, err)
+			assert.True(t, st.Installed)
+			assert.False(t, st.Loaded)
+			assert.Equal(t, "task is disabled", st.Detail)
+		})
+	}
+
+	t.Run("localized enabled task stays loaded", func(t *testing.T) {
+		s := &scriptedExec{respond: respond(listing("Bereit"), EncodeTaskXML(taskXML("true")), nil)}
 		st, err := newOSAgent(t, "windows", `C:\bilgie.exe`, s).Status(t.Context())
 		require.NoError(t, err)
-		assert.True(t, st.Installed)
-		assert.False(t, st.Loaded)
-		assert.Equal(t, "task is disabled", st.Detail)
+		assert.True(t, st.Loaded)
 	})
 
 	t.Run("query fails", func(t *testing.T) {

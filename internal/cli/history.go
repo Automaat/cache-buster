@@ -184,9 +184,12 @@ func runHistoryProvidersIn(out io.Writer, stateDir string, limit int, jsonOutput
 		}{Providers: stats, Runs: len(runs)})
 	}
 
-	if len(runs) == 0 {
+	switch {
+	case len(runs) == 0:
 		fmt.Fprintln(out, "No auto runs recorded")
-	} else {
+	case len(stats) == 0:
+		fmt.Fprintf(out, "No provider results in the last %d run(s)\n", len(runs))
+	default:
 		fmt.Fprintf(out, "Bytes freed per provider over the last %d run(s); dry-runs count as WOULD FREE\n", len(runs))
 		w := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
 		fmt.Fprintln(w, "PROVIDER\tRUNS\tFREED\tWOULD FREE\tSKIPPED\tERRORS")
