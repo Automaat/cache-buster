@@ -642,8 +642,8 @@ func foldPath(s string) string {
 	s = strings.ReplaceAll(s, `\`, "/")
 	parts := strings.Split(s, " ")
 	for i, part := range parts {
-		if strings.Contains(part, "/") {
-			parts[i] = path.Clean(part)
+		if at := strings.Index(part, "/"); at >= 0 {
+			parts[i] = part[:at] + path.Clean(part[at:])
 		}
 	}
 	s = strings.Join(parts, " ")

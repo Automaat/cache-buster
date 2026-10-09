@@ -884,3 +884,7 @@ func TestTreeProvider_DotDotSpellingHoldsTree(t *testing.T) {
 
 	assert.DirExists(t, inUse)
 }
+
+func TestFoldPath_KeepsPrefixGluedToPath(t *testing.T) {
+	assert.Contains(t, foldPath("tool --x=/a/../../home/u/cache"), "/home/u/cache")
+}
