@@ -140,7 +140,7 @@ type invocation struct {
 
 func newInvocation(text string, windows bool) invocation {
 	norm := normalizeSeparators(text, windows)
-	fields := strings.Fields(norm)
+	fields := plainFields(norm)
 	if windows {
 		if flat, ok := flattenCommand(norm, 0); ok {
 			fields = flat
@@ -214,7 +214,7 @@ func flattenCommand(text string, depth int) ([]string, bool) {
 // plainFields splits text on whitespace only, with shell operators trimmed
 // off each word, for command lines that shell quoting cannot parse.
 func plainFields(text string) []string {
-	var out []string
+	out := make([]string, 0, 8)
 	for w := range strings.FieldsSeq(text) {
 		out = append(out, splitOperators(w)...)
 	}
@@ -229,7 +229,7 @@ func isShellOperator(r rune) bool {
 // splitOperators cuts a word at command separators glued to it
 // ("hi;bilgie") and trims grouping characters off the pieces.
 func splitOperators(w string) []string {
-	var out []string
+	out := make([]string, 0, 2)
 	for part := range strings.FieldsFuncSeq(w, isShellOperator) {
 		if t := strings.Trim(part, " \t\n()"); t != "" {
 			out = append(out, t)
@@ -334,10 +334,10 @@ func matchProcessFor(commandLine string, wanted []string, windows bool) string {
 		}
 		base := filepath.Base(field)
 		if windows {
-			base = path.Base(field)
-			if strings.HasSuffix(strings.ToLower(base), ".exe") {
-				base = strings.ToLower(base[:len(base)-len(".exe")])
-			}
+			base = strings.TrimSuffix(strings.ToLower(path.Base(field)), ".exe")
+		}
+		if strings.HasPrefix(base, "yarn-") && strings.HasSuffix(base, ".cjs") {
+			base = "yarn"
 		}
 		if alias, ok := toolAliases[base]; ok {
 			base = alias

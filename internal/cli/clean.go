@@ -403,11 +403,21 @@ func skippedCount(result provider.CleanResult) string {
 // writeUnlisted prints the removed entries a provider's own output does not
 // name, so verbose never shows less than the concise largest-entries list.
 func writeUnlisted(w io.Writer, entries []provider.Entry, output string) {
+	const maxUnlisted = 200
+	shown, hidden := 0, 0
 	for _, e := range entries {
 		if strings.Contains(output, e.Path) {
 			continue
 		}
+		if shown == maxUnlisted {
+			hidden++
+			continue
+		}
 		fmt.Fprintf(w, "removed: %s (%s)\n", e.Path, size.FormatSize(e.Size))
+		shown++
+	}
+	if hidden > 0 {
+		fmt.Fprintf(w, "... and %d more removed entries\n", hidden)
 	}
 }
 

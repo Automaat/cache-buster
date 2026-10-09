@@ -855,3 +855,15 @@ func TestTreeProvider_YarnSkipsWhileYarnRuns(t *testing.T) {
 		assert.DirExists(t, dir)
 	}
 }
+
+func TestTreeProvider_FullCleanMeasuresWholePath(t *testing.T) {
+	root := t.TempDir()
+	writeAged(t, filepath.Join(root, "_logs", "debug.log"), 5000, day)
+	installFakeTool(t, fakeVerifyTool, fakeToolSpec{Default: fakeReply{Remove: []string{filepath.Join(root, "_logs")}}})
+	p := newTree(t, "npm", config.Provider{Paths: []string{root}, MaxSize: "1", MaxAge: "30d", CleanCmd: fakeVerifyTool})
+
+	res, err := p.Clean(context.Background(), CleanOptions{Mode: CleanModeFull})
+	require.NoError(t, err)
+
+	assert.Equal(t, int64(5000), res.BytesCleaned)
+}

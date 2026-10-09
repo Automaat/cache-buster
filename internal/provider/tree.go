@@ -143,7 +143,7 @@ func (p *TreeProvider) Clean(ctx context.Context, opts CleanOptions) (CleanResul
 		if opts.DryRun {
 			return CleanResult{Output: "would run: " + p.cleanCmd}, nil
 		}
-		return runMeasuredCleanTimeout(ctx, p.name, p.cmdArgs, p.CurrentSize, p.timeout)
+		return runMeasuredCleanTimeout(ctx, p.name, p.cmdArgs, p.BaseProvider.CurrentSize, p.timeout)
 	}
 	return p.trim(ctx, opts)
 }
@@ -196,8 +196,9 @@ func (p *TreeProvider) noopOutput(units []treeUnit, warnings int) string {
 	return out.String()
 }
 
-// CurrentSize implements Provider. It counts only what the provider may
-// delete, so untouchable bulk (indexes, logs) cannot keep it over max_size.
+// CurrentSize implements Provider. It counts the files and trees the provider
+// manages (held or newest ones included), so untouchable bulk such as indexes
+// and logs cannot keep it over max_size.
 func (p *TreeProvider) CurrentSize(ctx context.Context) (int64, error) {
 	units, _, err := p.collect(ctx)
 	if err != nil {

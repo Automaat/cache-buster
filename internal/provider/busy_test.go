@@ -47,6 +47,20 @@ func TestMatchProcess(t *testing.T) {
 	}
 }
 
+func TestMatchProcessFor_YarnForms(t *testing.T) {
+	assert.Equal(t, "yarn", matchProcessFor(`C:\Users\u\npm\Yarn.CMD install`, []string{"yarn"}, true))
+	assert.Equal(t, "yarn", matchProcessFor("node .yarn/releases/yarn-1.22.19.cjs install", []string{"yarn"}, false))
+	assert.Equal(t, "yarn", matchProcessFor("/usr/bin/yarnpkg add x", []string{"yarn"}, false))
+}
+
+func TestExcludeSelf_OperatorInBilgieArgument(t *testing.T) {
+	procs := []osshim.Process{
+		{PID: 50, CommandLine: "sh -c 'bilgie --config /x/R&D/c.yaml clean cargo'"},
+		{PID: 60, PPID: 50, CommandLine: "bilgie --config /x/R&D/c.yaml clean cargo"},
+	}
+	assert.Empty(t, excludeSelfFor(procs, 60, []string{"cargo"}, false))
+}
+
 func TestMatchProcessFor_WindowsRulesOnAnyHost(t *testing.T) {
 	assert.Equal(t, "cargo", matchProcessFor(`C:\Tools\CARGO.EXE build`, []string{"cargo"}, true))
 	assert.Equal(t, "go", matchProcessFor(`"C:\Program Files\Go\bin\go.exe" test`, []string{"go"}, true))
