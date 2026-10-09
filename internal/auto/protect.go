@@ -2,6 +2,8 @@ package auto
 
 import (
 	"context"
+	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -77,7 +79,7 @@ func insideGitCheckout(path, home string) bool {
 	}
 	isHome := func(dir string) bool {
 		return slices.ContainsFunc(withoutDataAlias([]string{dir}), func(d string) bool {
-			return slices.ContainsFunc(homes, func(h string) bool { return strings.EqualFold(h, d) })
+			return slices.ContainsFunc(homes, func(h string) bool { return sameDir(h, d) })
 		})
 	}
 	for _, start := range withoutDataAlias([]string{filepath.Clean(path)}) {
@@ -240,18 +242,22 @@ func hasGitMarker(dir string) bool {
 			return a.found
 		}
 	}
-	found := probeGitMarker(dir)
-	ancestorMemo.Store(dir, ancestorAnswer{at: time.Now(), found: found})
+	found, settled := probeGitMarker(dir)
+	if settled {
+		ancestorMemo.Store(dir, ancestorAnswer{at: time.Now(), found: found})
+	}
 	return found
 }
 
-func probeGitMarker(dir string) bool {
+// probeGitMarker answers for dir; settled is false when the listing failed,
+// so the answer is not worth remembering.
+func probeGitMarker(dir string) (found, settled bool) {
 	if _, err := os.Lstat(filepath.Join(dir, ".git")); err == nil {
-		return true
+		return true, true
 	}
 	f, err := openAncestor(dir)
 	if err != nil {
-		return false
+		return false, false
 	}
 	defer func() { _ = f.Close() }()
 	read := 0
@@ -259,12 +265,21 @@ func probeGitMarker(dir string) bool {
 		batch, readErr := f.ReadDir(listBatch)
 		for _, e := range batch {
 			if provider.IsGitMarkerName(e.Name()) {
-				return true
+				return true, true
 			}
 		}
 		read += len(batch)
-		if readErr != nil || read >= ancestorListCap {
-			return false
+		if read >= ancestorListCap || readErr != nil {
+			return false, readErr == nil || errors.Is(readErr, io.EOF)
 		}
 	}
+}
+
+// sameDir compares two directory spellings the way the default filesystem
+// does: ignoring case on macOS and Windows, exactly elsewhere.
+func sameDir(a, b string) bool {
+	if runtime.GOOS == "darwin" || runtime.GOOS == "windows" {
+		return strings.EqualFold(a, b)
+	}
+	return a == b
 }

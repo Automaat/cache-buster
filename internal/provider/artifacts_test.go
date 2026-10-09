@@ -1109,12 +1109,12 @@ func TestFindGit(t *testing.T) {
 	plain := filepath.Join(root, "plain", "x")
 	require.NoError(t, os.MkdirAll(plain, 0o750))
 
-	gotRoot, gotGit, err := findGit(nested, []string{root})
+	gotRoot, gotGit, err := findGit(nested, root, []string{root})
 	require.NoError(t, err)
 	assert.Equal(t, repo, gotRoot)
 	assert.Equal(t, filepath.Join(repo, ".git"), gotGit)
 
-	gotRoot, gotGit, err = findGit(plain, []string{root})
+	gotRoot, gotGit, err = findGit(plain, root, []string{root})
 	require.NoError(t, err)
 	assert.Empty(t, gotRoot)
 	assert.Empty(t, gotGit)
@@ -1131,12 +1131,12 @@ func TestFindGit_WalksAboveTheScanRootButStopsAtHome(t *testing.T) {
 	loose := filepath.Join(home, "loose", "app")
 	require.NoError(t, os.MkdirAll(loose, 0o750))
 
-	gotRoot, gotGit, err := findGit(project, []string{home})
+	gotRoot, gotGit, err := findGit(project, filepath.Join(repo, "packages"), []string{home})
 	require.NoError(t, err)
 	assert.Equal(t, repo, gotRoot, "a scan root inside a repo must still find the repo")
 	assert.Equal(t, filepath.Join(repo, ".git"), gotGit)
 
-	gotRoot, _, err = findGit(loose, []string{home})
+	gotRoot, _, err = findGit(loose, filepath.Dir(loose), []string{home})
 	require.NoError(t, err)
 	assert.Empty(t, gotRoot, "a repository in home does not own the projects below it")
 }

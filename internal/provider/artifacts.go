@@ -231,7 +231,7 @@ func (p *ProjectArtifactsProvider) Clean(ctx context.Context, opts CleanOptions)
 			break
 		}
 		if p.passBudget > 0 && p.now().Sub(started) > p.passBudget {
-			skipLine(&out, &result, c, "pass time budget")
+			skip(c, "pass time budget")
 			continue
 		}
 		reason := pass.guard(ctx, c)
@@ -364,6 +364,7 @@ type pass struct {
 	openSnap  map[string]bool
 	openErr   error
 	openAt    time.Time
+	openDone  time.Time
 }
 
 // noteSkip remembers the first reason an artifact was skipped.
@@ -428,9 +429,19 @@ func openVerdict(open bool, err error) string {
 	return ""
 }
 
+// openAge reports whether the open-file listing is too old for maxAge. The
+// pass limit counts from the start of the listing; the shorter limit before a
+// removal counts from its end, so a slow listing is not run twice in a row.
+func (ps *pass) openAge(maxAge time.Duration) bool {
+	if maxAge < openSnapshotTTL {
+		return ps.p.now().Sub(ps.openDone) > maxAge
+	}
+	return ps.p.now().Sub(ps.openAt) > maxAge
+}
+
 func (ps *pass) openInSnapshot(ctx context.Context, path string, maxAge time.Duration) (bool, error) {
 	p := ps.p
-	if ps.openAt.IsZero() || (!ps.dryRun && p.now().Sub(ps.openAt) > maxAge) {
+	if ps.openAt.IsZero() || (!ps.dryRun && ps.openAge(maxAge)) {
 		seen := map[string]bool{}
 		var dirs []string
 		for _, c := range ps.cands {
@@ -443,6 +454,7 @@ func (ps *pass) openInSnapshot(ctx context.Context, path string, maxAge time.Dur
 		defer cancel()
 		ps.openAt = p.now()
 		ps.openSnap, ps.openErr = p.openMany(probeCtx, dirs)
+		ps.openDone = p.now()
 	}
 	if ps.openErr != nil {
 		return false, ps.openErr

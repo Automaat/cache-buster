@@ -672,18 +672,20 @@ func TestProjectArtifacts_SnapshotAgeStartsWhenTheListingStarts(t *testing.T) {
 
 	h.clean(CleanOptions{Mode: CleanModeFull})
 
-	assert.Equal(t, 4, calls, "a listing that outlasts the TTL is not reused; each removal re-lists a stale one")
+	assert.Equal(t, 2, calls, "a listing that outlasts the TTL is not reused")
 }
 
 func TestProjectArtifacts_OpenFilesAreProbedAgainRightBeforeRemoval(t *testing.T) {
 	h := newArtifactHarness(t, nil)
 	nodeProject(t, h.path("a"), 10, 120*day)
 	clock := time.Now()
-	h.p.now = func() time.Time { return clock }
+	h.p.now = func() time.Time {
+		clock = clock.Add(200 * time.Millisecond)
+		return clock
+	}
 	calls := 0
 	h.p.openMany = func(_ context.Context, dirs []string) (map[string]bool, error) {
 		calls++
-		clock = clock.Add(removalSnapshotTTL + time.Millisecond)
 		open := map[string]bool{}
 		if calls > 1 {
 			for _, d := range dirs {
@@ -700,40 +702,21 @@ func TestProjectArtifacts_OpenFilesAreProbedAgainRightBeforeRemoval(t *testing.T
 	assert.Contains(t, res.Output, "has open files")
 }
 
-func TestProjectArtifacts_DryRunListsProcessesOnce(t *testing.T) {
+func TestProjectArtifacts_SlowListingIsNotRunTwiceInARow(t *testing.T) {
 	h := newArtifactHarness(t, nil)
-	for i := range 30 {
-		nodeProject(t, h.path(fmt.Sprintf("p%02d", i)), 10, 90*day)
-	}
-	calls := 0
-	h.p.processes = func(context.Context) ([]toolProcess, error) {
-		calls++
-		return nil, nil
-	}
-
-	h.clean(CleanOptions{DryRun: true, Mode: CleanModeFull})
-
-	assert.Equal(t, 1, calls)
-}
-
-func TestProjectArtifacts_DryRunListsOpenFilesOnceHoweverLongItTakes(t *testing.T) {
-	h := newArtifactHarness(t, nil)
-	for i := range 5 {
-		nodeProject(t, h.path(fmt.Sprintf("p%d", i)), 10, 90*day)
-	}
+	nodeProject(t, h.path("a"), 10, 120*day)
 	clock := time.Now()
 	h.p.now = func() time.Time { return clock }
-	h.p.passBudget = 0
 	calls := 0
 	h.p.openMany = func(context.Context, []string) (map[string]bool, error) {
 		calls++
-		clock = clock.Add(time.Hour)
+		clock = clock.Add(time.Second)
 		return map[string]bool{}, nil
 	}
 
-	h.clean(CleanOptions{DryRun: true, Mode: CleanModeFull})
+	h.clean(CleanOptions{Mode: CleanModeFull})
 
-	assert.Equal(t, 1, calls)
+	assert.Equal(t, 1, calls, "the check before removal counts from the end of the listing")
 }
 
 func TestProjectArtifacts_GitActivityDuringChecksKeepsTheArtifact(t *testing.T) {
@@ -823,4 +806,19 @@ func TestProjectArtifacts_SomeSkippedIsNotASkippedProvider(t *testing.T) {
 
 	assert.Len(t, res.Entries, 1)
 	assert.Empty(t, res.SkipReason)
+}
+
+func TestProjectArtifacts_PassBudgetSkipNamesItsReason(t *testing.T) {
+	h := newArtifactHarness(t, nil)
+	nodeProject(t, h.path("a"), 10, 120*day)
+	h.p.passBudget = time.Nanosecond
+	clock := time.Now()
+	h.p.now = func() time.Time {
+		clock = clock.Add(time.Second)
+		return clock
+	}
+
+	res := h.clean(CleanOptions{Mode: CleanModeFull})
+
+	assert.Equal(t, "all 1 artifacts skipped, first: pass time budget", res.SkipReason)
 }

@@ -173,3 +173,19 @@ func TestRun_SweepWithEveryMatchProtectedIsSkipped(t *testing.T) {
 	assert.Equal(t, StatusSkipped, report.Results[0].Status)
 	assert.Contains(t, report.Results[0].Reason, "protected path")
 }
+
+func TestHasGitMarker_FailedListingIsNotMemoized(t *testing.T) {
+	dir := t.TempDir()
+	opens := 0
+	old := openAncestor
+	openAncestor = func(string) (dirReader, error) {
+		opens++
+		return nil, os.ErrPermission
+	}
+	t.Cleanup(func() { openAncestor = old })
+
+	assert.False(t, hasGitMarker(dir))
+	assert.False(t, hasGitMarker(dir))
+
+	assert.Equal(t, 2, opens)
+}

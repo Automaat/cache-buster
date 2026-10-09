@@ -122,7 +122,7 @@ func (p *ProjectArtifactsProvider) measureActivity(ctx context.Context, proj *pr
 		return
 	}
 
-	repoRoot, gitDir, err := findGit(proj.Dir, homeSpellings(p.home))
+	repoRoot, gitDir, err := findGit(proj.Dir, proj.root, homeSpellings(p.home))
 	if err != nil {
 		proj.problem = "git state unreadable: " + err.Error()
 		return
@@ -148,12 +148,12 @@ func (p *ProjectArtifactsProvider) measureActivity(ctx context.Context, proj *pr
 // repository. repoRoot is the directory holding the .git entry; gitDir is the
 // directory with HEAD, which for a linked worktree is the worktree's own
 // admin directory.
-func findGit(dir string, homes []string) (repoRoot, gitDir string, err error) {
+func findGit(dir, root string, homes []string) (repoRoot, gitDir string, err error) {
 	for cur := dir; ; cur = filepath.Dir(cur) {
 		if slices.ContainsFunc(homes, func(h string) bool { return foldPathText(filepath.Clean(h)) == foldPathText(cur) }) {
 			return "", "", nil
 		}
-		entry := gitEntry(cur)
+		entry := gitEntryWithin(cur, root)
 		if info, statErr := os.Lstat(entry); statErr == nil {
 			switch {
 			case info.IsDir():
@@ -169,6 +169,16 @@ func findGit(dir string, homes []string) (repoRoot, gitDir string, err error) {
 			return "", "", nil
 		}
 	}
+}
+
+// gitEntryWithin is gitEntry, but lists a directory above the scan root only
+// for the exact .git name: such ancestors can hold huge numbers of entries
+// and a listing ignores the pass budget.
+func gitEntryWithin(dir, root string) string {
+	if root != "" && !pathWithin(dir, root) {
+		return filepath.Join(dir, ".git")
+	}
+	return gitEntry(dir)
 }
 
 // gitEntry returns the path of dir's .git entry, whatever its case: a
