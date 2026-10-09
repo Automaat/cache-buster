@@ -22,8 +22,11 @@ import (
 const gitStatusTimeout = 15 * time.Second
 
 var kindTools = map[artifactKind][]string{
-	kindRust:   {"cargo", "rustc"},
-	kindNode:   {"node", "npm", "npx", "pnpm", "yarn", "bun"},
+	kindRust: {"cargo", "rustc"},
+	kindNode: {
+		"node", "npm", "npx", "pnpm", "yarn", "bun", "deno", "tsx", "ts-node", "vite", "next", "next-server",
+		"nuxt", "webpack", "nodemon", "vitest", "jest", "turbo", "esbuild",
+	},
 	kindPython: {"python", "python3", "pip", "pip3", "uv", "poetry"},
 }
 
@@ -114,6 +117,10 @@ func (p *ProjectArtifactsProvider) measureActivity(ctx context.Context, proj *pr
 	}
 	proj.sampled = newest
 	proj.newest = newest
+	if truncated {
+		proj.problem = "too many files to judge idleness"
+		return
+	}
 
 	repoRoot, gitDir, err := findGit(proj.Dir, proj.root)
 	if err != nil {
@@ -122,9 +129,6 @@ func (p *ProjectArtifactsProvider) measureActivity(ctx context.Context, proj *pr
 	}
 	proj.repoRoot = repoRoot
 	if gitDir == "" {
-		if truncated {
-			proj.problem = "too many files to judge idleness without git"
-		}
 		return
 	}
 	gitTime, err := gitActivity(gitDir)
@@ -142,7 +146,7 @@ func (p *ProjectArtifactsProvider) measureActivity(ctx context.Context, proj *pr
 // linked worktree is the worktree's own admin directory.
 func findGit(dir, stop string) (repoRoot, gitDir string, err error) {
 	for cur := dir; ; cur = filepath.Dir(cur) {
-		entry := filepath.Join(cur, ".git")
+		entry := gitEntry(cur)
 		if info, statErr := os.Lstat(entry); statErr == nil {
 			switch {
 			case info.IsDir():
@@ -158,6 +162,30 @@ func findGit(dir, stop string) (repoRoot, gitDir string, err error) {
 			return "", "", nil
 		}
 	}
+}
+
+// gitEntry returns the path of dir's .git entry, whatever its case: a
+// case-insensitive volume accepts .GIT, and treating a lookalike as git on any
+// OS only makes the checks stricter. Without one it returns dir/.git.
+func gitEntry(dir string) string {
+	exact := filepath.Join(dir, ".git")
+	if _, err := os.Lstat(exact); err == nil {
+		return exact
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return exact
+	}
+	for _, e := range entries {
+		if isGitName(e.Name()) {
+			return filepath.Join(dir, e.Name())
+		}
+	}
+	return exact
+}
+
+func isGitName(name string) bool {
+	return strings.EqualFold(name, ".git")
 }
 
 func readGitFile(path, base string) (string, error) {
@@ -257,17 +285,154 @@ func (ps *pass) busyReason(c *candidate) string {
 		switch {
 		case foldContains(proc.CommandLine, proj.Dir), foldContains(proc.CommandLine, proj.alias):
 			return tool + " is running in the project"
-		case proc.CwdUnknown:
-			return tool + " is running and its directory cannot be read"
-		case proc.Cwd == "":
-			return tool + " is running and its directory cannot be read"
+		case proc.CwdUnknown, proc.Cwd == "":
+			return tool + procLabel(proc) + " is running and its directory cannot be read"
 		case pathWithin(proc.Cwd, proj.Dir):
 			return tool + " is running in the project"
+		case argsReach(proc, proj.Dir, proj.alias), namesRelative(proc, proj.Dir):
+			return tool + " is running on the project"
 		case proj.repoRoot != "" && pathWithin(proc.Cwd, proj.repoRoot) && pathWithin(proj.Dir, proc.Cwd):
 			return tool + " is running in the repository"
 		}
 	}
 	return ""
+}
+
+func procLabel(proc toolProcess) string {
+	if proc.pid > 0 {
+		return fmt.Sprintf(" (pid %d)", proc.pid)
+	}
+	return ""
+}
+
+// pathFlags are the options whose value is a project path.
+var pathFlags = []string{"--manifest-path", "--prefix", "--cwd", "-C", "--workspace", "-w"}
+
+// argsReach reports whether a path in the process's arguments, resolved
+// against its working directory, lies inside one of dirs. This catches
+// `cd ~/code && node app/server.js` and `npm --prefix app start`, whose
+// working directory is above the project. Only path-like tokens and the
+// values of pathFlags count, and an ancestor working directory alone never
+// does.
+func argsReach(proc toolProcess, dirs ...string) bool {
+	if proc.Cwd == "" {
+		return false
+	}
+	for _, fields := range [][]string{splitQuoted(proc.CommandLine), strings.Fields(proc.CommandLine)} {
+		if fieldsReach(fields, proc.Cwd, dirs) {
+			return true
+		}
+	}
+	return false
+}
+
+func fieldsReach(fields []string, cwd string, dirs []string) bool {
+	for i, field := range fields {
+		tok := strings.Trim(field, `"';&|()`)
+		if strings.HasPrefix(tok, "-") {
+			flag, value, hasValue := strings.Cut(tok, "=")
+			if !slices.Contains(pathFlags, flag) {
+				continue
+			}
+			if !hasValue {
+				if i+1 == len(fields) {
+					continue
+				}
+				value = strings.Trim(fields[i+1], `"';&|()`)
+			}
+			tok = value
+		} else if !strings.ContainsAny(tok, `/\`) && !strings.HasPrefix(tok, ".") && !existsBelow(cwd, tok) {
+			continue
+		}
+		if tok == "" {
+			continue
+		}
+		abs := tok
+		if !filepath.IsAbs(abs) {
+			abs = filepath.Join(cwd, tok)
+		}
+		spellings := []string{abs}
+		if resolved, err := filepath.EvalSymlinks(abs); err == nil && resolved != abs {
+			spellings = append(spellings, resolved)
+		}
+		for _, spelling := range spellings {
+			for _, dir := range dirs {
+				if dir != "" && pathWithin(spelling, dir) {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
+// namesRelative reports whether the command line spells the project's path
+// relative to the process's working directory, which sits above it. This
+// catches names ps shows without quoting, such as `node my app/server.js`.
+func namesRelative(proc toolProcess, projDir string) bool {
+	rel, err := filepath.Rel(proc.Cwd, projDir)
+	if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return false
+	}
+	line, want := foldPathText(proc.CommandLine), foldPathText(filepath.ToSlash(rel))
+	for from := 0; ; {
+		i := strings.Index(line[from:], want)
+		if i < 0 {
+			return false
+		}
+		start, end := from+i, from+i+len(want)
+		leftOK := start == 0 || strings.ContainsRune(" \t\"'=/", rune(line[start-1]))
+		rightOK := end == len(line) || strings.ContainsRune(" \t\"'/", rune(line[end]))
+		if leftOK && rightOK {
+			return true
+		}
+		from = start + 1
+	}
+}
+
+// existsBelow reports whether tok, a bare word such as the app in `node app`,
+// names something that exists in cwd.
+func existsBelow(cwd, tok string) bool {
+	if tok == "" || strings.HasPrefix(tok, "-") {
+		return false
+	}
+	_, err := os.Lstat(filepath.Join(cwd, tok))
+	return err == nil
+}
+
+// splitQuoted splits a command line on spaces, keeping a quoted run, which may
+// hold spaces, in one field with the quotes removed.
+func splitQuoted(s string) []string {
+	var (
+		fields []string
+		cur    strings.Builder
+		quote  rune
+		active bool
+	)
+	for _, r := range s {
+		switch {
+		case quote != 0:
+			if r == quote {
+				quote = 0
+			} else {
+				cur.WriteRune(r)
+			}
+		case r == '"' || r == '\'':
+			quote, active = r, true
+		case r == ' ' || r == '\t':
+			if active || cur.Len() > 0 {
+				fields = append(fields, cur.String())
+				cur.Reset()
+				active = false
+			}
+		default:
+			cur.WriteRune(r)
+		}
+	}
+	if active || cur.Len() > 0 {
+		fields = append(fields, cur.String())
+	}
+	return fields
 }
 
 // dirtyReason skips projects whose git tree has uncommitted changes. Git

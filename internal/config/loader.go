@@ -148,6 +148,9 @@ func mergeProjectArtifacts(l *Loader, name string, merged, user *Provider) {
 	if l.v.IsSet(prefix + "scan_budget") {
 		merged.ScanBudget = user.ScanBudget
 	}
+	if l.v.IsSet(prefix + "pass_budget") {
+		merged.PassBudget = user.PassBudget
+	}
 	if l.v.IsSet(prefix + "skip_if_dirty") {
 		merged.SkipIfDirty = user.SkipIfDirty
 	}

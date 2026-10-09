@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -132,14 +133,28 @@ func underDir(path, dir string) bool {
 // a cache owned by selfUID is not theirs to hold; an uninspectable process
 // of our own user is an error so the caller fails closed.
 func procHasOpenFiles(ctx context.Context, root, dir string, selfUID int) (bool, error) {
+	found := false
+	err := procScan(ctx, root, selfUID, func(paths []string) bool {
+		found = slices.ContainsFunc(paths, func(path string) bool { return underDir(path, dir) })
+		return found
+	})
+	return found, err
+}
+
+// procScan hands visit the paths each process holds (working directory,
+// root, executable, descriptors, mappings) until visit returns true. A process
+// owned by another user that cannot be inspected is skipped, since a cache
+// owned by selfUID is not theirs to hold; an uninspectable process of our own
+// user is an error so the caller fails closed.
+func procScan(ctx context.Context, root string, selfUID int, visit func(paths []string) bool) error {
 	pids, err := pidDirs(root)
 	if err != nil {
-		return false, err
+		return err
 	}
 
 	for _, pid := range pids {
 		if err := ctx.Err(); err != nil {
-			return false, err
+			return err
 		}
 		base := filepath.Join(root, pid)
 		info, err := os.Stat(base)
@@ -147,51 +162,52 @@ func procHasOpenFiles(ctx context.Context, root, dir string, selfUID int) (bool,
 			continue
 		}
 		if err != nil {
-			return false, err
+			return err
 		}
 		other := false
 		if st, ok := info.Sys().(*syscall.Stat_t); ok {
 			other = int(st.Uid) != selfUID && !statusUIDMatches(base, selfUID)
 		}
 
-		open, err := procPidHasOpenFiles(base, dir)
+		paths, err := procPidPaths(base)
 		for attempt := 0; attempt < inspectRetries && !other && errors.Is(err, os.ErrPermission) && !processIsDead(base); attempt++ {
 			time.Sleep(inspectRetryDelay)
-			open, err = procPidHasOpenFiles(base, dir)
+			paths, err = procPidPaths(base)
 		}
 		switch {
-		case err == nil && open:
-			return true, nil
-		case err == nil, errors.Is(err, os.ErrNotExist), errors.Is(err, syscall.ESRCH):
+		case err == nil:
+			if visit(paths) {
+				return nil
+			}
+		case errors.Is(err, os.ErrNotExist), errors.Is(err, syscall.ESRCH):
 			continue
 		case other && errors.Is(err, os.ErrPermission):
 			continue
 		case errors.Is(err, os.ErrPermission) && processIsDead(base):
 			continue
 		default:
-			return false, fmt.Errorf("inspect process %s: %w", pid, err)
+			return fmt.Errorf("inspect process %s: %w", pid, err)
 		}
 	}
-	return false, nil
+	return nil
 }
 
-func procPidHasOpenFiles(base, dir string) (bool, error) {
+func procPidPaths(base string) ([]string, error) {
+	var paths []string
 	for _, link := range []string{"cwd", "root", "exe"} {
 		target, err := os.Readlink(filepath.Join(base, link))
 		if errors.Is(err, os.ErrNotExist) {
 			continue
 		}
 		if err != nil {
-			return false, err
+			return nil, err
 		}
-		if underDir(target, dir) {
-			return true, nil
-		}
+		paths = append(paths, target)
 	}
 
 	fds, err := os.ReadDir(filepath.Join(base, "fd"))
 	if err != nil {
-		return false, err
+		return nil, err
 	}
 	for _, fd := range fds {
 		target, err := os.Readlink(filepath.Join(base, "fd", fd.Name()))
@@ -199,27 +215,23 @@ func procPidHasOpenFiles(base, dir string) (bool, error) {
 			continue
 		}
 		if err != nil {
-			return false, err
+			return nil, err
 		}
-		if underDir(strings.TrimSuffix(target, " (deleted)"), dir) {
-			return true, nil
-		}
+		paths = append(paths, strings.TrimSuffix(target, " (deleted)"))
 	}
 
 	maps, err := os.ReadFile(filepath.Join(base, "maps"))
 	if err != nil {
-		return false, err
+		return nil, err
 	}
 	for line := range strings.SplitSeq(string(maps), "\n") {
 		fields := strings.SplitN(line, " ", 6)
 		if len(fields) < 6 {
 			continue
 		}
-		if underDir(strings.TrimSuffix(strings.TrimSpace(fields[5]), " (deleted)"), dir) {
-			return true, nil
-		}
+		paths = append(paths, strings.TrimSuffix(strings.TrimSpace(fields[5]), " (deleted)"))
 	}
-	return false, nil
+	return paths, nil
 }
 
 // statusUIDMatches reports whether the real or effective uid in the status

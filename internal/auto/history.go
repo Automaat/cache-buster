@@ -25,6 +25,9 @@ type ProviderRecord struct {
 	Reason     string `json:"reason,omitempty"`
 	Error      string `json:"error,omitempty"`
 	FreedBytes int64  `json:"freed_bytes"`
+	// Warnings are problems that did not fail the provider, such as a
+	// leftover that could not be removed.
+	Warnings []string `json:"warnings,omitempty"`
 }
 
 // RunRecord is one line of the run log.
@@ -59,8 +62,9 @@ func NewRunRecord(report Report, now time.Time, runErr error, notified bool) Run
 	if runErr != nil {
 		rec.Error = runErr.Error()
 	}
-	for _, res := range report.Results {
-		pr := ProviderRecord{Name: res.Name, Status: res.Status, Reason: res.Reason, FreedBytes: res.Freed}
+	for i := range report.Results {
+		res := &report.Results[i]
+		pr := ProviderRecord{Name: res.Name, Status: res.Status, Reason: res.Reason, FreedBytes: res.Freed, Warnings: res.Warnings}
 		if res.Err != nil {
 			pr.Error = res.Err.Error()
 		}
