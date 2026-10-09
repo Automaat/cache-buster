@@ -315,7 +315,7 @@ func noteRefused(scan *artifactScan, out *strings.Builder, result *CleanResult) 
 		fmt.Fprintf(out, "skip: root %s\n", refusal)
 		result.Warnings = append(result.Warnings, "root not scanned: "+refusal)
 	}
-	if len(scan.projects) > 0 || len(scan.refused) == 0 {
+	if scan.roots > 0 || len(scan.refused) == 0 {
 		return false
 	}
 	result.SkipReason = "no usable root: " + strings.Join(scan.refused, "; ")

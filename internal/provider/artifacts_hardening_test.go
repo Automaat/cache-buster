@@ -822,3 +822,17 @@ func TestProjectArtifacts_PassBudgetSkipNamesItsReason(t *testing.T) {
 
 	assert.Equal(t, "all 1 artifacts skipped, first: pass time budget", res.SkipReason)
 }
+
+func TestProjectArtifacts_EmptyUsableRootBesideRefusedIsNotSkipped(t *testing.T) {
+	h := newArtifactHarness(t, nil)
+	home := filepath.Join(t.TempDir(), "home")
+	require.NoError(t, os.MkdirAll(home, 0o750))
+	h.p.home = home
+	h.p.paths = []string{home, h.root}
+
+	res := h.clean(CleanOptions{DryRun: true, Mode: CleanModeFull})
+
+	assert.Empty(t, res.SkipReason)
+	require.Len(t, res.Warnings, 1)
+	assert.Contains(t, res.Warnings[0], "root not scanned")
+}

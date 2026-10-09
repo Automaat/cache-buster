@@ -121,6 +121,8 @@ type artifactScan struct {
 	partial  bool
 	// refused lists the configured roots that were not scanned and why.
 	refused []string
+	// roots counts the usable roots that were walked.
+	roots int
 }
 
 func (s *artifactScan) total() int64 {
@@ -166,6 +168,7 @@ func (p *ProjectArtifactsProvider) discover(ctx context.Context) (*artifactScan,
 			continue
 		}
 		seen[foldPathText(resolved)] = true
+		scan.roots++
 		w := &walker{p: p, scan: scan, root: resolved, raw: filepath.Clean(root), seen: seen}
 		w.walk(searchCtx, resolved, 0)
 	}
