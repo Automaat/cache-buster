@@ -811,6 +811,7 @@ func TestTreeProvider_OverLimitWithNothingEvictableSaysSo(t *testing.T) {
 	assert.True(t, strings.HasPrefix(res.Output, "over limit"), res.Output)
 	assert.Contains(t, res.Output, "nothing is evictable")
 	assert.NotContains(t, res.Output, "already under limit")
+	assert.Equal(t, "over limit but nothing is evictable", res.SkipReason)
 	assert.Equal(t, 2, res.SkippedEntries)
 }
 
@@ -866,4 +867,20 @@ func TestTreeProvider_FullCleanMeasuresWholePath(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Equal(t, int64(5000), res.BytesCleaned)
+}
+
+func TestTreeProvider_DotDotSpellingHoldsTree(t *testing.T) {
+	root := t.TempDir()
+	makePackage(t, filepath.Join(root, "_npx", "h2"), 5, 90*day)
+	inUse := filepath.Join(root, "_npx", "h3")
+	makePackage(t, inUse, 5, 80*day)
+	makePackage(t, filepath.Join(root, "_npx", "newest"), 5, 70*day)
+	p := newTree(t, "npm", config.Provider{Paths: []string{root}, MaxSize: "1", MaxAge: "30d"})
+	line := "node " + filepath.ToSlash(filepath.Join(root, "_npx", "h2")) + "/../h3/x.js"
+	p.procLines = func(context.Context) ([]string, error) { return []string{line}, nil }
+
+	_, err := p.Clean(context.Background(), CleanOptions{Mode: CleanModeSmart})
+	require.NoError(t, err)
+
+	assert.DirExists(t, inUse)
 }

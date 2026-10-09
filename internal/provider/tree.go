@@ -157,7 +157,11 @@ func (p *TreeProvider) trim(ctx context.Context, opts CleanOptions) (CleanResult
 
 	plan := p.plan(units, opts.Mode == CleanModeSmart)
 	if len(plan) == 0 {
-		return CleanResult{Output: p.noopOutput(units, warnings), SkippedEntries: countHeld(units)}, nil
+		res := CleanResult{Output: p.noopOutput(units, warnings), SkippedEntries: countHeld(units)}
+		if strings.HasPrefix(res.Output, overLimitPrefix) {
+			res.SkipReason = "over limit but nothing is evictable"
+		}
+		return res, nil
 	}
 	return p.execute(ctx, plan, units, warnings, opts)
 }
@@ -172,6 +176,8 @@ func countHeld(units []treeUnit) int {
 	return n
 }
 
+const overLimitPrefix = "over limit"
+
 // noopOutput explains an empty plan. A cache still over max_size had nothing
 // to evict: every candidate is held or the newest of its pattern.
 func (p *TreeProvider) noopOutput(units []treeUnit, warnings int) string {
@@ -181,7 +187,7 @@ func (p *TreeProvider) noopOutput(units []treeUnit, warnings int) string {
 	}
 	var out strings.Builder
 	if total > p.maxSize {
-		fmt.Fprintf(&out, "over limit (%s > %s) but nothing is evictable", size.FormatSize(total), size.FormatSize(p.maxSize))
+		fmt.Fprintf(&out, overLimitPrefix+" (%s > %s) but nothing is evictable", size.FormatSize(total), size.FormatSize(p.maxSize))
 	} else {
 		out.WriteString("already under limit")
 	}
@@ -630,13 +636,17 @@ func removeTree(dir string) error {
 }
 
 // foldPath makes a path comparable with a process command line: slashes
-// are unified and repeated ones collapsed, and, on the case-insensitive Windows and macOS file systems,
+// are unified, repeated ones and dot-dot elements resolved, and, on the case-insensitive Windows and macOS file systems,
 // so is the case.
 func foldPath(s string) string {
 	s = strings.ReplaceAll(s, `\`, "/")
-	for strings.Contains(s, "//") {
-		s = strings.ReplaceAll(s, "//", "/")
+	parts := strings.Split(s, " ")
+	for i, part := range parts {
+		if strings.Contains(part, "/") {
+			parts[i] = path.Clean(part)
+		}
 	}
+	s = strings.Join(parts, " ")
 	if runtime.GOOS == "windows" || runtime.GOOS == "darwin" {
 		s = strings.ToLower(s)
 	}
