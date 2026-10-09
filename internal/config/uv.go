@@ -5,15 +5,20 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 )
 
 const uvProvider = "uv"
 
-// ResolveUVCacheDir picks the directory bilgie sizes and hands to uv. An
+// ResolveUVCacheDir picks the directory bilgie sizes and hands to uv. The
+// result is a literal path: callers must not glob-expand it again. An
 // explicit path wins. The per-OS default follows uv's own order: UV_CACHE_DIR,
 // then $XDG_CACHE_HOME/uv (not on Windows), then the OS default.
 func ResolveUVCacheDir(paths []string) (string, error) {
+	if slices.ContainsFunc(paths, func(p string) bool { return strings.TrimSpace(p) == "" }) {
+		return "", fmt.Errorf("paths must not contain an empty entry")
+	}
 	expanded, err := ExpandPaths(paths)
 	if err != nil {
 		return "", fmt.Errorf("expand paths: %w", err)
@@ -66,10 +71,12 @@ func samePath(a, b string) bool {
 // default directory is absent.
 func ProviderPathsExist(name string, p Provider) bool {
 	if name == uvProvider {
-		if dir, err := ResolveUVCacheDir(p.Paths); err == nil {
-			return PathsExist([]string{dir})
+		dir, err := ResolveUVCacheDir(p.Paths)
+		if err != nil {
+			return true
 		}
-		return true
+		_, statErr := os.Stat(dir)
+		return statErr == nil
 	}
 	return PathsExist(p.Paths)
 }

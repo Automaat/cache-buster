@@ -173,7 +173,7 @@ func TestUVProvider_MissingUVSkips(t *testing.T) {
 	t.Setenv("PATH", t.TempDir())
 	p := newUVProvider(t, config.Provider{Paths: []string{dir}})
 
-	assert.False(t, p.Available())
+	assert.True(t, p.Available(), "a missing uv is a skip line, not a vanished provider")
 	for _, mode := range []CleanMode{CleanModeSmart, CleanModeFull} {
 		res, err := p.Clean(context.Background(), CleanOptions{Mode: mode})
 		require.NoError(t, err)
@@ -196,6 +196,34 @@ func TestUVProvider_FailingUVSkipsWithReason(t *testing.T) {
 		assert.Zero(t, res.BytesCleaned)
 	}
 	requireAllExist(t, files)
+}
+
+func TestUVProvider_FailureReportsPartialFreedBytes(t *testing.T) {
+	dir, files := uvCache(t)
+	installFakeTool(t, "uv", fakeToolSpec{Default: fakeReply{
+		Exit: 2, Stderr: "error: late failure\n", Remove: []string{filepath.Join(dir, "archive-v0")},
+	}})
+	p := newUVProvider(t, config.Provider{Paths: []string{dir}})
+
+	res, err := p.Clean(context.Background(), CleanOptions{Mode: CleanModeSmart})
+	require.NoError(t, err)
+	assert.Contains(t, res.SkipReason, "late failure")
+	assert.Equal(t, int64(128), res.BytesCleaned, "what uv removed before failing still counts")
+	assert.Contains(t, res.Output, "freed")
+	requireAllExist(t, files[1:])
+}
+
+func TestUVProvider_TimeoutReportsPartialFreedBytes(t *testing.T) {
+	dir, _ := uvCache(t)
+	installFakeTool(t, "uv", fakeToolSpec{Default: fakeReply{
+		SleepMS: 30000, Remove: []string{filepath.Join(dir, "archive-v0")},
+	}})
+	p := newUVProvider(t, config.Provider{Paths: []string{dir}, CleanTimeout: "500ms"})
+
+	res, err := p.Clean(context.Background(), CleanOptions{Mode: CleanModeFull})
+	require.NoError(t, err)
+	assert.Contains(t, res.SkipReason, "timed out")
+	assert.Equal(t, int64(128), res.BytesCleaned)
 }
 
 func TestUVProvider_TimeoutSkipsWithReason(t *testing.T) {
@@ -360,4 +388,72 @@ func TestNewProvider_UVIsCommandManaged(t *testing.T) {
 	_, err = NewProvider("uv", config.Provider{Enabled: true, Paths: []string{t.TempDir()}, CleanCmd: "echo hi"})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "provider uv: clean_cmd must be")
+}
+
+// globDirNames lists directory names whose glob reading would match a
+// sibling; Windows forbids * and ? in names.
+func globDirNames() []string {
+	if runtime.GOOS == "windows" {
+		return []string{"cache[1]"}
+	}
+	return []string{"cache[1]", "cache*", "cache?"}
+}
+
+func TestUVProvider_EnvDirWithGlobCharactersStaysLiteral(t *testing.T) {
+	for _, name := range globDirNames() {
+		t.Run(name, func(t *testing.T) {
+			isolateHome(t)
+			root := filepath.Clean(t.TempDir())
+			literal := filepath.Join(root, name, "uv")
+			sibling := filepath.Join(root, "cache1", "uv")
+			for _, d := range []string{literal, sibling} {
+				require.NoError(t, os.MkdirAll(d, 0o700))
+				require.NoError(t, os.WriteFile(filepath.Join(d, "blob"), make([]byte, 64), 0o600))
+			}
+			log := filepath.Join(t.TempDir(), "calls")
+			installFakeTool(t, "uv", fakeToolSpec{Default: fakeReply{Log: log}})
+			t.Setenv("UV_CACHE_DIR", literal)
+
+			p := newUVProvider(t, config.Provider{Paths: defaultUVPaths()})
+			assert.Equal(t, []string{literal}, p.Paths())
+
+			_, err := p.Clean(context.Background(), CleanOptions{Mode: CleanModeFull})
+			require.NoError(t, err)
+			assert.Equal(t, []string{"cache clean\tUV_CACHE_DIR=" + literal + "\tUV_NO_CACHE="}, logLines(t, log))
+			assert.FileExists(t, filepath.Join(sibling, "blob"))
+		})
+	}
+}
+
+func TestUVProvider_XDGDirWithGlobCharactersStaysLiteral(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("uv ignores XDG_CACHE_HOME on Windows")
+	}
+	isolateHome(t)
+	xdg := filepath.Join(filepath.Clean(t.TempDir()), "cache[1]")
+	require.NoError(t, os.MkdirAll(filepath.Join(xdg, "uv"), 0o700))
+	t.Setenv("XDG_CACHE_HOME", xdg)
+
+	p := newUVProvider(t, config.Provider{Paths: defaultUVPaths()})
+	assert.Equal(t, []string{filepath.Join(xdg, "uv")}, p.Paths())
+}
+
+func TestNewUVProvider_ZeroOrManyMatchesIsAnError(t *testing.T) {
+	isolateHome(t)
+	root := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(root, "a1"), 0o700))
+	require.NoError(t, os.MkdirAll(filepath.Join(root, "a2"), 0o700))
+
+	for name, paths := range map[string][]string{
+		"no match":   {filepath.Join(root, "none*")},
+		"two":        {filepath.Join(root, "a*")},
+		"empty list": {},
+		"blank":      {""},
+	} {
+		t.Run(name, func(t *testing.T) {
+			p, err := NewUVProvider("uv", config.Provider{Enabled: true, MaxSize: "1G", Paths: paths})
+			require.Error(t, err)
+			assert.Nil(t, p)
+		})
+	}
 }

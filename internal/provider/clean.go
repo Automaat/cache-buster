@@ -72,7 +72,13 @@ func runMeasuredCleanEnv(
 		if ctx.Err() == nil && errors.Is(cmdCtx.Err(), context.DeadlineExceeded) {
 			err = fmt.Errorf("clean command timed out after %s: %w", timeout, err)
 		}
-		return CleanResult{Output: output}, err
+		var partial int64
+		if ctx.Err() == nil && beforeErr == nil {
+			if after, afterErr := sizeFn(ctx); afterErr == nil {
+				partial = max(sizeBefore-after, 0)
+			}
+		}
+		return CleanResult{Output: output, BytesCleaned: partial}, err
 	}
 
 	sizeAfter, afterErr := sizeFn(ctx)

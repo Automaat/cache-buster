@@ -177,6 +177,10 @@ func resolveProviders(cfg *config.Config, args []string, allFlag, smart bool) ([
 		}
 	}
 
+	if missing := missingCacheErrors(cfg, invalid); len(missing) > 0 {
+		return nil, fmt.Errorf("%s", strings.Join(missing, "\n"))
+	}
+
 	if len(invalid) > 0 {
 		available := cfg.EnabledProviders()
 		return nil, fmt.Errorf("unknown providers: %s\nAvailable: %s",
@@ -184,6 +188,27 @@ func resolveProviders(cfg *config.Config, args []string, allFlag, smart bool) ([
 	}
 
 	return args, nil
+}
+
+// missingCacheErrors names the requested providers that are enabled but
+// hidden because none of their paths exist, so the user sees which path was
+// checked instead of an "unknown provider".
+func missingCacheErrors(cfg *config.Config, requested []string) []string {
+	var out []string
+	for _, name := range requested {
+		if !slices.Contains(cfg.AllEnabledProviders(), name) {
+			return nil
+		}
+		pc, _ := cfg.GetProvider(name)
+		checked := strings.Join(pc.Paths, ", ")
+		if name == "uv" {
+			if dir, err := config.ResolveUVCacheDir(pc.Paths); err == nil {
+				checked = dir
+			}
+		}
+		out = append(out, fmt.Sprintf("provider %s: no cache directory found (checked: %s)", name, checked))
+	}
+	return out
 }
 
 // unavailableProvider is a provider that could not be loaded or is not installed.

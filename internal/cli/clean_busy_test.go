@@ -228,3 +228,25 @@ func TestClean_InterruptedCleanIsNotAnErrorInJSON(t *testing.T) {
 	assert.Equal(t, "slow", got.Providers[0].Name)
 	assert.Equal(t, statusCancelled, got.Providers[0].Status)
 }
+
+func TestClean_NamedProviderWithoutCacheDirNamesThePath(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "no-such-uv-cache")
+	cfgPath := filepath.Join(t.TempDir(), "config.yaml")
+	require.NoError(t, os.WriteFile(cfgPath, []byte(`version: "1"
+providers:
+  uv:
+    enabled: true
+    paths:
+      - `+missing+`
+    max_size: 1
+`), 0o600))
+	loader := config.NewLoader()
+	loader.SetConfigPath(cfgPath)
+	loader.SkipDefaults()
+
+	err := runCleanWithLoader(loader, []string{"uv"}, false, false, true, false, false, os.Stdin)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "provider uv: no cache directory found (checked: "+missing+")")
+	assert.NotContains(t, err.Error(), "unknown providers")
+}

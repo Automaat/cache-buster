@@ -28,3 +28,23 @@ func TestProviderPathsExist_UVFollowsCacheEnv(t *testing.T) {
 	assert.False(t, ProviderPathsExist("uv", explicit), "an explicit path ignores the environment")
 	assert.False(t, ProviderPathsExist("other", uv), "only uv resolves through the environment")
 }
+
+func TestProviderPathsExist_UVEnvDirIsLiteral(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("XDG_CACHE_HOME", "")
+	literal := filepath.Join(filepath.Clean(t.TempDir()), "cache[1]", "uv")
+	require.NoError(t, os.MkdirAll(literal, 0o700))
+	t.Setenv("UV_CACHE_DIR", literal)
+
+	assert.True(t, ProviderPathsExist("uv", DefaultProviders()["uv"]))
+
+	cfg := &Config{Providers: map[string]Provider{"uv": DefaultProviders()["uv"]}}
+	assert.Equal(t, []string{"uv"}, cfg.EnabledProviders())
+}
+
+func TestProviderPathsExist_UVBadPathsStayVisible(t *testing.T) {
+	assert.True(t, ProviderPathsExist("uv", Provider{Paths: []string{}}), "a load error must name the provider")
+	assert.True(t, ProviderPathsExist("uv", Provider{Paths: []string{""}}))
+}

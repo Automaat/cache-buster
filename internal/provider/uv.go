@@ -28,6 +28,7 @@ const (
 // `uv cache prune` (unused entries), full mode runs `uv cache clean`.
 type UVProvider struct {
 	*BaseProvider
+	dir      string
 	lookPath func(string) (string, error)
 	cleanCmd string
 	fullArgs []string
@@ -57,14 +58,14 @@ func NewUVProvider(name string, cfg config.Provider) (*UVProvider, error) {
 	if err != nil {
 		return nil, err
 	}
-	cfg.Paths = []string{dir}
-	base, err := NewBaseProvider(name, cfg)
+	base, err := newBaseProviderWithPaths(name, cfg, []string{dir})
 	if err != nil {
 		return nil, err
 	}
 	home, _ := os.UserHomeDir()
 	p := &UVProvider{
 		BaseProvider: base,
+		dir:          dir,
 		lookPath:     exec.LookPath,
 		cleanCmd:     cmd,
 		fullArgs:     fullArgs,
@@ -114,10 +115,10 @@ func (p *UVProvider) findUV() (string, bool) {
 	return bin, err == nil
 }
 
-// Available reports whether uv is on PATH.
+// Available is always true: a missing uv is reported as a skip with its
+// reason on the provider's own line, not as a vanished provider.
 func (p *UVProvider) Available() bool {
-	_, found := p.findUV()
-	return found
+	return true
 }
 
 // Clean implements Provider.
@@ -157,7 +158,12 @@ func (p *UVProvider) Clean(ctx context.Context, opts CleanOptions) (CleanResult,
 		if line := firstLine(res.Output); line != "" {
 			reason += ": " + line
 		}
-		return skipResult(reason), nil
+		skipped := skipResult(reason)
+		if res.BytesCleaned > 0 {
+			skipped.BytesCleaned = res.BytesCleaned
+			skipped.Output += fmt.Sprintf(" (uv freed %s before failing)", sizeText(res.BytesCleaned))
+		}
+		return skipped, nil
 	}
 	return res, nil
 }
@@ -173,7 +179,7 @@ func (p *UVProvider) childEnv() []string {
 		}
 		env = append(env, kv)
 	}
-	return append(env, "UV_CACHE_DIR="+p.paths[0])
+	return append(env, "UV_CACHE_DIR="+p.dir)
 }
 
 // guardReason refuses a cache directory that is, lies inside or contains a
@@ -182,9 +188,9 @@ func (p *UVProvider) guardReason() string {
 	p.mu.Lock()
 	protected := slices.Clone(p.protected)
 	p.mu.Unlock()
-	for _, cand := range pathSpellings(p.paths[0]) {
+	for _, cand := range pathSpellings(p.dir) {
 		if lexicallyProtected(cand) {
-			return "protected path " + p.paths[0]
+			return "protected path " + p.dir
 		}
 		for _, root := range protected {
 			for _, spelling := range rootSpellings(root) {
