@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"slices"
 
+	"github.com/smykla-skalski/bilgie/internal/fsx"
+
 	"github.com/spf13/viper"
 )
 
@@ -67,6 +69,9 @@ func (l *Loader) Load() (*Config, error) {
 		return nil, err
 	}
 
+	if err := fsx.CheckRegular(configPath); err != nil {
+		return nil, fmt.Errorf("read config: %w", err)
+	}
 	l.v.SetConfigFile(configPath)
 	l.v.SetConfigType("yaml")
 

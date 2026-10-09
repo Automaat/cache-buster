@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -22,7 +23,7 @@ configured level, pumps caches out below it and sweeps hard at the critical leve
 It manages developer caches on macOS, Linux and Windows with configurable size limits.`,
 	Args:              cobra.NoArgs,
 	SilenceErrors:     true,
-	PersistentPreRunE: func(cmd *cobra.Command, _ []string) error { cli.MigrateLegacy(cmd.ErrOrStderr()); return nil },
+	PersistentPreRunE: func(cmd *cobra.Command, _ []string) error { return cli.BeforeCommand(cmd) },
 	RunE:              runRoot,
 }
 
@@ -48,6 +49,9 @@ func init() {
 // error line is silenced so it does not repeat.
 func execute(errOut io.Writer) int {
 	if err := rootCmd.Execute(); err != nil {
+		if errors.Is(err, cli.ErrReported) {
+			return 1
+		}
 		fmt.Fprintln(errOut, "Error:", err)
 		return 1
 	}

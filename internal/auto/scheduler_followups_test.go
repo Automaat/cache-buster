@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -182,4 +183,26 @@ func TestInstallLaunchd_KeepsAForeignFileInTheLegacyLogDir(t *testing.T) {
 
 	assert.FileExists(t, keep)
 	assert.False(t, strings.Contains(output(a), "error"))
+}
+
+func TestInstallLaunchd_LegacyLogDirSymlinkNeverDeletesInItsTarget(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlinks need a privilege on Windows")
+	}
+	a := newAgent(t, &recorder{})
+	target := filepath.Join(t.TempDir(), "precious")
+	require.NoError(t, os.MkdirAll(target, 0o750))
+	log := filepath.Join(target, "auto.log")
+	other := filepath.Join(target, "other.txt")
+	require.NoError(t, os.WriteFile(log, []byte("precious"), 0o600))
+	require.NoError(t, os.WriteFile(other, []byte("keep"), 0o600))
+	logs := filepath.Join(a.Home, "Library", "Logs", "cache-buster")
+	require.NoError(t, os.MkdirAll(filepath.Dir(logs), 0o750))
+	require.NoError(t, os.Symlink(target, logs))
+
+	require.NoError(t, a.Install(t.Context()))
+
+	assert.FileExists(t, log)
+	assert.FileExists(t, other)
+	assert.Contains(t, output(a), "leaving "+logs)
 }
