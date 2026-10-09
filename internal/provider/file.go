@@ -85,6 +85,7 @@ func (p *FileProvider) fullClean(ctx context.Context, opts CleanOptions) (CleanR
 	sort.Slice(files, func(i, j int) bool {
 		return files[i].ModTime.Before(files[j].ModTime)
 	})
+	files = cache.GroupLinks(files)
 
 	ledger := cache.NewLinkLedger(files)
 	var (

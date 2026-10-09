@@ -364,3 +364,52 @@ func TestCalculateSize_OverlappingAndAliasedPathsCountOnce(t *testing.T) {
 	require.NoError(t, err)
 	assert.Len(t, list.Files, 2)
 }
+
+func TestTrim_RemovesSharedInodeWholeOrNotAtAll(t *testing.T) {
+	dir := t.TempDir()
+	a1 := filepath.Join(dir, "a1")
+	b1 := filepath.Join(dir, "b1")
+	createTestFile(t, a1, 1000, 20*24*time.Hour)
+	createTestFile(t, b1, 1000, 15*24*time.Hour)
+	for _, l := range []struct {
+		from, to string
+		age      time.Duration
+	}{{a1, "a2", 10 * 24 * time.Hour}, {b1, "b2", 5 * 24 * time.Hour}} {
+		to := filepath.Join(dir, l.to)
+		linkOrSkip(t, l.from, to)
+		mtime := time.Now().Add(-l.age)
+		require.NoError(t, os.Chtimes(to, mtime, mtime))
+	}
+
+	result, err := Trim(context.Background(), []string{dir}, TrimOptions{
+		MaxSize: 1200, MaxAge: 90 * 24 * time.Hour,
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, int64(1000), result.FreedBytes)
+	assert.Equal(t, int64(2), result.DeletedCount)
+	assert.FileExists(t, b1, "an inode is not left with some links removed")
+	assert.FileExists(t, filepath.Join(dir, "b2"))
+}
+
+func TestCalculateSize_DuplicateFileRootsCountOnce(t *testing.T) {
+	root := t.TempDir()
+	file := filepath.Join(root, "f.bin")
+	createTestFile(t, file, 300, time.Hour)
+
+	res, err := CalculateSize([]string{file, file, filepath.Join(root, "..", filepath.Base(root), "f.bin")})
+	require.NoError(t, err)
+	assert.Equal(t, int64(300), res.Size)
+	list, err := ListFiles([]string{file, file})
+	require.NoError(t, err)
+	assert.Len(t, list.Files, 1)
+}
+
+func TestDistinctRoots_FilesystemRootAbsorbsChildren(t *testing.T) {
+	root := string(filepath.Separator)
+	if v := filepath.VolumeName(t.TempDir()); v != "" {
+		root = v + root
+	}
+	got := distinctRoots([]string{filepath.Join(root, "definitely-missing-x"), root, t.TempDir()})
+	assert.Equal(t, []string{root}, got)
+}

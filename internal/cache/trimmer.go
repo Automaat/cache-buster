@@ -56,6 +56,28 @@ func (l *LinkLedger) Freeable(f FileInfo) bool {
 	return !f.Shared || l.listed[f.ID] >= f.Nlink
 }
 
+// GroupLinks reorders files so the links of a shared inode sit together, at
+// the position of the first one. A trim then removes an inode whole instead of
+// stopping with some links gone and the data still alive.
+func GroupLinks(files []FileInfo) []FileInfo {
+	byID := map[osshim.FileID][]FileInfo{}
+	for _, f := range files {
+		if f.Shared {
+			byID[f.ID] = append(byID[f.ID], f)
+		}
+	}
+	out := make([]FileInfo, 0, len(files))
+	for _, f := range files {
+		if !f.Shared {
+			out = append(out, f)
+			continue
+		}
+		out = append(out, byID[f.ID]...)
+		delete(byID, f.ID)
+	}
+	return out
+}
+
 // UniqueSize is the size of files with each hard-linked inode counted once.
 func UniqueSize(files []FileInfo) int64 {
 	var total int64
@@ -103,6 +125,7 @@ func Trim(ctx context.Context, paths []string, opts TrimOptions) (TrimResult, er
 	sort.Slice(files, func(i, j int) bool {
 		return files[i].ModTime.Before(files[j].ModTime)
 	})
+	files = GroupLinks(files)
 
 	var (
 		result        TrimResult

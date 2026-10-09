@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -193,14 +194,18 @@ func ListFilesContext(ctx context.Context, paths []string) (ListResult, error) {
 // that is itself a symlink never absorbs others, because walking it visits
 // nothing. The result is ordered, so scans are deterministic.
 func distinctRoots(paths []string) []string {
-	type root struct{ path, key string }
+	type root struct {
+		path, key string
+		dir       bool
+	}
 	roots := make([]root, 0, len(paths))
 	for _, p := range paths {
 		key := filepath.Clean(p)
 		if resolved, err := filepath.EvalSymlinks(p); err == nil {
 			key = resolved
 		}
-		roots = append(roots, root{p, key})
+		info, err := os.Lstat(p)
+		roots = append(roots, root{path: p, key: foldCase(key), dir: err == nil && info.IsDir()})
 	}
 	slices.SortFunc(roots, func(a, b root) int {
 		return cmp.Or(cmp.Compare(len(a.key), len(b.key)), strings.Compare(a.key, b.key), strings.Compare(a.path, b.path))
@@ -209,11 +214,14 @@ func distinctRoots(paths []string) []string {
 	var kept []root
 	for _, r := range roots {
 		covered := slices.ContainsFunc(kept, func(k root) bool {
-			if r.key != k.key && !strings.HasPrefix(r.key, k.key+string(filepath.Separator)) {
+			if r.key == k.key {
+				return k.dir == r.dir
+			}
+			if !k.dir {
 				return false
 			}
-			info, err := os.Lstat(k.path)
-			return err == nil && info.IsDir()
+			rel, err := filepath.Rel(k.key, r.key)
+			return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 		})
 		if !covered {
 			kept = append(kept, r)
@@ -224,4 +232,13 @@ func distinctRoots(paths []string) []string {
 		out[i] = k.path
 	}
 	return out
+}
+
+// foldCase lowercases paths on the case-insensitive Windows and macOS file
+// systems, so two spellings of one place compare equal.
+func foldCase(p string) string {
+	if runtime.GOOS == "windows" || runtime.GOOS == "darwin" {
+		return strings.ToLower(p)
+	}
+	return p
 }
