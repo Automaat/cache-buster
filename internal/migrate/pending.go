@@ -3,11 +3,12 @@ package migrate
 import (
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
+
+	"github.com/smykla-skalski/bilgie/internal/fsx"
 )
 
 const configFile = "config.yaml"
@@ -41,20 +42,18 @@ func PendingConfig(home string) *Pending {
 const maxProbe = 1 << 20
 
 // hasContent is true for a regular file that holds a line other than blank,
-// a comment or a YAML document marker. A file it cannot read counts as
-// content: the loader reports that error itself.
+// a comment or a YAML document marker. A file it cannot read, or one larger
+// than maxProbe, counts as content: the loader judges those itself. Anything
+// that is not a regular file (dangling link, directory, FIFO) has none.
 func hasContent(path string) bool {
-	info, err := os.Stat(path)
-	if err != nil || !info.Mode().IsRegular() {
+	if _, err := os.Stat(path); err != nil {
 		return false
 	}
-	f, err := os.Open(path)
-	if err != nil {
-		return true
-	}
-	defer f.Close()
-	data, err := io.ReadAll(io.LimitReader(f, maxProbe))
-	if err != nil {
+	data, err := fsx.ReadRegular(path, maxProbe)
+	switch {
+	case errors.Is(err, fsx.ErrNotRegular):
+		return false
+	case err != nil:
 		return true
 	}
 	for line := range strings.SplitSeq(strings.TrimPrefix(string(data), "\ufeff"), "\n") {

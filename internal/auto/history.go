@@ -10,6 +10,8 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/smykla-skalski/bilgie/internal/fsx"
 )
 
 // RunLogName is the append-only JSON Lines file of auto runs.
@@ -149,6 +151,9 @@ func ReadRuns(stateDir string, limit int) ([]RunRecord, int, error) {
 }
 
 func readRunFile(path string) ([]RunRecord, int, error) {
+	if err := fsx.CheckRegular(path); err != nil {
+		return nil, 0, fmt.Errorf("open run log: %w", err)
+	}
 	f, err := os.Open(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, 0, nil

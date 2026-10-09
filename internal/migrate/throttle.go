@@ -7,7 +7,11 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/smykla-skalski/bilgie/internal/fsx"
 )
+
+const maxMarker = 1 << 20
 
 // reportEvery is how long a repeating migration warning stays quiet.
 const reportEvery = 24 * time.Hour
@@ -27,7 +31,7 @@ func markerPath(home string) string {
 
 func readMarker(home string) map[string]reported {
 	var m map[string]reported
-	data, err := os.ReadFile(markerPath(home))
+	data, err := fsx.ReadRegular(markerPath(home), maxMarker)
 	if err != nil || json.Unmarshal(data, &m) != nil || m == nil {
 		return map[string]reported{}
 	}
@@ -107,7 +111,7 @@ func lockFile(path string, wait time.Duration) (unlock func()) {
 }
 
 func releaseLock(path, token string) {
-	if data, err := os.ReadFile(path); err == nil && string(data) == token {
+	if data, err := fsx.ReadRegular(path, maxMarker); err == nil && string(data) == token {
 		_ = os.Remove(path)
 	}
 }
