@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/smykla-skalski/bilgie/internal/appname"
 )
@@ -27,31 +28,51 @@ func Dirs(home string) [][2]string {
 	}
 }
 
-// Legacy moves each legacy dir under home to its current location and writes a
-// one-line note per move to out. A dir that is skipped or fails is reported as
-// a warning and never aborts the command.
-func Legacy(home string, out io.Writer) {
-	for _, pair := range Dirs(home) {
-		moved, err := Dir(pair[0], pair[1])
-		switch {
-		case err != nil:
-			fmt.Fprintf(out, "warning: not migrating %s: %v\n", pair[0], err)
-		case moved:
-			fmt.Fprintf(out, "migrated %s to %s\n", pair[0], pair[1])
-		}
-	}
+// Issue is a legacy dir that could not be migrated, or only in part.
+type Issue struct {
+	Old, New string
+	Err      error
 }
 
-// ErrNewDirExists reports that the legacy dir was left in place because the
-// current dir already exists; the user has to merge them by hand.
+// Legacy moves each legacy dir under home to its current location and writes a
+// note per move to out. A dir that is skipped or fails is reported as a
+// warning, at most once per kind of failure and day (see Throttle), and never
+// aborts the command. The returned issues list every dir left behind, whether
+// or not it was warned about.
+func Legacy(home string, out io.Writer) []Issue {
+	var issues []Issue
+	for _, pair := range Dirs(home) {
+		moved, err := Dir(pair[0], pair[1])
+		if moved {
+			fmt.Fprintf(out, "migrated %s to %s\n", pair[0], pair[1])
+		}
+		if err == nil {
+			Resolved(home, pair[0])
+			continue
+		}
+		issues = append(issues, Issue{Old: pair[0], New: pair[1], Err: err})
+		if ShouldReport(home, pair[0], err.Error()) {
+			fmt.Fprintf(out, "warning: not migrating %s: %v\n", pair[0], err)
+		}
+	}
+	return issues
+}
+
+// ErrNewDirExists reports that entries of the legacy dir were left in place
+// because the current dir already holds an entry of the same name; the user
+// has to merge them by hand.
 var ErrNewDirExists = errors.New("the new dir already exists")
 
-// Dir moves oldDir to newDir when oldDir exists and newDir does not. It never
-// overwrites: when both exist and oldDir holds anything, both stay untouched
-// and the error wraps ErrNewDirExists so the caller can tell the user to move
-// the rest by hand. A symlink to a directory (home-manager, stow) is
-// recreated at newDir, pointing at the same target, and the old link is
-// removed. An oldDir that is not a readable directory is skipped with an error.
+// Dir moves oldDir to newDir when oldDir exists and newDir does not. When
+// both are real directories, every entry of oldDir that newDir lacks moves
+// over and the rest stays: nothing is ever overwritten, and the error wraps
+// ErrNewDirExists so the caller can tell the user to move the rest by hand.
+// A symlink to a directory (home-manager, stow) or a Windows junction is
+// renamed as a link, so its target is never touched. An oldDir that is not a
+// directory is skipped with an error. Moving needs no read access to the
+// contents: a rename inside one parent only edits directory entries. A relative
+// link only keeps its meaning when oldDir and newDir share a parent, as the
+// pairs from Dirs do.
 func Dir(oldDir, newDir string) (bool, error) {
 	info, err := os.Lstat(oldDir)
 	if errors.Is(err, os.ErrNotExist) {
@@ -60,13 +81,16 @@ func Dir(oldDir, newDir string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	isLink := info.Mode()&os.ModeSymlink != 0
+	linkLike := info.Mode()&(os.ModeSymlink|os.ModeIrregular) != 0
 	var statErr error
-	if isLink {
+	if linkLike {
 		info, statErr = os.Stat(oldDir)
 	}
-	_, err = os.Lstat(newDir)
+	newInfo, err := os.Lstat(newDir)
 	if err == nil {
+		if !linkLike && statErr == nil && info.IsDir() && newInfo.IsDir() {
+			return merge(oldDir, newDir)
+		}
 		return false, skipOrWarn(oldDir, newDir)
 	}
 	if !errors.Is(err, os.ErrNotExist) {
@@ -78,12 +102,6 @@ func Dir(oldDir, newDir string) (bool, error) {
 	if !info.IsDir() {
 		return false, errors.New("not a directory")
 	}
-	if isLink {
-		return moveLink(oldDir, newDir)
-	}
-	if err := checkReadable(oldDir); err != nil {
-		return false, tolerateLostRace(err, oldDir)
-	}
 	if err := os.MkdirAll(filepath.Dir(newDir), 0o750); err != nil {
 		return false, err
 	}
@@ -91,6 +109,47 @@ func Dir(oldDir, newDir string) (bool, error) {
 		return false, tolerateLostRace(err, oldDir)
 	}
 	return true, nil
+}
+
+// merge moves the entries of oldDir that newDir lacks, then drops oldDir if it
+// ended up empty. Each rename is atomic, so concurrent runs split the entries
+// between them and only the winner of an entry counts it as moved.
+func merge(oldDir, newDir string) (bool, error) {
+	entries, err := os.ReadDir(oldDir)
+	if err != nil {
+		return false, tolerateLostRace(err, oldDir)
+	}
+	moved := false
+	var kept []string
+	for _, e := range entries {
+		src, dst := filepath.Join(oldDir, e.Name()), filepath.Join(newDir, e.Name())
+		if pathExists(dst) {
+			if emptyFile(src) {
+				_ = os.Remove(src)
+				continue
+			}
+			kept = append(kept, e.Name())
+			continue
+		}
+		if err := rename(src, dst); err != nil {
+			if tolerateLostRace(err, src) == nil {
+				continue
+			}
+			return moved, err
+		}
+		moved = true
+	}
+	if len(kept) == 0 {
+		_ = os.Remove(oldDir)
+		return moved, nil
+	}
+	return moved, fmt.Errorf("%w (%s): %s in %s also exist there; move what you still need by hand, then remove them",
+		ErrNewDirExists, newDir, strings.Join(kept, ", "), oldDir)
+}
+
+func emptyFile(path string) bool {
+	info, err := os.Lstat(path)
+	return err == nil && info.Mode().IsRegular() && info.Size() == 0
 }
 
 // skipOrWarn settles a legacy path next to an existing newDir: silent unless
@@ -126,39 +185,6 @@ func newDirExists(oldDir, newDir string) error {
 		ErrNewDirExists, newDir, oldDir)
 }
 
-// moveLink recreates the symlink oldDir at newDir with the same target, made absolute
-// when the two dirs differ in parent, then drops the old one.
-func moveLink(oldDir, newDir string) (bool, error) {
-	target, err := os.Readlink(oldDir)
-	if err != nil {
-		return false, err
-	}
-	if !filepath.IsAbs(target) && filepath.Dir(oldDir) != filepath.Dir(newDir) {
-		parent, err := filepath.EvalSymlinks(filepath.Dir(oldDir))
-		if err != nil {
-			return false, err
-		}
-		target = filepath.Join(parent, target)
-	}
-	if err := os.MkdirAll(filepath.Dir(newDir), 0o750); err != nil {
-		return false, err
-	}
-	if err := os.Symlink(target, newDir); err != nil {
-		if errors.Is(err, os.ErrExist) {
-			return false, nil
-		}
-		return false, tolerateLostRace(err, oldDir)
-	}
-	if err := os.Remove(oldDir); err != nil {
-		if !pathExists(oldDir) {
-			return true, nil
-		}
-		_ = os.Remove(newDir)
-		return false, err
-	}
-	return true, nil
-}
-
 var rename = os.Rename
 
 // tolerateLostRace drops a not-exist error once oldDir is gone, whether a
@@ -174,24 +200,4 @@ func tolerateLostRace(err error, oldDir string) error {
 func pathExists(path string) bool {
 	_, err := os.Lstat(path)
 	return err == nil
-}
-
-// checkReadable lists the dir and opens its files, so a dir with unreadable
-// content stays where it is instead of being moved half-usable.
-func checkReadable(dir string) error {
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return err
-	}
-	for _, e := range entries {
-		if !e.Type().IsRegular() {
-			continue
-		}
-		f, err := os.Open(filepath.Join(dir, e.Name()))
-		if err != nil {
-			return err
-		}
-		_ = f.Close()
-	}
-	return nil
 }

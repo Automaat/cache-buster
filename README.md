@@ -46,10 +46,15 @@ Extract it and put `bilgie` (`bilgie.exe` on Windows) on your `PATH`.
 
 The first run of any `bilgie` command moves `~/.config/cache-buster` to `~/.config/bilgie` and
 `~/.local/state/cache-buster` to `~/.local/state/bilgie` (config, run history and the first-run marker),
-and prints one line per move. A legacy directory that is a symlink to a directory (home-manager, stow)
-is recreated at the new path with the same target. A new directory that already exists is never
-overwritten: while the legacy directory still holds anything, every command warns that you must move
-what you need by hand and remove it. A legacy directory that cannot be read is skipped with a warning. `install-agent` and `uninstall-agent` also remove
+and prints one line per move. Nothing needs read access to the contents, so unreadable files move too.
+A legacy directory that is a symlink to a directory (home-manager, stow) or a junction is renamed as a link and its
+target is never touched. When the new directory already exists, entries it lacks move over and nothing is
+overwritten; entries that collide stay in the legacy directory and a warning says to merge them by hand.
+A failure that persists is warned about once, again after a day or when it changes.
+While the legacy `config.yaml` has not reached `~/.config/bilgie`, `clean`, `interactive`, `auto`, `tick` and
+`install-agent` refuse to run (previews with `--dry-run` or `--assume-free` still work) instead of using default
+config, and `bilgie doctor` names the exact `mv` command to finish. `help` and shell completion never migrate anything.
+`install-agent` and `uninstall-agent` also remove
 an agent installed under the old names (launchd label `dev.mskalski.cache-buster`, the `cache-buster`
 systemd unit, crontab tag and Task Scheduler task). Run `bilgie install-agent` once after upgrading; the first
 run after it is a dry-run again.
