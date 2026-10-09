@@ -624,7 +624,7 @@ the next install fail with `failed to read directory .../archive-v0/<id>`.
   root is skipped.
 - `max_size` and `max_age` do not bound uv: prune and clean decide. Existing configs without
   `clean_cmd` keep working. `clean_cmd` may only be `uv cache clean`, `uv cache prune` or `uv cache prune --ci`
-  (it then replaces the full-mode command); anything else fails to load with
+  (a prune command also serves smart mode, so `--ci` applies there too; a clean command only replaces the full-mode default); anything else fails to load with
   `provider uv: clean_cmd must be ...`, so remove it.
 - Busy guard: skipped while `<path>/.lock` is flock-held or a `uv` process runs.
 

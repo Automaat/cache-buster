@@ -6,7 +6,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -54,7 +53,7 @@ func NewUVProvider(name string, cfg config.Provider) (*UVProvider, error) {
 	if err != nil {
 		return nil, err
 	}
-	dir, err := resolveUVCacheDir(cfg.Paths)
+	dir, err := config.ResolveUVCacheDir(cfg.Paths)
 	if err != nil {
 		return nil, err
 	}
@@ -99,57 +98,6 @@ func parseUVCleanCmd(cmd string) ([]string, error) {
 	return words[1:], nil
 }
 
-// resolveUVCacheDir picks the directory bilgie sizes and hands to uv. An
-// explicit path wins. The per-OS default follows uv's own order: UV_CACHE_DIR,
-// then $XDG_CACHE_HOME/uv (not on Windows), then the OS default.
-func resolveUVCacheDir(paths []string) (string, error) {
-	expanded, err := config.ExpandPaths(paths)
-	if err != nil {
-		return "", fmt.Errorf("expand paths: %w", err)
-	}
-	if len(expanded) != 1 {
-		return "", fmt.Errorf("paths must name exactly one uv cache directory, got %d", len(expanded))
-	}
-	dir := expanded[0]
-	if !isDefaultUVDir(dir) {
-		return dir, nil
-	}
-	if env := os.Getenv("UV_CACHE_DIR"); env != "" {
-		abs, err := filepath.Abs(env)
-		if err != nil {
-			return "", fmt.Errorf("resolve UV_CACHE_DIR %q: %w", env, err)
-		}
-		return abs, nil
-	}
-	if xdg := os.Getenv("XDG_CACHE_HOME"); xdg != "" && runtime.GOOS != "windows" && filepath.IsAbs(xdg) {
-		return filepath.Join(xdg, uvBinary), nil
-	}
-	return dir, nil
-}
-
-func isDefaultUVDir(dir string) bool {
-	defaults := []string{"~/.cache/uv"}
-	defaults = append(defaults, config.DefaultProviders()[uvBinary].Paths...)
-	for _, d := range defaults {
-		exp, err := config.ExpandTilde(d)
-		if err != nil {
-			continue
-		}
-		if samePath(exp, dir) {
-			return true
-		}
-	}
-	return false
-}
-
-func samePath(a, b string) bool {
-	a, b = filepath.Clean(a), filepath.Clean(b)
-	if runtime.GOOS == "windows" {
-		return strings.EqualFold(a, b)
-	}
-	return a == b
-}
-
 // SetProtected implements ProtectionAware. The paths add to the built-in ones.
 func (p *UVProvider) SetProtected(paths []string) {
 	p.mu.Lock()
@@ -186,7 +134,7 @@ func (p *UVProvider) Clean(ctx context.Context, opts CleanOptions) (CleanResult,
 	}
 
 	args, display := p.fullArgs, p.cleanCmd
-	if opts.Mode == CleanModeSmart {
+	if opts.Mode == CleanModeSmart && args[1] != "prune" {
 		args, display = []string{"cache", "prune"}, uvSmartCleanCmd
 	}
 

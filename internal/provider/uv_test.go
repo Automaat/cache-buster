@@ -109,7 +109,7 @@ func TestUVProvider_CleanCmdOverridesFullMode(t *testing.T) {
 	lines := logLines(t, log)
 	require.Len(t, lines, 2)
 	assert.True(t, strings.HasPrefix(lines[0], "cache prune --ci\t"), lines[0])
-	assert.True(t, strings.HasPrefix(lines[1], "cache prune\t"), lines[1])
+	assert.True(t, strings.HasPrefix(lines[1], "cache prune --ci\t"), "smart keeps the configured prune flags: "+lines[1])
 }
 
 func TestUVProvider_DryRunReportsCommandAndSize(t *testing.T) {

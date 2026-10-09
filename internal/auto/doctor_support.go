@@ -198,7 +198,7 @@ func ProtectionConflicts(
 	var out []Conflict
 	for _, name := range names {
 		pc := cfg.Providers[name]
-		if !pc.Enabled || !cfg.Applies(name) || neverRun(name, pc) || !config.PathsExist(pc.Paths) {
+		if !pc.Enabled || !cfg.Applies(name) || neverRun(name, pc) || !config.ProviderPathsExist(name, pc) {
 			continue
 		}
 		p, err := newProvider(name, pc)
@@ -250,7 +250,7 @@ func LoadErrors(
 		if !pc.Enabled || !cfg.Applies(name) || neverRun(name, pc) {
 			continue
 		}
-		if !hasTargets(pc) {
+		if !hasTargets(name, pc) {
 			continue
 		}
 		if _, err := newProvider(name, pc); err != nil {
