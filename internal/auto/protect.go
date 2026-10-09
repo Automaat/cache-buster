@@ -79,7 +79,7 @@ func insideGitCheckout(path, home string) bool {
 	}
 	isHome := func(dir string) bool {
 		return slices.ContainsFunc(withoutDataAlias([]string{dir}), func(d string) bool {
-			return slices.ContainsFunc(homes, func(h string) bool { return sameDir(h, d) })
+			return slices.ContainsFunc(homes, func(h string) bool { return strings.EqualFold(h, d) })
 		})
 	}
 	for _, start := range withoutDataAlias([]string{filepath.Clean(path)}) {
@@ -273,13 +273,4 @@ func probeGitMarker(dir string) (found, settled bool) {
 			return false, readErr == nil || errors.Is(readErr, io.EOF)
 		}
 	}
-}
-
-// sameDir compares two directory spellings the way the default filesystem
-// does: ignoring case on macOS and Windows, exactly elsewhere.
-func sameDir(a, b string) bool {
-	if runtime.GOOS == "darwin" || runtime.GOOS == "windows" {
-		return strings.EqualFold(a, b)
-	}
-	return a == b
 }
