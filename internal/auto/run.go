@@ -312,9 +312,19 @@ func runCandidate(ctx context.Context, cfg *config.Config, c *candidate, tier Ti
 		return res
 	}
 
-	if aware, ok := p.(provider.ProtectionAware); ok {
+	switch aware := p.(type) {
+	case provider.ProtectionAware:
 		aware.SetProtected(append(slices.Clone(protected), protectedRoots(deps.Home)...))
-	} else {
+	case provider.PathGuarded:
+		reason, ctxErr := guardPaths(ctx, p, aware, deps.Home, protected)
+		if ctxErr != nil {
+			res.Status, res.Err = StatusError, ctxErr
+			return res
+		}
+		if reason != "" {
+			return skipped(res, reason)
+		}
+	default:
 		reason, ctxErr := protectedReason(ctx, p, c.cfg.Type == config.TypeDirPattern, deps.Home, protected)
 		if ctxErr != nil {
 			res.Status, res.Err = StatusError, ctxErr
@@ -402,21 +412,67 @@ func skipped(res Result, reason string) Result {
 // the scan was cancelled.
 func protectedReason(ctx context.Context, p provider.Provider, sweep bool, home string, protected []string) (string, error) {
 	for _, path := range p.Paths() {
-		if sweep && (hasProtectedName(path) || hasResolvedProtectedName(path)) {
-			return "protected path " + path, nil
-		}
-		v := checkProtected(ctx, path, home, protected, true)
-		switch {
-		case v.cancelled:
-			return "", ctx.Err()
-		case v.kind == verdictProtected && v.detail != "":
-			return "protected path " + path + " (" + v.detail + ")", nil
-		case v.kind == verdictProtected:
-			return "protected path " + path, nil
-		case v.kind == verdictUnverified:
-			return v.detail, nil
+		reason, err := pathReason(ctx, path, sweep, home, protected)
+		if err != nil || reason != "" {
+			return reason, err
 		}
 	}
+	return "", nil
+}
+
+// pathReason is protectedReason for one path.
+func pathReason(ctx context.Context, path string, sweep bool, home string, protected []string) (string, error) {
+	if sweep && (hasProtectedName(path) || hasResolvedProtectedName(path)) {
+		return "protected path " + path, nil
+	}
+	v := checkProtected(ctx, path, home, protected, true)
+	switch {
+	case v.cancelled:
+		return "", ctx.Err()
+	case v.kind == verdictProtected && v.detail != "":
+		return "protected path " + path + " (" + v.detail + ")", nil
+	case v.kind == verdictProtected:
+		return "protected path " + path, nil
+	case v.kind == verdictUnverified:
+		return v.detail, nil
+	}
+	return "", nil
+}
+
+// guardPaths hands a path-guarded provider a guard that skips only the
+// protected matches. The provider is skipped whole only when every one of its
+// paths is off limits; the reason is then the first path's. Each path is
+// checked once: the guard reuses the verdicts found here.
+func guardPaths(ctx context.Context, p provider.Provider, g provider.PathGuarded, home string, protected []string) (string, error) {
+	paths := p.Paths()
+	reasons := make(map[string]string, len(paths))
+	first, blocked := "", 0
+	for _, path := range paths {
+		reason, err := pathReason(ctx, path, true, home, protected)
+		if err != nil {
+			return "", err
+		}
+		reasons[path] = reason
+		if reason != "" {
+			if blocked == 0 {
+				first = reason
+			}
+			blocked++
+		}
+	}
+	if len(paths) > 0 && blocked == len(paths) {
+		return first, nil
+	}
+	g.SetPathGuard(func(path string) string {
+		if reason, ok := reasons[path]; ok {
+			return reason
+		}
+		reason, err := pathReason(ctx, path, true, home, protected)
+		if err != nil {
+			return "cancelled"
+		}
+		return reason
+	})
 	return "", nil
 }
 

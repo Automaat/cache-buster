@@ -173,14 +173,18 @@ machine. The search goes `max_depth` levels below each root (default 4), never f
 symlinks, never enters `.git`, `node_modules`, `target`, `.venv` or `venv` while searching, and
 stops after
 `scan_budget` (default 10s) or on Ctrl-C. A nested project in a monorepo is found at its own
-level. A root that is home, a parent of home or the filesystem root is ignored.
+level. A root that is home, a parent of home or the filesystem root is ignored, and the output
+says so: as a warning when other roots were scanned, as the skip reason when none was.
 
 A project is idle when all of these are older than `min_idle` (default 60 days): the newest
 mtime among files outside the artifacts and `.git` (a sample of the first 3000 entries, breadth
 first; a sample cut short skips the project, with or without git), and the git `HEAD` and reflog
 time. A folder that merely shares an artifact's name, such as `src/target/`, is source and is
 sampled; only recognised artifacts (valid marker beside the project file) are left out. A
-linked worktree is judged by its own `HEAD`. A directory-only removal never makes a project look
+linked worktree is judged by its own `HEAD`. The repository is found by walking up from the
+project to the filesystem root, past the configured root, but never into home, so a repository
+of dotfiles in home does not own the projects below it. The git time is read again just
+before each removal; a commit or checkout made meanwhile keeps the artifact. A directory-only removal never makes a project look
 active: the parent keeps its mtime.
 
 An idle project's artifact must also be unused. It is skipped while any of these is newer than
@@ -192,7 +196,8 @@ as `target/release/<tool>`, `node_modules/.bin/<tool>` (followed to its script) 
 atime is only an extra signal: `noatime` mounts never update it and `relatime` updates it at
 most daily, so a quiet atime proves nothing and the mtime checks, the running-process check and
 the open-file check stay in force. Directory atimes are ignored because listing a directory
-refreshes them.
+refreshes them. This use check covers the top-level entries, `.bin` and the release executables
+named above, not a module read deep inside `node_modules`.
 
 An artifact is skipped, with the reason in `--verbose` output, when:
 
@@ -203,7 +208,8 @@ An artifact is skipped, with the reason in `--verbose` output, when:
 - the git tree is dirty (`git status --porcelain` is non-empty, or git is missing or fails).
   Set `skip_if_dirty: false` to turn this off
 - a tool of that kind runs in the project: `cargo` or `rustc` for Rust, `node`, `npm`, `npx`,
-  `pnpm`, `yarn` or `bun` for Node, `python`, `pip`, `uv` or `poetry` for Python. A process
+  `pnpm`, `yarn` or `bun` for Node, `python`, `pip`, `uv` or `poetry` for Python (versioned and alternative interpreters such as
+  `python3.12`, `pypy3`, `ipython` and the `py` launcher count too). A process
   counts when its command line names the project, its working directory is inside it, or a
   relative path in its arguments, or the value of `--manifest-path`, `--prefix`, `--cwd` or
   `-C`, `-w` or `--workspace`, resolves to a place inside it (`cd ~/code && node app/server.js`,
@@ -212,7 +218,8 @@ An artifact is skipped, with the reason in `--verbose` output, when:
   whose working directory cannot be read counts as busy, and the skip reason names the tool and
   pid (always on Windows, where only image names are visible)
 - a process has an open file in it (`lsof`, one listing for the whole pass, or `/proc` on Linux;
-  `skip_if_open: false` turns this off). Windows
+  `skip_if_open: false` turns this off). The listing is read again right before each removal
+  when it is older than 250ms. Windows
   cannot list handles, but refuses to rename a directory that has open files, so the rename is
   the check there
 
@@ -235,7 +242,8 @@ case on every OS, which only makes the dirty and idleness checks stricter.
 `auto` remove only until the artifacts are under `max_size`; `auto` under low-space pressure
 instead stops as soon as free space is back above the floors. `--dry-run` lists what would go;
 by default the five largest, with kind, project and idle days, and `--verbose` lists all of them
-and every skip. `status` shows the size of all artifacts and how much of it is recoverable now
+and every skip. When every artifact is skipped, the provider shows as skipped with the first
+reason. `status` shows the size of all artifacts and how much of it is recoverable now
 (the clean checks except the slow open-file probe).
 
 ```yaml
@@ -384,8 +392,8 @@ Safety rules:
 - `docker-volumes` never runs in `auto`, enabled or not.
 - `xcode-archives` never runs in `auto`, by name or by path (any provider on an Xcode `Archives` folder is skipped): archives hold App Store dSYMs and signed builds.
 - Protection is by exact location, never by a directory's name. A provider is skipped when its path is, lies inside, or contains one of the protected roots: `~/Downloads`, the opencode data, config, cache and home directories, Docker volumes and the `protected` list. A directory that is merely named `opencode`, `worktrees` or `Downloads` inside a cache (mise keeps `downloads/opencode`) protects nothing.
-- A provider whose path lies inside a git checkout is skipped. Below the path, `auto` looks for a git checkout or worktree by its marker, an entry named `.git` of any kind (a directory, or the file of a linked worktree whose `gitdir:` points into another repository's `worktrees/` directory; the file is never opened, so any `.git` file protects), down to 3 levels below the path. The scan lists directory names only: it never opens files, never follows symlinks, stops at the first hit and gives up after 5 seconds, 50000 directories or 2000000 entries. A checkout buried deeper than 3 levels is not detected by this scan. The skip reason names the checkout that was found. One protected entry skips the whole provider, including the sweep matches around it.
-- Anything the scan cannot verify is skipped, never cleaned: `skipped (too large to verify: <path>)` when a limit is hit, `skipped (cannot verify: <dir>)` for an unreadable directory. Both appear in the `auto` output and the run log, and when every provider ends up skipped `auto` says `nothing to clean`.
+- A provider whose path lies inside a git checkout is skipped. Below the path, `auto` looks for a git checkout or worktree by its marker, an entry named `.git` of any kind (a directory, or the file of a linked worktree whose `gitdir:` points into another repository's `worktrees/` directory; the file is never opened, so any `.git` file protects), down to 3 levels below the path. The scan lists directory names only: it never opens files, never follows symlinks, stops at the first hit and gives up after 5 seconds, 50000 directories or 2000000 entries. A checkout buried deeper than 3 levels is not detected by this scan. The skip reason names the checkout that was found. For a `dir-pattern` sweep the check is per match: a protected match is skipped and counted, and the clean matches around it still go. The sweep is skipped whole only when every match is protected. For any other provider one protected entry skips the whole provider.
+- Anything the scan cannot verify is skipped, never cleaned: `skipped (too large to verify: <path>)` when a limit is hit, `skipped (scan timed out, cannot verify: <path>)` when the 5 second scan runs out on a slow or network filesystem, `skipped (cannot verify: <dir>)` for an unreadable directory. Both appear in the `auto` output and the run log, and when every provider ends up skipped `auto` says `nothing to clean`.
 - Names still matter in two places: the path of a `dir-pattern` sweep of user directories (such as `sail-dirs`) is skipped when it has a `Downloads`, `opencode` or `worktrees` element, and the `status` listing of protected data finds `worktrees` directories near home.
 - Docker prune commands are cancelled after 10 minutes; command providers keep their `clean_timeout`.
 - Providers whose tool is busy are skipped, as in `clean`.
@@ -523,7 +531,7 @@ providers:
 | `skip_if_git_worktree` | `dir-pattern`: skip directories containing a `.git` entry (default `true`) |
 | `max_depth` | `project-artifacts`: directory levels searched below each root (default `4`, from 1 to 16; a negative value is an error) |
 | `pass_budget` | `project-artifacts`: time one clean pass may spend before the remaining candidates are skipped (default `30s`) |
-| `scan_budget` | `project-artifacts`: time allowed for finding projects per pass (default `10s`) |
+| `scan_budget` | `project-artifacts`: time allowed for finding projects per pass (default `10s`; units `ms`, `s`, `m`, `h`, `d`) |
 | `rust`, `node`, `python` | `project-artifacts`: per-kind switches (default `true`, `true`, `false`) |
 | `skip_if_dirty` | `project-artifacts`: skip projects with uncommitted changes (default `true`) |
 | `skip_prefixes` | Whole-entry providers never evict entries whose name starts with one of these prefixes; user values add to the built-in ones |

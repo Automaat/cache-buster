@@ -23,6 +23,7 @@ const (
 	defaultArtifactBudget     = 10 * time.Second
 	defaultArtifactPassBudget = 30 * time.Second
 	openSnapshotTTL           = 2 * time.Second
+	removalSnapshotTTL        = 250 * time.Millisecond
 	defaultArtifactDepth      = 4
 	openCheckTimeout          = time.Minute
 	scanCacheTTL              = 2 * time.Minute
@@ -200,6 +201,9 @@ func (p *ProjectArtifactsProvider) Clean(ctx context.Context, opts CleanOptions)
 	if !opts.DryRun {
 		result.Warnings = p.sweepTrash(scan, &out)
 	}
+	if noteRefused(scan, &out, &result) {
+		return finish(nil)
+	}
 	if scan.partial {
 		fmt.Fprintf(&out, "note: scan stopped at its %s budget, some projects may be missing\n", p.budget)
 	}
@@ -210,13 +214,17 @@ func (p *ProjectArtifactsProvider) Clean(ctx context.Context, opts CleanOptions)
 	remaining := scan.total()
 	var freed int64
 	started := p.now()
+	skip := func(c *candidate, reason string) {
+		pass.noteSkip(reason)
+		skipLine(&out, &result, c, reason)
+	}
 
 	for _, c := range pass.cands {
 		if err := ctx.Err(); err != nil {
 			return finish(err)
 		}
 		if reason := pass.cheapReason(c); reason != "" {
-			skipLine(&out, &result, c, reason)
+			skip(c, reason)
 			continue
 		}
 		if p.satisfied(opts, remaining-freed, freed) {
@@ -233,6 +241,9 @@ func (p *ProjectArtifactsProvider) Clean(ctx context.Context, opts CleanOptions)
 		if reason == "" {
 			reason = p.finalReason(ctx, c)
 		}
+		if reason == "" && !opts.DryRun {
+			reason = pass.openReasonWithin(ctx, c, removalSnapshotTTL)
+		}
 		if reason == "" {
 			if !opts.DryRun {
 				pass.procs, pass.procsErr = p.processes(ctx)
@@ -243,7 +254,7 @@ func (p *ProjectArtifactsProvider) Clean(ctx context.Context, opts CleanOptions)
 			return finish(err)
 		}
 		if reason != "" {
-			skipLine(&out, &result, c, reason)
+			skip(c, reason)
 			continue
 		}
 
@@ -252,35 +263,64 @@ func (p *ProjectArtifactsProvider) Clean(ctx context.Context, opts CleanOptions)
 			gone, partial, rmErr := p.removeCandidate(ctx, c)
 			switch {
 			case !gone:
-				skipLine(&out, &result, c, "cannot rename aside: "+rmErr.Error())
+				skip(c, "cannot rename aside: "+rmErr.Error())
 				continue
 			case rmErr != nil:
-				errs = append(errs, fmt.Errorf("remove %s: %w", c.art.Path, rmErr))
-				fmt.Fprintf(&out, "error: %s (%v)\n", c.art.Path, rmErr)
+				errs = append(errs, recordPartialRemoval(&out, &result, c, detail, partial, rmErr))
 				freed += partial.bytes
-				result.BytesCleaned += partial.bytes
-				result.FilesDeleted += partial.files
-				if partial.bytes > 0 || partial.files > 0 {
-					result.Entries = append(result.Entries, Entry{Path: c.art.Path, Size: partial.bytes, Detail: detail + ", partly removed"})
-				}
 				continue
 			}
 		}
-		verb := "removed"
-		if opts.DryRun {
-			verb = "would remove"
-		}
-		fmt.Fprintf(&out, "%s: %s (%s; %s)\n", verb, c.art.Path, size.FormatSize(c.art.Size), detail)
+		recordRemoved(&out, &result, c, detail, opts.DryRun)
 		freed += c.art.Size
-		result.BytesCleaned += c.art.Size
-		result.FilesDeleted += c.art.Files
-		result.Entries = append(result.Entries, Entry{Path: c.art.Path, Size: c.art.Size, Detail: detail})
 	}
 
+	if len(errs) == 0 {
+		result.SkipReason = pass.allSkippedReason(result.SkippedEntries)
+	}
 	return finish(errors.Join(errs...))
 }
 
 type removedPart struct{ bytes, files int64 }
+
+// recordRemoved books one artifact as removed, or as one a dry-run would remove.
+func recordRemoved(out *strings.Builder, result *CleanResult, c *candidate, detail string, dryRun bool) {
+	verb := "removed"
+	if dryRun {
+		verb = "would remove"
+	}
+	fmt.Fprintf(out, "%s: %s (%s; %s)\n", verb, c.art.Path, size.FormatSize(c.art.Size), detail)
+	result.BytesCleaned += c.art.Size
+	result.FilesDeleted += c.art.Files
+	result.Entries = append(result.Entries, Entry{Path: c.art.Path, Size: c.art.Size, Detail: detail})
+}
+
+// recordPartialRemoval books what a failed delete did remove and returns the
+// error to report.
+func recordPartialRemoval(out *strings.Builder, result *CleanResult, c *candidate, detail string, partial removedPart, rmErr error) error {
+	fmt.Fprintf(out, "error: %s (%v)\n", c.art.Path, rmErr)
+	result.BytesCleaned += partial.bytes
+	result.FilesDeleted += partial.files
+	if partial.bytes > 0 || partial.files > 0 {
+		result.Entries = append(result.Entries, Entry{Path: c.art.Path, Size: partial.bytes, Detail: detail + ", partly removed"})
+	}
+	return fmt.Errorf("remove %s: %w", c.art.Path, rmErr)
+}
+
+// noteRefused reports the roots that were not scanned: as a warning beside
+// the roots that were, as the skip reason when no root was usable. It returns
+// true when nothing was scanned.
+func noteRefused(scan *artifactScan, out *strings.Builder, result *CleanResult) bool {
+	for _, refusal := range scan.refused {
+		fmt.Fprintf(out, "skip: root %s\n", refusal)
+		result.Warnings = append(result.Warnings, "root not scanned: "+refusal)
+	}
+	if len(scan.projects) > 0 || len(scan.refused) == 0 {
+		return false
+	}
+	result.SkipReason = "no usable root: " + strings.Join(scan.refused, "; ")
+	return true
+}
 
 // removeCandidate renames the artifact aside and deletes it. When the delete
 // fails after the rename, partial says how much did go, measured from what is
@@ -318,11 +358,29 @@ type pass struct {
 	procsErr error
 	dirty    map[string]string
 
-	cands    []*candidate
-	dryRun   bool
-	openSnap map[string]bool
-	openErr  error
-	openAt   time.Time
+	cands     []*candidate
+	firstSkip string
+	dryRun    bool
+	openSnap  map[string]bool
+	openErr   error
+	openAt    time.Time
+}
+
+// noteSkip remembers the first reason an artifact was skipped.
+func (ps *pass) noteSkip(reason string) {
+	if ps.firstSkip == "" {
+		ps.firstSkip = reason
+	}
+}
+
+// allSkippedReason is the skip reason of a pass that left every candidate
+// alone, so the concise output says why instead of only counting skips. It is
+// empty when anything was removed or the pass ended before reaching them all.
+func (ps *pass) allSkippedReason(skipped int) string {
+	if len(ps.cands) == 0 || skipped != len(ps.cands) {
+		return ""
+	}
+	return fmt.Sprintf("all %d artifacts skipped, first: %s", len(ps.cands), ps.firstSkip)
 }
 
 // openReason runs the slow open-file probe. Windows cannot list handles, but
@@ -330,6 +388,12 @@ type pass struct {
 // follows is the check there. One listing of open files answers for every
 // candidate and is reused for openSnapshotTTL.
 func (ps *pass) openReason(ctx context.Context, c *candidate) string {
+	return ps.openReasonWithin(ctx, c, openSnapshotTTL)
+}
+
+// openReasonWithin is openReason with a chosen limit on the age of the
+// listing it may reuse. The check right before a removal passes a short one.
+func (ps *pass) openReasonWithin(ctx context.Context, c *candidate, maxAge time.Duration) string {
 	p := ps.p
 	if !p.skipIfOpen {
 		return ""
@@ -339,12 +403,20 @@ func (ps *pass) openReason(ctx context.Context, c *candidate) string {
 		err  error
 	)
 	if p.openMany != nil {
-		open, err = ps.openInSnapshot(ctx, c.art.Path)
+		open, err = ps.openInSnapshot(ctx, c.art.Path, maxAge)
 	} else {
 		probeCtx, cancel := context.WithTimeout(ctx, openCheckTimeout)
 		defer cancel()
 		open, err = p.openCheck(probeCtx, c.art.Path)
 	}
+	return openVerdict(open, err)
+}
+
+// openVerdict turns an open-file answer into a skip reason. Where handles
+// cannot be listed (Windows) the probe is no check at all: the rename-aside
+// that follows is, because Windows refuses to rename a directory holding open
+// files, and the process table is read again just before it.
+func openVerdict(open bool, err error) string {
 	switch {
 	case errors.Is(err, osshim.ErrOpenFilesUnsupported):
 		return ""
@@ -356,9 +428,9 @@ func (ps *pass) openReason(ctx context.Context, c *candidate) string {
 	return ""
 }
 
-func (ps *pass) openInSnapshot(ctx context.Context, path string) (bool, error) {
+func (ps *pass) openInSnapshot(ctx context.Context, path string, maxAge time.Duration) (bool, error) {
 	p := ps.p
-	if ps.openAt.IsZero() || (!ps.dryRun && p.now().Sub(ps.openAt) > openSnapshotTTL) {
+	if ps.openAt.IsZero() || (!ps.dryRun && p.now().Sub(ps.openAt) > maxAge) {
 		seen := map[string]bool{}
 		var dirs []string
 		for _, c := range ps.cands {
@@ -389,6 +461,15 @@ func (p *ProjectArtifactsProvider) finalReason(ctx context.Context, c *candidate
 		return "recheck failed: " + err.Error()
 	}
 	proj := c.proj
+	if proj.gitDir != "" {
+		gitTime, gitErr := gitActivity(proj.gitDir)
+		switch {
+		case gitErr != nil:
+			return "recheck failed: " + gitErr.Error()
+		case gitTime.After(proj.gitTime):
+			return "git activity during checks"
+		}
+	}
 	if below.After(proj.sampled) || (root.After(proj.sampled) && !root.Equal(proj.ownRoot)) {
 		return "modified during checks"
 	}

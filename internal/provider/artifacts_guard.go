@@ -122,7 +122,7 @@ func (p *ProjectArtifactsProvider) measureActivity(ctx context.Context, proj *pr
 		return
 	}
 
-	repoRoot, gitDir, err := findGit(proj.Dir, proj.root)
+	repoRoot, gitDir, err := findGit(proj.Dir, homeSpellings(p.home))
 	if err != nil {
 		proj.problem = "git state unreadable: " + err.Error()
 		return
@@ -136,16 +136,23 @@ func (p *ProjectArtifactsProvider) measureActivity(ctx context.Context, proj *pr
 		proj.problem = "git state unreadable: " + err.Error()
 		return
 	}
+	proj.gitDir, proj.gitTime = gitDir, gitTime
 	if gitTime.After(proj.newest) {
 		proj.newest = gitTime
 	}
 }
 
-// findGit walks up from dir to stop looking for a .git entry. repoRoot is
-// the directory holding it; gitDir is the directory with HEAD, which for a
-// linked worktree is the worktree's own admin directory.
-func findGit(dir, stop string) (repoRoot, gitDir string, err error) {
+// findGit walks up from dir to the filesystem root, so a scan root inside a
+// repository still finds it, and stops before any of homes: a dotfiles
+// repository in home must not make every project below it part of that
+// repository. repoRoot is the directory holding the .git entry; gitDir is the
+// directory with HEAD, which for a linked worktree is the worktree's own
+// admin directory.
+func findGit(dir string, homes []string) (repoRoot, gitDir string, err error) {
 	for cur := dir; ; cur = filepath.Dir(cur) {
+		if slices.ContainsFunc(homes, func(h string) bool { return foldPathText(filepath.Clean(h)) == foldPathText(cur) }) {
+			return "", "", nil
+		}
 		entry := gitEntry(cur)
 		if info, statErr := os.Lstat(entry); statErr == nil {
 			switch {
@@ -158,7 +165,7 @@ func findGit(dir, stop string) (repoRoot, gitDir string, err error) {
 				return cur, "", errors.New(".git is neither a directory nor a file")
 			}
 		}
-		if cur == stop || filepath.Dir(cur) == cur {
+		if filepath.Dir(cur) == cur {
 			return "", "", nil
 		}
 	}
@@ -553,10 +560,11 @@ func pathWithin(path, root string) bool {
 	return strings.HasPrefix(path, root)
 }
 
-var versionedTool = regexp.MustCompile(`^(python|pythonw|pip)[0-9.]*$`)
+var versionedTool = regexp.MustCompile(`^(python|pythonw|pip|pypy|ipython|py|pyw)[0-9.]*$`)
 
 // matchKind names the build tool of kind that a command line involves.
-// Versioned interpreters such as python3.12 or pip3.12 count for Python.
+// Versioned and alternative interpreters (python3.12, pip3.12, pypy3,
+// ipython, the py launcher) count for Python.
 func matchKind(commandLine string, kind artifactKind) string {
 	if tool := matchProcess(commandLine, kindTools[kind]); tool != "" {
 		return tool

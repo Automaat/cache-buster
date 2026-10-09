@@ -104,8 +104,12 @@ type project struct {
 	measured bool
 	problem  string
 	repoRoot string
-	newest   time.Time
-	sampled  time.Time
+	// gitDir and gitTime are the git admin directory and its activity time
+	// as first read, so the final check can tell new git activity.
+	gitDir  string
+	gitTime time.Time
+	newest  time.Time
+	sampled time.Time
 	// ownRoot is the project directory's mtime after our own removals could
 	// not restore it; that bump is not an edit.
 	ownRoot time.Time
@@ -115,6 +119,8 @@ type artifactScan struct {
 	projects []*project
 	trash    []string
 	partial  bool
+	// refused lists the configured roots that were not scanned and why.
+	refused []string
 }
 
 func (s *artifactScan) total() int64 {
@@ -149,8 +155,14 @@ func (p *ProjectArtifactsProvider) discover(ctx context.Context) (*artifactScan,
 
 	seen := map[string]bool{}
 	for _, root := range p.paths {
-		resolved, ok := p.usableRoot(root)
-		if !ok || seen[foldPathText(resolved)] {
+		resolved, refusal, ok := p.usableRoot(root)
+		if !ok {
+			if refusal != "" {
+				scan.refused = append(scan.refused, root+" "+refusal)
+			}
+			continue
+		}
+		if seen[foldPathText(resolved)] {
 			continue
 		}
 		seen[foldPathText(resolved)] = true
@@ -173,22 +185,29 @@ func (p *ProjectArtifactsProvider) discover(ctx context.Context) (*artifactScan,
 
 // usableRoot resolves a configured root and rejects any that is missing, not
 // a directory, the filesystem root, home or a parent of home: scanning those
-// would wander into places no project artifact lives.
-func (p *ProjectArtifactsProvider) usableRoot(root string) (string, bool) {
+// would wander into places no project artifact lives. A missing root is
+// rejected without a refusal text, since a root that is not there is normal;
+// every other rejection says why.
+func (p *ProjectArtifactsProvider) usableRoot(root string) (resolved, refusal string, ok bool) {
 	resolved, err := filepath.EvalSymlinks(root)
 	if err != nil {
-		return "", false
+		return "", "", false
 	}
 	info, err := os.Stat(resolved)
-	if err != nil || !info.IsDir() || filepath.Dir(resolved) == resolved {
-		return "", false
+	switch {
+	case err != nil:
+		return "", "", false
+	case !info.IsDir():
+		return "", "is not a directory", false
+	case filepath.Dir(resolved) == resolved:
+		return "", "is the filesystem root", false
 	}
 	for _, home := range homeSpellings(p.home) {
 		if pathWithin(home, resolved) {
-			return "", false
+			return "", "is home or a parent of home", false
 		}
 	}
-	return resolved, true
+	return resolved, "", true
 }
 
 func homeSpellings(home string) []string {

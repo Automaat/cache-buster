@@ -672,7 +672,32 @@ func TestProjectArtifacts_SnapshotAgeStartsWhenTheListingStarts(t *testing.T) {
 
 	h.clean(CleanOptions{Mode: CleanModeFull})
 
-	assert.Equal(t, 2, calls, "a listing that outlasts the TTL is not reused")
+	assert.Equal(t, 4, calls, "a listing that outlasts the TTL is not reused; each removal re-lists a stale one")
+}
+
+func TestProjectArtifacts_OpenFilesAreProbedAgainRightBeforeRemoval(t *testing.T) {
+	h := newArtifactHarness(t, nil)
+	nodeProject(t, h.path("a"), 10, 120*day)
+	clock := time.Now()
+	h.p.now = func() time.Time { return clock }
+	calls := 0
+	h.p.openMany = func(_ context.Context, dirs []string) (map[string]bool, error) {
+		calls++
+		clock = clock.Add(removalSnapshotTTL + time.Millisecond)
+		open := map[string]bool{}
+		if calls > 1 {
+			for _, d := range dirs {
+				open[d] = true
+			}
+		}
+		return open, nil
+	}
+
+	res := h.clean(CleanOptions{Mode: CleanModeFull})
+
+	assert.Equal(t, 2, calls)
+	assert.DirExists(t, h.path("a", "node_modules"), "a handle opened after the pass listing keeps it")
+	assert.Contains(t, res.Output, "has open files")
 }
 
 func TestProjectArtifacts_DryRunListsProcessesOnce(t *testing.T) {
@@ -709,4 +734,93 @@ func TestProjectArtifacts_DryRunListsOpenFilesOnceHoweverLongItTakes(t *testing.
 	h.clean(CleanOptions{DryRun: true, Mode: CleanModeFull})
 
 	assert.Equal(t, 1, calls)
+}
+
+func TestProjectArtifacts_GitActivityDuringChecksKeepsTheArtifact(t *testing.T) {
+	h := newArtifactHarness(t, nil)
+	rustProject(t, h.path("api"), 100, 90*day)
+	gitRepo(t, h.path("api"), 90*day)
+	h.p.git = func(context.Context, string, ...string) (string, error) {
+		now := time.Now()
+		writeFile(t, h.path("api", ".git", "logs", "HEAD"),
+			fmt.Sprintf("0 1 A <a@b.c> %d +0000\tcommit: late\n", now.Unix()))
+		return "", nil
+	}
+
+	res := h.clean(CleanOptions{Mode: CleanModeFull})
+
+	assert.DirExists(t, h.path("api", "target"))
+	assert.Contains(t, res.Output, "git activity during checks")
+}
+
+func TestProjectArtifacts_SubSecondScanBudgetIsAccepted(t *testing.T) {
+	h := newArtifactHarness(t, func(c *config.Provider) { c.ScanBudget = "1ms" })
+	nodeProject(t, h.path("web"), 10, 90*day)
+
+	assert.Equal(t, time.Millisecond, h.p.budget)
+	h.p.now = func() time.Time { return time.Now().Add(-time.Hour) }
+	res := h.clean(CleanOptions{Mode: CleanModeFull})
+
+	assert.Empty(t, res.Entries)
+	assert.Contains(t, res.Output, "budget")
+}
+
+func TestProjectArtifacts_AlternativePythonInterpretersCountAsPython(t *testing.T) {
+	for _, line := range []string{"/usr/bin/pypy3 app.py", "ipython", "py -3 build.py", "C:\\Python\\py.exe -m pip", "pypy3.10 x.py", "/opt/bin/ipython3"} {
+		assert.NotEmpty(t, matchKind(line, kindPython), line)
+	}
+	assert.Empty(t, matchKind("pyramid serve", kindPython))
+	assert.Empty(t, matchKind("/usr/bin/pyenv versions", kindPython))
+}
+
+func TestProjectArtifacts_RefusedRootIsExplained(t *testing.T) {
+	h := newArtifactHarness(t, nil)
+	home := filepath.Join(h.root, "home")
+	require.NoError(t, os.MkdirAll(home, 0o750))
+	h.p.home = home
+	h.p.paths = []string{home}
+
+	res := h.clean(CleanOptions{DryRun: true, Mode: CleanModeFull})
+
+	assert.Contains(t, res.SkipReason, "no usable root")
+	assert.Contains(t, res.SkipReason, "is home or a parent of home")
+	assert.Contains(t, res.Output, "skip: root "+home)
+}
+
+func TestProjectArtifacts_RefusedRootBesideAGoodRootWarns(t *testing.T) {
+	h := newArtifactHarness(t, nil)
+	nodeProject(t, h.path("web"), 10, 90*day)
+	home := filepath.Join(t.TempDir(), "home")
+	require.NoError(t, os.MkdirAll(home, 0o750))
+	h.p.home = home
+	h.p.paths = []string{home, h.root}
+
+	res := h.clean(CleanOptions{DryRun: true, Mode: CleanModeFull})
+
+	assert.Empty(t, res.SkipReason)
+	assert.Len(t, res.Entries, 1)
+	require.Len(t, res.Warnings, 1)
+	assert.Contains(t, res.Warnings[0], "root not scanned")
+}
+
+func TestProjectArtifacts_EverythingSkippedSaysWhy(t *testing.T) {
+	h := newArtifactHarness(t, nil)
+	nodeProject(t, h.path("web"), 10, 1*day)
+	nodeProject(t, h.path("api"), 10, 1*day)
+
+	res := h.clean(CleanOptions{Mode: CleanModeFull})
+
+	assert.Empty(t, res.Entries)
+	assert.Contains(t, res.SkipReason, "all 2 artifacts skipped, first: project active")
+}
+
+func TestProjectArtifacts_SomeSkippedIsNotASkippedProvider(t *testing.T) {
+	h := newArtifactHarness(t, nil)
+	nodeProject(t, h.path("web"), 10, 1*day)
+	nodeProject(t, h.path("api"), 10, 90*day)
+
+	res := h.clean(CleanOptions{Mode: CleanModeFull})
+
+	assert.Len(t, res.Entries, 1)
+	assert.Empty(t, res.SkipReason)
 }

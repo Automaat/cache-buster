@@ -44,6 +44,7 @@ const (
 	markerTooLarge
 	markerUnreadable
 	markerCancelled
+	markerTimedOut
 )
 
 type markerResult struct {
@@ -145,11 +146,12 @@ func listDir(ctx, parent context.Context, dir string, budget, dirBudget int, wan
 	}
 }
 
-// ctxOutcome tells the scan's own timeout, a budget overrun, from a caller
-// that cancelled or ran out of time.
+// ctxOutcome tells the scan's own timeout from a caller that cancelled or
+// ran out of time. A timeout says the filesystem was slow, not that the tree
+// is large.
 func ctxOutcome(parent context.Context) markerOutcome {
 	if parent.Err() != nil {
 		return markerCancelled
 	}
-	return markerTooLarge
+	return markerTimedOut
 }

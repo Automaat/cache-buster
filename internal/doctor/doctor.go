@@ -456,6 +456,14 @@ func configFindings(in Input) []Finding {
 
 	conflicted := make(map[string]bool)
 	for _, c := range in.Conflicts {
+		if c.Incomplete {
+			out = append(out, Finding{
+				Area: "config", Level: Warn,
+				Message: "protection check incomplete: " + c.Reason,
+				Hint:    "run doctor again to verify the remaining providers",
+			})
+			continue
+		}
 		conflicted[c.Provider] = true
 		out = append(out, Finding{
 			Area: "config", Level: Warn,

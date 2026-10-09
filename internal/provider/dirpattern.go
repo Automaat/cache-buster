@@ -32,8 +32,12 @@ type DirPatternProvider struct {
 	protected []string
 	// keep holds directories a match must neither equal nor contain, so a
 	// sweep never removes the temp dir the process itself runs in.
-	keep []string
+	keep  []string
+	guard func(path string) string
 }
+
+// SetPathGuard implements PathGuarded.
+func (p *DirPatternProvider) SetPathGuard(guard func(path string) string) { p.guard = guard }
 
 // NewDirPatternProvider creates a provider that removes stale directories matching cfg.Paths.
 func NewDirPatternProvider(name string, cfg config.Provider) (*DirPatternProvider, error) {
@@ -220,6 +224,11 @@ func (f *freedLinks) bytesFor(sc dirScan) int64 {
 func (p *DirPatternProvider) evaluate(ctx context.Context, dir string) (sc dirScan, skipReason string) {
 	if p.isProtected(dir) || p.isProtected(resolveParent(dir)) {
 		return sc, "protected path"
+	}
+	if p.guard != nil {
+		if reason := p.guard(dir); reason != "" {
+			return sc, reason
+		}
 	}
 
 	if p.containsKept(dir) || p.containsKept(resolveParent(dir)) {

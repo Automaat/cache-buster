@@ -4,7 +4,8 @@ package osshim
 
 import "context"
 
-// OpenFilesUnder always fails closed on Windows, like HasOpenFiles.
+// OpenFilesUnder always returns ErrOpenFilesUnsupported on Windows, like
+// HasOpenFiles.
 func OpenFilesUnder(context.Context, []string) (map[string]bool, error) {
 	return nil, ErrOpenFilesUnsupported
 }
