@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 )
 
 const configFile = "config.yaml"
@@ -38,9 +39,9 @@ func PendingConfig(home string) *Pending {
 func (p Pending) Step() string {
 	move := func(src, dst string) string {
 		if runtime.GOOS == "windows" {
-			return fmt.Sprintf("Move-Item -LiteralPath %q -Destination %q", src, dst)
+			return fmt.Sprintf("Move-Item -LiteralPath %s -Destination %s", shellQuote(src), shellQuote(dst))
 		}
-		return fmt.Sprintf("mv %q %q", src, dst)
+		return fmt.Sprintf("mv %s %s", shellQuote(src), shellQuote(dst))
 	}
 	info, err := os.Lstat(p.New)
 	switch {
@@ -68,4 +69,15 @@ func freeName(path string) string {
 		candidate = fmt.Sprintf("%s.%d", path, i)
 	}
 	return candidate
+}
+
+// shellQuote single-quotes s for POSIX shells and PowerShell, which both treat
+// the contents literally, so $ and backticks in a path survive a paste.
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", func() string {
+		if runtime.GOOS == "windows" {
+			return "''"
+		}
+		return `'\''`
+	}()) + "'"
 }

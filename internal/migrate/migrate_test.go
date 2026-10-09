@@ -539,3 +539,12 @@ func TestPendingStep_NeverReusesAnExistingBackupName(t *testing.T) {
 
 	assert.Contains(t, PendingConfig(home).Step(), dirs[0][1]+".bak.2")
 }
+
+func TestPendingStep_QuotesPathsLiterally(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX quoting")
+	}
+	p := Pending{Old: "/h/$HOME/it's/old", New: "/h/`x`/new"}
+
+	assert.Equal(t, `mv '/h/$HOME/it'\''s/old' '/h/`+"`x`"+`/new'`, p.Step())
+}

@@ -36,7 +36,7 @@ func BeforeCommand(cmd *cobra.Command) error {
 		migrate.Resolved(home, pendingKey)
 		return nil
 	}
-	msg := fmt.Sprintf("the legacy config %s was not migrated to %s, so defaults would ignore your settings; run: %s",
+	msg := fmt.Sprintf("the legacy config %s was not migrated to %s, so defaults would ignore your settings; run: %s (on a permission error, make both directories writable first)",
 		pending.Old, pending.New, pending.Step())
 	first := migrate.ShouldReport(home, pendingKey, msg)
 	if !isDestructive(cmd) {
