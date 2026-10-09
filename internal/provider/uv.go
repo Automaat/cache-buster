@@ -150,7 +150,7 @@ func (p *UVProvider) Clean(ctx context.Context, opts CleanOptions) (CleanResult,
 		}, nil
 	}
 
-	res, err := runMeasuredCleanEnv(ctx, p.name, append([]string{bin}, args...), p.childEnv(), p.CurrentSize, p.timeout)
+	res, err := runMeasuredCleanEnv(ctx, p.name, uvCommand(bin, args), p.childEnv(), p.CurrentSize, p.timeout)
 	if err != nil {
 		if ctx.Err() != nil {
 			return CleanResult{Output: res.Output}, ctx.Err()
@@ -205,3 +205,9 @@ func (p *UVProvider) guardReason() string {
 }
 
 var _ ProtectionAware = (*UVProvider)(nil)
+
+// uvCommand ignores uv config files: a no-cache or cache-dir setting there
+// would send uv to a directory other than the one bilgie measured.
+func uvCommand(bin string, args []string) []string {
+	return append(append([]string{bin}, args...), "--no-config")
+}

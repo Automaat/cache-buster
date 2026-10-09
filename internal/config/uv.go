@@ -58,7 +58,10 @@ func looksLikeGlob(path string) bool {
 
 func pathIsDir(path string) bool {
 	info, err := os.Stat(path)
-	return err == nil && info.IsDir()
+	if err != nil {
+		return false
+	}
+	return info.IsDir()
 }
 
 func isDefaultUVDir(dir string) bool {

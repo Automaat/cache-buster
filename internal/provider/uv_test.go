@@ -72,7 +72,7 @@ func TestUVProvider_SmartRunsPruneOnce(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Empty(t, res.SkipReason)
-	assert.Equal(t, []string{"cache prune\tUV_CACHE_DIR=" + dir + "\tUV_NO_CACHE="}, logLines(t, log))
+	assert.Equal(t, []string{"cache prune --no-config\tUV_CACHE_DIR=" + dir + "\tUV_NO_CACHE="}, logLines(t, log))
 	assert.Equal(t, int64(128), res.BytesCleaned, "freed bytes come from the size before and after")
 	assert.Contains(t, res.Output, "Pruning cache")
 	assert.NoFileExists(t, files[0])
@@ -91,7 +91,7 @@ func TestUVProvider_FullRunsCleanOnce(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Empty(t, res.SkipReason)
-	assert.Equal(t, []string{"cache clean\tUV_CACHE_DIR=" + dir + "\tUV_NO_CACHE="}, logLines(t, log))
+	assert.Equal(t, []string{"cache clean --no-config\tUV_CACHE_DIR=" + dir + "\tUV_NO_CACHE="}, logLines(t, log))
 	requireAllExist(t, files)
 }
 
@@ -108,8 +108,8 @@ func TestUVProvider_CleanCmdOverridesFullMode(t *testing.T) {
 
 	lines := logLines(t, log)
 	require.Len(t, lines, 2)
-	assert.True(t, strings.HasPrefix(lines[0], "cache prune --ci\t"), lines[0])
-	assert.True(t, strings.HasPrefix(lines[1], "cache prune --ci\t"), "smart keeps the configured prune flags: "+lines[1])
+	assert.True(t, strings.HasPrefix(lines[0], "cache prune --ci --no-config\t"), lines[0])
+	assert.True(t, strings.HasPrefix(lines[1], "cache prune --ci --no-config\t"), "smart keeps the configured prune flags: "+lines[1])
 }
 
 func TestUVProvider_DryRunReportsCommandAndSize(t *testing.T) {
@@ -247,7 +247,7 @@ func TestUVProvider_ChildEnvPinsCacheDir(t *testing.T) {
 
 	_, err := p.Clean(context.Background(), CleanOptions{Mode: CleanModeSmart})
 	require.NoError(t, err)
-	assert.Equal(t, []string{"cache prune\tUV_CACHE_DIR=" + dir + "\tUV_NO_CACHE="}, logLines(t, log))
+	assert.Equal(t, []string{"cache prune --no-config\tUV_CACHE_DIR=" + dir + "\tUV_NO_CACHE="}, logLines(t, log))
 }
 
 // defaultUVPaths is the config an untouched install holds.
@@ -284,7 +284,7 @@ func TestUVProvider_UVCacheDirHonored(t *testing.T) {
 
 	_, err = p.Clean(context.Background(), CleanOptions{Mode: CleanModeSmart})
 	require.NoError(t, err)
-	assert.Equal(t, []string{"cache prune\tUV_CACHE_DIR=" + custom + "\tUV_NO_CACHE="}, logLines(t, log))
+	assert.Equal(t, []string{"cache prune --no-config\tUV_CACHE_DIR=" + custom + "\tUV_NO_CACHE="}, logLines(t, log))
 	assert.FileExists(t, filepath.Join(custom, "blob"))
 }
 
@@ -419,7 +419,7 @@ func TestUVProvider_EnvDirWithGlobCharactersStaysLiteral(t *testing.T) {
 
 			_, err := p.Clean(context.Background(), CleanOptions{Mode: CleanModeFull})
 			require.NoError(t, err)
-			assert.Equal(t, []string{"cache clean\tUV_CACHE_DIR=" + literal + "\tUV_NO_CACHE="}, logLines(t, log))
+			assert.Equal(t, []string{"cache clean --no-config\tUV_CACHE_DIR=" + literal + "\tUV_NO_CACHE="}, logLines(t, log))
 			assert.FileExists(t, filepath.Join(sibling, "blob"))
 		})
 	}
@@ -478,7 +478,7 @@ func TestNewUVProvider_ExplicitGlobNamedDirIsLiteral(t *testing.T) {
 	assert.Equal(t, []string{literal}, p.Paths())
 	_, err := p.Clean(context.Background(), CleanOptions{Mode: CleanModeFull})
 	require.NoError(t, err)
-	assert.Equal(t, []string{"cache clean\tUV_CACHE_DIR=" + literal + "\tUV_NO_CACHE="}, logLines(t, log))
+	assert.Equal(t, []string{"cache clean --no-config\tUV_CACHE_DIR=" + literal + "\tUV_NO_CACHE="}, logLines(t, log))
 	assert.FileExists(t, filepath.Join(sibling, "blob"))
 }
 
