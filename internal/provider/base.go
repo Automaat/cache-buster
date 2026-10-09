@@ -25,6 +25,11 @@ func NewBaseProvider(name string, cfg config.Provider) (*BaseProvider, error) {
 	if err != nil {
 		return nil, fmt.Errorf("expand paths: %w", err)
 	}
+	for _, path := range paths {
+		if !config.IsAbsPortable(path) {
+			return nil, fmt.Errorf("path %q must be absolute or start with ~/", path)
+		}
+	}
 	return newBaseProviderWithPaths(name, cfg, paths)
 }
 

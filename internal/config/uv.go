@@ -19,10 +19,14 @@ func ResolveUVCacheDir(paths []string) (string, error) {
 	if len(paths) != 1 || strings.TrimSpace(paths[0]) == "" {
 		return "", fmt.Errorf("paths must name exactly one uv cache directory, got %d", countNonBlank(paths))
 	}
-	dir, err := ExpandTilde(paths[0])
+	if err := RequireAbsoluteOrTilde(paths[0]); err != nil {
+		return "", err
+	}
+	expanded, err := ExpandTilde(paths[0])
 	if err != nil {
 		return "", fmt.Errorf("expand paths: %w", err)
 	}
+	dir := filepath.Clean(expanded)
 	if !isDefaultUVDir(dir) {
 		if looksLikeGlob(dir) && !pathIsDir(dir) {
 			return "", fmt.Errorf("paths is a literal directory, not a glob pattern, and %q does not exist", dir)
@@ -100,4 +104,14 @@ func ProviderPathsExist(name string, p Provider) bool {
 		return statErr == nil
 	}
 	return PathsExist(p.Paths)
+}
+
+// RequireAbsoluteOrTilde rejects a path that is neither absolute nor
+// home-relative: it would resolve against whatever directory bilgie runs in,
+// and the protected-path checks compare the spelled path.
+func RequireAbsoluteOrTilde(path string) error {
+	if IsAbsPortable(path) || path == "~" || strings.HasPrefix(path, "~/") || strings.HasPrefix(path, `~\`) {
+		return nil
+	}
+	return fmt.Errorf("path %q must be absolute or start with ~/", path)
 }

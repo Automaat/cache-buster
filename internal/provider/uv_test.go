@@ -16,7 +16,7 @@ import (
 // uvCache builds a uv-shaped cache: a wheels pointer that names an archive.
 func uvCache(t *testing.T) (dir string, files []string) {
 	t.Helper()
-	dir = t.TempDir()
+	dir = filepath.Clean(t.TempDir())
 	archive := filepath.Join(dir, "archive-v0", "abc")
 	require.NoError(t, os.MkdirAll(archive, 0o700))
 	require.NoError(t, os.MkdirAll(filepath.Join(dir, "wheels-v5"), 0o700))
@@ -328,7 +328,7 @@ func TestUVProvider_ExplicitPathBeatsEnv(t *testing.T) {
 	isolateHome(t)
 	t.Setenv("UV_CACHE_DIR", t.TempDir())
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
-	explicit := t.TempDir()
+	explicit := filepath.Clean(t.TempDir())
 
 	p := newUVProvider(t, config.Provider{Paths: []string{explicit}})
 	assert.Equal(t, []string{explicit}, p.Paths())
@@ -499,4 +499,80 @@ func TestUVProvider_DryRunEmptyCacheReportsZero(t *testing.T) {
 	res, err := p.Clean(context.Background(), CleanOptions{DryRun: true})
 	require.NoError(t, err)
 	assert.Contains(t, res.Output, "cache 0 B")
+}
+
+func TestNewUVProvider_RelativePathsAreErrors(t *testing.T) {
+	home := isolateHome(t)
+	t.Chdir(home)
+	require.NoError(t, os.MkdirAll(filepath.Join(home, "Documents"), 0o700))
+
+	for _, rel := range []string{".", "..", "Documents", "./Documents", "a/../Documents"} {
+		t.Run(rel, func(t *testing.T) {
+			p, err := NewUVProvider("uv", config.Provider{Enabled: true, MaxSize: "1G", Paths: []string{rel}})
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "must be absolute or start with ~/")
+			assert.Nil(t, p)
+
+			loaded, err := NewProvider("uv", config.Provider{Enabled: true, MaxSize: "1G", Paths: []string{rel}})
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "provider uv: path")
+			assert.Nil(t, loaded)
+		})
+	}
+}
+
+func TestUVProvider_UncleanSpellingsStillHitProtectedRoots(t *testing.T) {
+	root := filepath.Clean(t.TempDir())
+	protected := filepath.Join(root, "precious")
+	require.NoError(t, os.MkdirAll(filepath.Join(protected, "uv"), 0o700))
+	installFakeTool(t, "uv", fakeToolSpec{})
+
+	for name, spelled := range map[string]string{
+		"dotdot":   filepath.Join(root, "other", "..", "precious", "uv"),
+		"trailing": filepath.Join(protected, "uv") + string(filepath.Separator) + ".",
+		"double":   root + string(filepath.Separator) + string(filepath.Separator) + "precious" + string(filepath.Separator) + "uv",
+	} {
+		t.Run(name, func(t *testing.T) {
+			p := newUVProvider(t, config.Provider{Paths: []string{spelled}})
+			p.SetProtected([]string{protected})
+
+			res, err := p.Clean(context.Background(), CleanOptions{Mode: CleanModeFull})
+			require.NoError(t, err)
+			assert.Contains(t, res.SkipReason, "protected path")
+		})
+	}
+}
+
+func TestProviders_RelativePathsAreRejected(t *testing.T) {
+	home := isolateHome(t)
+	t.Chdir(home)
+
+	for _, name := range []string{"mise", "rustup", "docker", "go-build", "gh", "npm", "huggingface", "jetbrains", "cargo", "yarn", "docker-volumes"} {
+		t.Run(name, func(t *testing.T) {
+			p, err := NewProvider(name, config.Provider{Enabled: true, MaxSize: "1G", Paths: []string{"."}, CleanCmd: defaultCmdFor(name)})
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "must be absolute or start with ~/")
+			assert.Nil(t, p)
+		})
+	}
+}
+
+func defaultCmdFor(name string) string {
+	if name == "npm" || name == "go-build" || name == "docker" || name == "docker-volumes" {
+		return name + " cache clean"
+	}
+	return ""
+}
+
+func TestPatternProviders_RelativePathsAreRejected(t *testing.T) {
+	home := isolateHome(t)
+	t.Chdir(home)
+
+	_, err := NewProvider("sweep", config.Provider{Enabled: true, Type: config.TypeDirPattern, Paths: []string{"rel/dirs-*"}})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "must be absolute or start with ~/")
+
+	_, err = NewProvider("proj", config.Provider{Enabled: true, Type: config.TypeProjectArtifacts, Paths: []string{"."}})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "must be absolute or start with ~/")
 }
