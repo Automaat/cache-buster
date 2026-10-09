@@ -12,6 +12,7 @@ import (
 
 	"github.com/smykla-skalski/bilgie/internal/auto"
 	"github.com/smykla-skalski/bilgie/internal/config"
+	"github.com/smykla-skalski/bilgie/internal/osshim"
 	"github.com/smykla-skalski/bilgie/internal/provider"
 	"github.com/smykla-skalski/bilgie/pkg/size"
 	"github.com/spf13/cobra"
@@ -86,6 +87,8 @@ type autoEnv struct {
 	configDir   string
 	verbose     bool
 	lookPath    func(string) (string, error)
+	memory      auto.MemoryFunc
+	processes   auto.ProcessesFunc
 }
 
 func defaultAutoEnv() (autoEnv, error) {
@@ -106,6 +109,8 @@ func defaultAutoEnv() (autoEnv, error) {
 		newProvider: provider.NewProvider,
 		exec:        auto.ExecCommand,
 		notify:      auto.DefaultNotifier(auto.ExecCommand),
+		memory:      osshim.ReadMemory,
+		processes:   osshim.ProcessTable,
 		now:         time.Now,
 		lookPath:    exec.LookPath,
 		out:         os.Stdout,
@@ -253,7 +258,13 @@ func (e autoEnv) recordRun(ctx context.Context, cfg config.Auto, report auto.Rep
 		}
 	}
 	now := e.clock()
-	if err := auto.AppendRun(e.stateDir, auto.NewRunRecord(report, now, runErr, notified)); err != nil {
+	rec := auto.NewRunRecord(report, now, runErr, notified)
+	if e.memory != nil {
+		if mem, memErr := e.memory(ctx); memErr == nil {
+			rec.SwapUsedMiB = auto.SwapUsedMiB(mem)
+		}
+	}
+	if err := auto.AppendRun(e.stateDir, rec); err != nil {
 		fmt.Fprintf(e.out, "warning: record run: %v\n", err)
 	}
 	if preview || (runErr != nil && !errors.Is(runErr, context.DeadlineExceeded)) {

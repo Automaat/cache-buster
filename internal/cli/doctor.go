@@ -11,6 +11,7 @@ import (
 	"github.com/smykla-skalski/bilgie/internal/config"
 	"github.com/smykla-skalski/bilgie/internal/doctor"
 	"github.com/smykla-skalski/bilgie/internal/migrate"
+	"github.com/smykla-skalski/bilgie/internal/osshim"
 	"github.com/spf13/cobra"
 )
 
@@ -25,6 +26,7 @@ var DoctorCmd = &cobra.Command{
   last run   time, tier, bytes freed and errors from runs.jsonl
   free space current free space and its 7-day trend from the run history
   config     disabled providers, providers skipped on every recent run, protected-path conflicts
+  memory     swap in use against auto.swap_warn, with the largest process families when it is high
   notifier   whether the low-space notification program exists
 
 Exits non-zero when a finding needs attention; each one says what to do.`,
@@ -84,12 +86,38 @@ func runDoctorWithLoader(ctx context.Context, loader *config.Loader, env autoEnv
 		in.LoadErrors = auto.LoadErrors(cfg, env.newProvider)
 	}
 
+	fillMemory(ctx, &in, env)
+
 	rep := doctor.Diagnose(in)
 	rep.Write(env.out)
 	if n := rep.Attention(); n > 0 {
 		return fmt.Errorf("doctor: %d finding(s) need attention", n)
 	}
 	return nil
+}
+
+// fillMemory samples swap and, only while it is above auto.swap_warn, the
+// process table that names the largest families.
+func fillMemory(ctx context.Context, in *doctor.Input, env autoEnv) {
+	if env.memory == nil {
+		return
+	}
+	in.Mem, in.MemErr = env.memory(ctx)
+	if in.MemErr != nil {
+		return
+	}
+	in.MemRead = true
+	if in.Cfg == nil || env.processes == nil {
+		return
+	}
+	limits, err := in.Cfg.Auto.Limits()
+	if err != nil || !auto.SwapHigh(in.Mem, limits.SwapWarn) {
+		return
+	}
+	var procs []osshim.Process
+	if procs, in.FamiliesErr = env.processes(ctx); in.FamiliesErr == nil {
+		in.Families = auto.ProcessFamilies(procs)
+	}
 }
 
 func loadValidConfig(loader *config.Loader) (*config.Config, error) {

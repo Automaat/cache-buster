@@ -379,6 +379,10 @@ Thresholds:
 - Notifications: at most one per tier per `auto.notify_cooldown` (default 3h), unless free space
   dropped by more than 10 GiB since that tier's last notification. A tier not yet notified (a worse
   one) is always sent.
+- Swap: every tick reads swap in use and keeps it in `tick.json`. While it stays above
+  `auto.swap_warn` (default 8G, `0` disables) one desktop notification goes out per
+  `auto.notify_cooldown`; it points to `bilgie doctor`. Reading swap never delays the free-space check,
+  and bilgie only reports: it never kills a process.
 - State files: `tick.json` and `pass.json` that are corrupt, unreadable or not regular files are moved
   aside to `<name>.bad` with a warning, and the tick carries on; `bilgie doctor` reports them. An
   interrupted or failed pass and the forced first-run dry-run do not start a cooldown.
@@ -437,7 +441,9 @@ files and the first-run marker, and succeeds when nothing is installed; on Linux
 the systemd units and the crontab line.
 
 Every run appends one JSON line to `~/.local/state/bilgie/runs.jsonl`: time, tier, free space
-before and after, bytes freed per provider, and skipped providers with their reasons. The log rotates
+before and after, swap in use (`swap_used_mib`, left out when it could not be read), bytes freed per provider,
+and skipped providers with their reasons. The history table shows swap in its SWAP column, so the trend is
+visible next to free space. The log rotates
 to `runs.jsonl.1` at 8 MiB.
 
 ```bash
@@ -474,7 +480,7 @@ the cadence (tick and full-pass intervals), the last tick (it must be recent for
 means the installed agent is still the old 30-minute `auto` one) and the next expected full pass, the last run (time, tier, bytes freed, errors from `runs.jsonl`) is recent for `auto.interval`,
 free space is above the floors, the 7-day free-space trend from the run history, config problems
 (disabled providers, providers skipped on each of the last runs for a reason other than
-"within limit", providers on protected paths, providers whose config does not load) and whether the notifier program exists.
+"within limit", providers on protected paths, providers whose config does not load), swap and memory, and whether the notifier program exists.
 It exits non-zero when a finding needs attention; each one carries a "what to do" line.
 
 ```text
@@ -492,13 +498,24 @@ $ bilgie doctor
        what to do: run: bilgie auto; run: bilgie status for large unmanaged directories
 [warn] trend: free space -41 GiB over 6d (65 GiB -> 24 GiB, 80 run(s)); min_free is reached in about 8 day(s) at this rate
        what to do: find what grows: bilgie status shows large unmanaged directories
+[warn] memory: swap 14 GiB of 16 GiB used, memory free 3% (warning above 8.0 GiB)
+       largest process families:
+         112 x node /Users/me/dev/app/worker.js (40 orphaned)
+         9 x /usr/bin/python3 stale.py
+       what to do: quit or restart the largest memory users; bilgie only reports and never kills processes. Swap grows on the same disk as free space
 [note] config: 3 provider(s) disabled: docker-volumes, sail-dirs, xcode-archives
 [warn] config: gradle was skipped on each of the last 5 runs: unavailable
        what to do: install the tool gradle needs, or set providers.gradle.enabled: false
 [ok  ] notifier: osascript is available
 
-5 finding(s) need attention
+6 finding(s) need attention
 ```
+
+Swap and memory come from `sysctl vm.swapusage` and `memory_pressure` on macOS, `/proc/meminfo` on
+Linux and the commit charge on Windows (the part beyond physical memory counts as swap). When swap is above
+`auto.swap_warn`, the finding is a warning that names up to three process families: a command line repeated by at
+least 4 processes, or at least 3 orphans whose parent is PID 1. Command lines are cut to 60 characters. If the
+reading fails, doctor prints a note and carries on.
 
 ### config
 
@@ -566,7 +583,8 @@ auto:
   low_cooldown: 10m         # minimum gap between passes at the low tier
   critical_cooldown: 2m     # ... at the critical and emergency tiers
   forecast: 15m             # pass when the falling trend crosses the low threshold within this (0 disables)
-  notify_cooldown: 3h       # minimum gap between notifications of one tier
+  notify_cooldown: 3h       # minimum gap between notifications of one tier (also between swap warnings)
+  swap_warn: 8G             # warn when swap in use exceeds this (0 disables)
 ```
 
 A config that sets `min_free_pct: 15` keeps that value, but the percentage part is still limited by `min_free_cap` (100G by default): on a 2 TB volume the low threshold is 100G, not 300G. Raise `min_free_cap` to restore the old threshold.

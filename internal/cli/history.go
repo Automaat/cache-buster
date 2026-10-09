@@ -80,7 +80,7 @@ func runHistoryIn(out io.Writer, stateDir string, limit int, jsonOutput bool) er
 
 func writeHistoryTable(out io.Writer, runs []auto.RunRecord) {
 	w := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "TIME\tTIER\tFREE\tFREED\tCLEANED\tSKIPPED\tERRORS\tNOTES")
+	fmt.Fprintln(w, "TIME\tTIER\tFREE\tSWAP\tFREED\tCLEANED\tSKIPPED\tERRORS\tNOTES")
 	for _, r := range slices.Backward(runs) {
 		var cleaned, skipped, failed int
 		for _, p := range r.Providers {
@@ -93,12 +93,19 @@ func writeHistoryTable(out io.Writer, runs []auto.RunRecord) {
 				cleaned++
 			}
 		}
-		fmt.Fprintf(w, "%s\t%s\t%s -> %s\t%s\t%d\t%d\t%d\t%s\n",
+		fmt.Fprintf(w, "%s\t%s\t%s -> %s\t%s\t%s\t%d\t%d\t%d\t%s\n",
 			r.Time.Local().Format("2006-01-02 15:04"), r.Tier,
-			size.FormatSize(r.FreeBefore), size.FormatSize(r.FreeAfter),
+			size.FormatSize(r.FreeBefore), size.FormatSize(r.FreeAfter), swapCell(r.SwapUsedMiB),
 			size.FormatSize(r.FreedBytes), cleaned, skipped, failed, historyNotes(r))
 	}
 	_ = w.Flush()
+}
+
+func swapCell(mib int32) string {
+	if mib <= 0 {
+		return "-"
+	}
+	return size.FormatSize(int64(mib) << 20)
 }
 
 func historyNotes(r auto.RunRecord) string {
