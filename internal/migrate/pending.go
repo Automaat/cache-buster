@@ -33,14 +33,29 @@ func PendingConfig(home string) *Pending {
 	return &Pending{Old: pair[0], New: pair[1]}
 }
 
-// Step is the manual command that finishes the migration of the config.
+// Step is the manual command that finishes the migration of the config. A
+// file sitting at the new path is set aside first.
 func (p Pending) Step() string {
-	src, dst := p.Old, p.New
-	if pathExists(p.New) {
-		src, dst = filepath.Join(p.Old, configFile), filepath.Join(p.New, configFile)
+	move := func(src, dst string) string {
+		if runtime.GOOS == "windows" {
+			return fmt.Sprintf("Move-Item -LiteralPath %q -Destination %q", src, dst)
+		}
+		return fmt.Sprintf("mv %q %q", src, dst)
 	}
+	info, err := os.Lstat(p.New)
+	switch {
+	case err != nil:
+		return move(p.Old, p.New)
+	case info.IsDir():
+		return move(filepath.Join(p.Old, configFile), filepath.Join(p.New, configFile))
+	default:
+		return move(p.New, p.New+".bak") + sep() + move(p.Old, p.New)
+	}
+}
+
+func sep() string {
 	if runtime.GOOS == "windows" {
-		return fmt.Sprintf("Move-Item -LiteralPath %q -Destination %q", src, dst)
+		return "; "
 	}
-	return fmt.Sprintf("mv %q %q", src, dst)
+	return " && "
 }

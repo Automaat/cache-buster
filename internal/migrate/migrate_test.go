@@ -494,3 +494,16 @@ func TestMerge_FallsBackToARenameWithoutHardLinks(t *testing.T) {
 	assert.True(t, moved)
 	assert.Equal(t, "1", readFile(t, filepath.Join(newDir, "a")))
 }
+
+func TestPendingStep_SetsAsideAFileAtTheNewPath(t *testing.T) {
+	home := t.TempDir()
+	dirs := Dirs(home)
+	writeFile(t, filepath.Join(dirs[0][0], "config.yaml"), "x")
+	writeFile(t, dirs[0][1], "in the way")
+
+	step := PendingConfig(home).Step()
+
+	assert.Contains(t, step, dirs[0][1]+".bak")
+	assert.Contains(t, step, dirs[0][0])
+	assert.NotContains(t, step, "config.yaml")
+}
