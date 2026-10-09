@@ -32,7 +32,9 @@ func TestCoveredPaths_UVUsesTheResolvedLiteralDir(t *testing.T) {
 	t.Setenv("XDG_CACHE_HOME", "")
 	moved := filepath.Join(filepath.Clean(t.TempDir()), "cache[1]", "uv")
 	t.Setenv("UV_CACHE_DIR", moved)
-	cfg := &config.Config{Providers: map[string]config.Provider{"uv": config.DefaultProviders()["uv"]}}
+	uv := config.DefaultProviders()["uv"]
+	uv.Enabled = true
+	cfg := &config.Config{Providers: map[string]config.Provider{"uv": uv}}
 
 	assert.Equal(t, []string{moved}, CoveredPaths(cfg))
 }

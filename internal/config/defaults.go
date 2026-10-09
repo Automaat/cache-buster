@@ -164,7 +164,7 @@ func xcodeProviders() map[string]Provider {
 func otherProviders(p Platform) map[string]Provider {
 	return map[string]Provider{
 		"uv": {
-			Enabled: true,
+			Enabled: false,
 			Paths: perOS(p,
 				[]string{"~/.cache/uv"},
 				[]string{p.cache("uv")},

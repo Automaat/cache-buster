@@ -120,7 +120,7 @@ Providers are auto-detected — only tools installed on your system appear in th
 | yarn | 2G | smart: whole `v*/<package>` directories; full: `yarn cache clean` |
 | pnpm | 5G | smart: store files (content-addressed); full: `pnpm store prune` |
 | **Python** | | |
-| uv | 4G | smart: `uv cache prune`; full: `uv cache clean`; see [uv](#uv) |
+| uv | 4G | opt-in (`enabled: false`); smart: `uv cache prune`; full: `uv cache clean`; see [uv](#uv) |
 | pip | 3G | `pip cache purge` |
 | **Rust** | | |
 | cargo | 5G | `registry/cache` `.crate` files by age, whole `registry/src/<index>/<crate>`, `git/checkouts/*/*` and `git/db/*` directories; `registry/index` untouched |
@@ -607,6 +607,12 @@ Dot entries are ignored. In full mode providers with a `clean_cmd` run it.
 `uv` is a command-managed provider: uv decides what goes, bilgie never deletes a file in the uv
 cache. The `wheels-v*` pointer files reference `archive-v0/<id>`, so removing either side makes
 the next install fail with `failed to read directory .../archive-v0/<id>`.
+
+`uv` is off by default until a few safety follow-ups land. Enable it with `providers.uv.enabled: true`.
+The old behavior of trimming uv cache files by age is gone for good because it could corrupt the cache.
+A config that already sets `enabled: true` for `uv` (for example one written by `config init`) keeps it
+on; a config that omits `enabled` follows the new default (off). bilgie cannot tell a saved default
+from a deliberate choice, so set `enabled: false` to turn it off in an existing config.
 
 - Smart mode (and `auto`) runs `uv cache prune`, which drops entries nothing refers to.
 - Full mode runs `uv cache clean`.

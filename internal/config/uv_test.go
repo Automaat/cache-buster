@@ -41,7 +41,9 @@ func TestProviderPathsExist_UVEnvDirIsLiteral(t *testing.T) {
 
 	assert.True(t, ProviderPathsExist("uv", DefaultProviders()["uv"]))
 
-	cfg := &Config{Providers: map[string]Provider{"uv": DefaultProviders()["uv"]}}
+	enabledUV := DefaultProviders()["uv"]
+	enabledUV.Enabled = true
+	cfg := &Config{Providers: map[string]Provider{"uv": enabledUV}}
 	assert.Equal(t, []string{"uv"}, cfg.EnabledProviders())
 }
 
@@ -81,4 +83,35 @@ func TestResolveUVCacheDir_PatternSpelledPathIsRejectedOnlyWhenAbsent(t *testing
 	_, err = ResolveUVCacheDir([]string{filepath.Join(t.TempDir(), "a"), filepath.Join(t.TempDir(), "b")})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "exactly one uv cache directory")
+}
+
+func TestDefaultProviders_UVIsOptInOnEveryOS(t *testing.T) {
+	for _, p := range []Platform{macPlatform, linPlatform, winPlatform} {
+		uv, ok := DefaultProvidersFor(p)["uv"]
+		require.True(t, ok, p.OS)
+		assert.False(t, uv.Enabled, p.OS)
+		assert.Equal(t, "uv cache clean", uv.CleanCmd, p.OS)
+	}
+}
+
+func loadUVConfig(t *testing.T, body string) *Config {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	require.NoError(t, os.WriteFile(path, []byte(body), 0o600))
+	loader := NewLoader()
+	loader.SetConfigPath(path)
+	cfg, err := loader.Load()
+	require.NoError(t, err)
+	return cfg
+}
+
+func TestLoader_UVEnabledFlagMerge(t *testing.T) {
+	omitted := loadUVConfig(t, "version: \"1\"\nproviders:\n  uv:\n    max_size: 2G\n")
+	assert.False(t, omitted.Providers["uv"].Enabled, "an omitted enabled follows the new opt-in default")
+
+	explicitOn := loadUVConfig(t, "version: \"1\"\nproviders:\n  uv:\n    enabled: true\n")
+	assert.True(t, explicitOn.Providers["uv"].Enabled, "a saved enabled: true is kept")
+
+	explicitOff := loadUVConfig(t, "version: \"1\"\nproviders:\n  uv:\n    enabled: false\n")
+	assert.False(t, explicitOff.Providers["uv"].Enabled)
 }
