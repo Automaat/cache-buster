@@ -391,3 +391,13 @@ func TestHistoryProviders_AggregatesFreedBytesPerProvider(t *testing.T) {
 	require.NoError(t, runHistoryProvidersIn(&empty, t.TempDir(), 10, false))
 	assert.Contains(t, empty.String(), "No auto runs recorded")
 }
+
+func TestHistoryProviders_RunsWithoutProvidersPrintNoBareHeader(t *testing.T) {
+	stateDir := t.TempDir()
+	require.NoError(t, auto.AppendRun(stateDir, auto.RunRecord{Time: time.Now().Add(-time.Hour), Tier: "ok"}))
+
+	var out bytes.Buffer
+	require.NoError(t, runHistoryProvidersIn(&out, stateDir, 10, false))
+
+	assert.Equal(t, "No provider results in the last 1 run(s)\n", out.String())
+}

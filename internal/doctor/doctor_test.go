@@ -3,6 +3,7 @@ package doctor
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
@@ -284,11 +285,47 @@ func TestLastRunFailureIsNotMaskedByManualDryRun(t *testing.T) {
 func TestOnlyDryRunsWarnsOnceFirstRunIsDone(t *testing.T) {
 	in := healthy()
 	in.Runs = []auto.RunRecord{{Time: fixedNow.Add(-time.Minute), Tier: "low", DryRun: true}}
+	for _, f := range Diagnose(in).Findings {
+		assert.NotEqual(t, "schedule", f.Area, "a fresh forced first run is not a problem yet")
+	}
+
+	in.Runs[0].Time = fixedNow.Add(-2 * time.Hour)
 	assert.Equal(t, Warn, find(t, Diagnose(in), "schedule").Level)
 
 	in.FirstRunPending = true
 	for _, f := range Diagnose(in).Findings {
 		assert.NotEqual(t, "schedule", f.Area)
+	}
+}
+
+func TestUnusableStateFilesAreFlagged(t *testing.T) {
+	in := healthy()
+	in.Tick = auto.TickState{}
+	in.TickErr = fmt.Errorf("%w: tick.json is corrupt", auto.ErrBadState)
+	in.PassErr = fmt.Errorf("%w: pass.json is not a regular file", auto.ErrBadState)
+	r := Diagnose(in)
+
+	tick := find(t, r, "last tick")
+	assert.Equal(t, Warn, tick.Level)
+	assert.Contains(t, tick.Message, "tick.json is corrupt")
+	assert.NotContains(t, tick.Message, "no tick recorded")
+	assert.Contains(t, find(t, r, "next full pass").Message, "pass.json is not a regular file")
+	assert.Equal(t, Warn, find(t, r, "next full pass").Level)
+}
+
+func TestCapLoweringMinFreePctIsNoted(t *testing.T) {
+	in := healthy()
+	in.Cfg.Auto.MinFreePct = 15
+	in.Cfg.Auto.MinFreeCap = "100G"
+	in.Free = auto.FreeSpace{Free: 900 * gib, Total: 2000 * gib}
+	f := find(t, Diagnose(in), "min free")
+	assert.Equal(t, Note, f.Level)
+	assert.Contains(t, f.Message, "min_free_pct 15%")
+	assert.Contains(t, f.Message, "min_free_cap 100 GiB")
+
+	in.Free = auto.FreeSpace{Free: 200 * gib, Total: 500 * gib}
+	for _, f := range Diagnose(in).Findings {
+		assert.NotEqual(t, "min free", f.Area, "75G is under the cap")
 	}
 }
 

@@ -232,13 +232,13 @@ func (e autoEnv) clock() time.Time {
 }
 
 // recordRun notifies when space is still low, appends the run record and
-// stores the pass state the tick schedules from. None of these failures
+// stores the pass state the tick schedules from. A dry-run or a run that was
+// interrupted or failed before finishing is not stamped as done, so it never
+// delays the next real pass. None of these failures
 // changes the run's outcome: they are reported and the run keeps its own result.
 func (e autoEnv) recordRun(ctx context.Context, cfg config.Auto, report auto.Report, runErr error, preview bool) {
 	pass, err := auto.ReadPassState(e.stateDir)
-	if err != nil {
-		fmt.Fprintf(e.out, "warning: %v\n", err)
-	}
+	e.healState(auto.PassStateName, err)
 	notified := false
 	if runErr == nil {
 		notifyCtx, cancel := context.WithTimeout(ctx, auto.NotifyTimeout)
@@ -255,10 +255,12 @@ func (e autoEnv) recordRun(ctx context.Context, cfg config.Auto, report auto.Rep
 	if err := auto.AppendRun(e.stateDir, auto.NewRunRecord(report, now, runErr, notified)); err != nil {
 		fmt.Fprintf(e.out, "warning: record run: %v\n", err)
 	}
-	if preview {
+	if preview || (runErr != nil && !errors.Is(runErr, context.DeadlineExceeded)) {
 		return
 	}
-	pass.Time, pass.Tier, pass.DryRun = now.UTC(), report.Tier.String(), report.DryRun
+	if !report.DryRun {
+		pass.Time, pass.Tier, pass.DryRun = now.UTC(), report.Tier.String(), false
+	}
 	if err := auto.WritePassState(e.stateDir, pass); err != nil {
 		fmt.Fprintf(e.out, "warning: record pass: %v\n", err)
 	}

@@ -81,13 +81,9 @@ func runTickWithLoader(ctx context.Context, loader *config.Loader, env autoEnv, 
 	now := env.clock()
 
 	tick, err := auto.ReadTickState(env.stateDir)
-	if err != nil {
-		return err
-	}
+	env.healState(auto.TickStateName, err)
 	pass, err := auto.ReadPassState(env.stateDir)
-	if err != nil {
-		return err
-	}
+	env.healState(auto.PassStateName, err)
 
 	d := auto.Decide(auto.TickInput{Now: now, Free: fs, Limits: limits, Tick: tick, Pass: pass})
 	state := auto.TickState{
@@ -120,9 +116,9 @@ func runTickWithLoader(ctx context.Context, loader *config.Loader, env autoEnv, 
 	}
 	defer lock.Release()
 
-	if pass, err = auto.ReadPassState(env.stateDir); err != nil {
-		return err
-	}
+	now = env.clock()
+	pass, err = auto.ReadPassState(env.stateDir)
+	env.healState(auto.PassStateName, err)
 	d = auto.Decide(auto.TickInput{Now: now, Free: fs, Limits: limits, Tick: tick, Pass: pass})
 	if !d.Run {
 		state.Action, state.Reason = auto.ActionIdle, d.Reason
@@ -140,6 +136,21 @@ func runTickWithLoader(ctx context.Context, loader *config.Loader, env autoEnv, 
 		env.saveTick(state)
 	}
 	return err
+}
+
+// healState reports a state file that cannot be used and moves it aside, so
+// the unattended tick carries on with the empty state instead of failing on
+// the same file forever.
+func (e autoEnv) healState(name string, readErr error) {
+	if readErr == nil {
+		return
+	}
+	moved, err := auto.QuarantineState(e.stateDir, name)
+	if err != nil {
+		fmt.Fprintf(e.out, "warning: %v; could not move it aside: %v\n", readErr, err)
+		return
+	}
+	fmt.Fprintf(e.out, "warning: %v; moved aside to %s\n", readErr, moved)
 }
 
 func (e autoEnv) saveTick(state auto.TickState) {

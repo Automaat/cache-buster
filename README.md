@@ -364,6 +364,9 @@ Thresholds:
 - Notifications: at most one per tier per `auto.notify_cooldown` (default 3h), unless free space
   dropped by more than 10 GiB since that tier's last notification. A tier not yet notified (a worse
   one) is always sent.
+- State files: `tick.json` and `pass.json` that are corrupt, unreadable or not regular files are moved
+  aside to `<name>.bad` with a warning, and the tick carries on; `bilgie doctor` reports them. An
+  interrupted or failed pass and the forced first-run dry-run do not start a cooldown.
 
 `auto` still works as before and is a full pass on demand (it also resets the routine-pass timer).
 An agent installed by v0.10.0 ran `auto` every 30 minutes; run `bilgie install-agent` once to

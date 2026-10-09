@@ -246,3 +246,21 @@ func TestDoctor_NextFullPassIsDueWhenOverdue(t *testing.T) {
 
 	assert.Contains(t, f.out.String(), "next full pass: due at the next tick")
 }
+
+func TestDoctor_FlagsUnusableStateFilesInsteadOfNoTickRecorded(t *testing.T) {
+	d := scheduled("darwin")
+	f := doctorFixture(t, d, 100*autoGiB, recentRun())
+	tickPath := filepath.Join(f.env.stateDir, "tick.json")
+	require.NoError(t, os.WriteFile(tickPath, []byte("{torn"), 0o600))
+	passPath := filepath.Join(f.env.stateDir, "pass.json")
+	require.NoError(t, os.RemoveAll(passPath))
+	require.NoError(t, os.MkdirAll(passPath, 0o750))
+
+	err := runDoctorWithLoader(t.Context(), f.loader, f.env)
+
+	require.Error(t, err)
+	assert.Contains(t, f.out.String(), "[warn] last tick: unusable state file: tick.json is corrupt")
+	assert.Contains(t, f.out.String(), "[warn] next full pass: unusable state file: pass.json is not a regular file")
+	assert.NotContains(t, f.out.String(), "no tick recorded")
+	assert.FileExists(t, tickPath, "doctor only reports, it never moves files")
+}

@@ -172,8 +172,8 @@ func TestUninstall_RemovesTickAgentOnEveryBackend(t *testing.T) {
 			require.NoError(t, WritePassState(a.StateDir, PassState{Time: tickNow}))
 
 			require.NoError(t, a.Uninstall(t.Context()))
-			assert.NoFileExists(t, filepath.Join(a.StateDir, tickStateName))
-			assert.NoFileExists(t, filepath.Join(a.StateDir, passStateName))
+			assert.NoFileExists(t, filepath.Join(a.StateDir, TickStateName))
+			assert.NoFileExists(t, filepath.Join(a.StateDir, PassStateName))
 
 			for _, p := range []string{a.PlistPath(), a.ServicePath(), a.TimerPath(), a.TaskXMLPath()} {
 				assert.NoFileExists(t, p)
