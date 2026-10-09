@@ -200,6 +200,7 @@ func (e autoEnv) checkSwap(ctx context.Context, state *auto.TickState, limits co
 	switch {
 	case errors.Is(err, auto.ErrNotifierUnavailable):
 		fmt.Fprintf(e.out, "notification skipped: %v\n", err)
+		state.SwapNotified = now.UTC()
 	case err != nil:
 		fmt.Fprintf(e.out, "warning: %v\n", err)
 	}

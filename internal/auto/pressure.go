@@ -127,11 +127,11 @@ func shorten(s string, width int) string {
 	return string(r[:width-1]) + "…"
 }
 
-// String renders a family as "112 x <command> (40 orphaned)".
+// String renders a family as "112 x <command> (40 with parent PID 1)".
 func (f Family) String() string {
 	s := fmt.Sprintf("%d x %s", f.Count, f.Command)
 	if f.Orphans > 0 {
-		s += fmt.Sprintf(" (%d orphaned)", f.Orphans)
+		s += fmt.Sprintf(" (%d with parent PID 1)", f.Orphans)
 	}
 	return s
 }

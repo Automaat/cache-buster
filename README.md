@@ -381,8 +381,9 @@ Thresholds:
   one) is always sent.
 - Swap: every tick reads swap in use and keeps it in `tick.json`. While it stays above
   `auto.swap_warn` (default 8G, `0` disables) one desktop notification goes out per
-  `auto.notify_cooldown`; it points to `bilgie doctor`. Reading swap never delays the free-space check,
-  and bilgie only reports: it never kills a process.
+  `auto.notify_cooldown`; it points to `bilgie doctor`. The swap read is bounded to a few seconds and
+  never stops the free-space check. A notifier that is not installed is skipped once per cooldown.
+  bilgie only reports: it never kills a process.
 - State files: `tick.json` and `pass.json` that are corrupt, unreadable or not regular files are moved
   aside to `<name>.bad` with a warning, and the tick carries on; `bilgie doctor` reports them. An
   interrupted or failed pass and the forced first-run dry-run do not start a cooldown.
@@ -500,7 +501,7 @@ $ bilgie doctor
        what to do: find what grows: bilgie status shows large unmanaged directories
 [warn] memory: swap 14 GiB of 16 GiB used, memory free 3% (warning above 8.0 GiB)
        largest process families:
-         112 x node /Users/me/dev/app/worker.js (40 orphaned)
+         112 x node /Users/me/dev/app/worker.js (40 with parent PID 1)
          9 x /usr/bin/python3 stale.py
        what to do: quit or restart the largest memory users; bilgie only reports and never kills processes. Swap grows on the same disk as free space
 [note] config: 3 provider(s) disabled: docker-volumes, sail-dirs, xcode-archives
@@ -514,7 +515,8 @@ $ bilgie doctor
 Swap and memory come from `sysctl vm.swapusage` and `memory_pressure` on macOS, `/proc/meminfo` on
 Linux and the commit charge on Windows (the part beyond physical memory counts as swap). When swap is above
 `auto.swap_warn`, the finding is a warning that names up to three process families: a command line repeated by at
-least 4 processes, or at least 3 orphans whose parent is PID 1. Command lines are cut to 60 characters. If the
+least 4 processes, or at least 3 whose parent is PID 1. Command lines are cut to 60 characters. Windows lists processes by image
+name only, so doctor does not name families there. If the
 reading fails, doctor prints a note and carries on.
 
 ### config

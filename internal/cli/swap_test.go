@@ -173,7 +173,7 @@ func TestDoctor_WarnsWhenSwapIsHighAndNamesProcessFamilies(t *testing.T) {
 	out := f.out.String()
 	assert.Contains(t, out, "[warn] memory: swap 14 GiB of 20 GiB used")
 	assert.Contains(t, out, "(warning above 8.0 GiB)")
-	assert.Contains(t, out, "30 x node runaway.js (10 orphaned)")
+	assert.Contains(t, out, "30 x node runaway.js (10 with parent PID 1)")
 	assert.Contains(t, out, "what to do: quit or restart the largest memory users")
 }
 
@@ -192,7 +192,7 @@ func TestDoctor_SwapBelowThresholdIsOKAndSkipsTheProcessTable(t *testing.T) {
 }
 
 func TestDoctor_HighSwapWithUnlistableProcessesStillWarns(t *testing.T) {
-	d := scheduled("windows")
+	d := scheduled("linux")
 	f := doctorFixture(t, d, 100*autoGiB, recentRun())
 	f.env.memory = fixedMemory(14)
 	f.env.processes = func(context.Context) ([]osshim.Process, error) { return nil, errors.New("access denied") }
@@ -210,4 +210,31 @@ func TestDoctor_UnreadableMemoryIsOnlyANote(t *testing.T) {
 	require.NoError(t, runDoctorWithLoader(t.Context(), f.loader, f.env), f.out.String())
 
 	assert.Contains(t, f.out.String(), "[note] memory: cannot read swap and memory: no /proc")
+}
+
+func TestDoctor_WindowsDoesNotNameFamiliesFromImageNames(t *testing.T) {
+	d := scheduled("windows")
+	f := doctorFixture(t, d, 100*autoGiB, recentRun())
+	f.env.memory = fixedMemory(14)
+	f.env.processes = func(context.Context) ([]osshim.Process, error) {
+		t.Error("process table read on Windows")
+		return nil, nil
+	}
+
+	require.Error(t, runDoctorWithLoader(t.Context(), f.loader, f.env))
+
+	assert.Contains(t, f.out.String(), "[warn] memory: swap 14 GiB of 20 GiB used")
+	assert.Contains(t, f.out.String(), "no full command lines on Windows")
+}
+
+func TestTick_MissingNotifierIsSkippedOncePerCooldown(t *testing.T) {
+	r := newTickRig(t, "")
+	var notes noteLog
+	r.env.notify = notes.notifier(auto.ErrNotifierUnavailable)
+	r.env.memory = fixedMemory(14)
+
+	r.tick(400*autoGiB, 0)
+	r.tick(400*autoGiB, 2*time.Minute)
+
+	assert.Len(t, notes.titles, 1)
 }

@@ -3,6 +3,7 @@ package osshim
 import (
 	"bufio"
 	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
@@ -126,32 +127,25 @@ func ParseMemoryPressure(out string) (int, error) {
 	return pct, nil
 }
 
-// CommitStatus is the raw Windows memory status: physical memory and the
-// commit limit (physical memory plus page files).
-type CommitStatus struct {
-	TotalPhys     uint64
-	AvailPhys     uint64
-	TotalPageFile uint64
-	AvailPageFile uint64
-}
-
-// MemoryFromCommit turns a Windows commit reading into a Memory. Commit
-// charge is limit minus available; whatever part of it exceeds the physical
-// memory in use sits in the page file, which is what counts as swap used.
-func MemoryFromCommit(s CommitStatus) Memory {
-	m := Memory{MemTotal: s.TotalPhys, MemAvailable: s.AvailPhys, FreePercent: -1}
-	if s.TotalPageFile > s.TotalPhys {
-		m.SwapTotal = s.TotalPageFile - s.TotalPhys
+// ParsePageFiles sums a Windows SystemPageFileInformation buffer: a chain of
+// entries that each start with NextEntryOffset, TotalSize, TotalInUse and
+// PeakUsage as little-endian uint32 page counts. Sizes come back in bytes.
+func ParsePageFiles(buf []byte, pageSize uint64) (used, total uint64, err error) {
+	const header = 16
+	off := uint32(0)
+	for {
+		if uint64(off)+header > uint64(len(buf)) {
+			return 0, 0, errors.New("page file information is truncated")
+		}
+		e := buf[off:]
+		next := binary.LittleEndian.Uint32(e[0:4])
+		total += uint64(binary.LittleEndian.Uint32(e[4:8])) * pageSize
+		used += uint64(binary.LittleEndian.Uint32(e[8:12])) * pageSize
+		if next == 0 {
+			return used, total, nil
+		}
+		off += next
 	}
-	if s.TotalPageFile < s.AvailPageFile || s.TotalPhys < s.AvailPhys {
-		return m
-	}
-	commit := s.TotalPageFile - s.AvailPageFile
-	physUsed := s.TotalPhys - s.AvailPhys
-	if commit > physUsed {
-		m.SwapUsed = min(commit-physUsed, m.SwapTotal)
-	}
-	return m
 }
 
 // commandRunner runs a program and returns its standard output.

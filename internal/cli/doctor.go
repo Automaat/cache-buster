@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os/exec"
 	"runtime"
@@ -96,6 +97,8 @@ func runDoctorWithLoader(ctx context.Context, loader *config.Loader, env autoEnv
 	return nil
 }
 
+const goosWindows = "windows"
+
 // fillMemory samples swap and, only while it is above auto.swap_warn, the
 // process table that names the largest families.
 func fillMemory(ctx context.Context, in *doctor.Input, env autoEnv) {
@@ -112,6 +115,10 @@ func fillMemory(ctx context.Context, in *doctor.Input, env autoEnv) {
 	}
 	limits, err := in.Cfg.Auto.Limits()
 	if err != nil || !auto.SwapHigh(in.Mem, limits.SwapWarn) {
+		return
+	}
+	if env.goos == goosWindows || (env.goos == "" && runtime.GOOS == goosWindows) {
+		in.FamiliesErr = errors.New("the process list has no full command lines on Windows")
 		return
 	}
 	var procs []osshim.Process

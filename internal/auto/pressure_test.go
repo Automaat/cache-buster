@@ -101,7 +101,7 @@ func TestProcessFamilies(t *testing.T) {
 
 	got := ProcessFamilies(procs)
 	require.Len(t, got, 3)
-	assert.Equal(t, "17 x node worker.js (5 orphaned)", got[0].String())
+	assert.Equal(t, "17 x node worker.js (5 with parent PID 1)", got[0].String())
 	assert.Equal(t, "6 x go test ./...", got[1].String())
 	assert.Equal(t, 4, got[2].Count)
 	assert.LessOrEqual(t, len([]rune(got[2].Command)), familyCmdWidth)

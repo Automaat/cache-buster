@@ -2,6 +2,7 @@ package osshim
 
 import (
 	"context"
+	"encoding/binary"
 	"errors"
 	"strings"
 	"testing"
@@ -134,32 +135,30 @@ func TestReadMemoryWithFailsWhenSysctlFails(t *testing.T) {
 	require.Error(t, err)
 }
 
-func TestMemoryFromCommit(t *testing.T) {
-	const gib = uint64(1) << 30
-	tests := []struct {
-		name string
-		in   CommitStatus
-		want Memory
-	}{
-		{
-			name: "commit beyond RAM lands in the page file",
-			in:   CommitStatus{TotalPhys: 16 * gib, AvailPhys: 1 * gib, TotalPageFile: 24 * gib, AvailPageFile: 2 * gib},
-			want: Memory{MemTotal: 16 * gib, MemAvailable: 1 * gib, SwapTotal: 8 * gib, SwapUsed: 7 * gib, FreePercent: -1},
-		},
-		{
-			name: "commit inside RAM uses no page file",
-			in:   CommitStatus{TotalPhys: 16 * gib, AvailPhys: 8 * gib, TotalPageFile: 24 * gib, AvailPageFile: 16 * gib},
-			want: Memory{MemTotal: 16 * gib, MemAvailable: 8 * gib, SwapTotal: 8 * gib, FreePercent: -1},
-		},
-		{
-			name: "inconsistent counters report no swap",
-			in:   CommitStatus{TotalPhys: 4 * gib, AvailPhys: 8 * gib, TotalPageFile: 4 * gib, AvailPageFile: 8 * gib},
-			want: Memory{MemTotal: 4 * gib, MemAvailable: 8 * gib, FreePercent: -1},
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.want, MemoryFromCommit(tt.in))
-		})
-	}
+func pageFileEntry(next, size, inUse uint32) []byte {
+	e := make([]byte, 16)
+	binary.LittleEndian.PutUint32(e[0:], next)
+	binary.LittleEndian.PutUint32(e[4:], size)
+	binary.LittleEndian.PutUint32(e[8:], inUse)
+	return e
+}
+
+func TestParsePageFiles(t *testing.T) {
+	buf := append(pageFileEntry(16, 1000, 400), pageFileEntry(0, 500, 100)...)
+	used, total, err := ParsePageFiles(buf, 4096)
+	require.NoError(t, err)
+	assert.Equal(t, uint64(500*4096), used)
+	assert.Equal(t, uint64(1500*4096), total)
+
+	used, total, err = ParsePageFiles(pageFileEntry(0, 0, 0), 4096)
+	require.NoError(t, err)
+	assert.Zero(t, used)
+	assert.Zero(t, total)
+}
+
+func TestParsePageFilesRejectsTruncatedBuffers(t *testing.T) {
+	_, _, err := ParsePageFiles(nil, 4096)
+	require.Error(t, err)
+	_, _, err = ParsePageFiles(pageFileEntry(64, 1, 1), 4096)
+	require.Error(t, err)
 }
