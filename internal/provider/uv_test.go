@@ -438,17 +438,18 @@ func TestUVProvider_XDGDirWithGlobCharactersStaysLiteral(t *testing.T) {
 	assert.Equal(t, []string{filepath.Join(xdg, "uv")}, p.Paths())
 }
 
-func TestNewUVProvider_ZeroOrManyMatchesIsAnError(t *testing.T) {
+func TestNewUVProvider_NonLiteralPathsAreErrors(t *testing.T) {
 	isolateHome(t)
 	root := t.TempDir()
 	require.NoError(t, os.MkdirAll(filepath.Join(root, "a1"), 0o700))
 	require.NoError(t, os.MkdirAll(filepath.Join(root, "a2"), 0o700))
 
 	for name, paths := range map[string][]string{
-		"no match":   {filepath.Join(root, "none*")},
-		"two":        {filepath.Join(root, "a*")},
-		"empty list": {},
-		"blank":      {""},
+		"pattern, no such dir": {filepath.Join(root, "none*")},
+		"pattern over two":     {filepath.Join(root, "a*")},
+		"two paths":            {filepath.Join(root, "a1"), filepath.Join(root, "a2")},
+		"empty list":           {},
+		"blank":                {""},
 	} {
 		t.Run(name, func(t *testing.T) {
 			p, err := NewUVProvider("uv", config.Provider{Enabled: true, MaxSize: "1G", Paths: paths})
@@ -456,4 +457,46 @@ func TestNewUVProvider_ZeroOrManyMatchesIsAnError(t *testing.T) {
 			assert.Nil(t, p)
 		})
 	}
+}
+
+func TestNewUVProvider_ExplicitGlobNamedDirIsLiteral(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows forbids * and ? in names")
+	}
+	isolateHome(t)
+	root := filepath.Clean(t.TempDir())
+	literal := filepath.Join(root, "uv?")
+	sibling := filepath.Join(root, "uv1")
+	for _, d := range []string{literal, sibling} {
+		require.NoError(t, os.MkdirAll(d, 0o700))
+		require.NoError(t, os.WriteFile(filepath.Join(d, "blob"), make([]byte, 8), 0o600))
+	}
+	log := filepath.Join(t.TempDir(), "calls")
+	installFakeTool(t, "uv", fakeToolSpec{Default: fakeReply{Log: log}})
+
+	p := newUVProvider(t, config.Provider{Paths: []string{literal}})
+	assert.Equal(t, []string{literal}, p.Paths())
+	_, err := p.Clean(context.Background(), CleanOptions{Mode: CleanModeFull})
+	require.NoError(t, err)
+	assert.Equal(t, []string{"cache clean\tUV_CACHE_DIR=" + literal + "\tUV_NO_CACHE="}, logLines(t, log))
+	assert.FileExists(t, filepath.Join(sibling, "blob"))
+}
+
+func TestNewUVProvider_BracketDirAsExplicitPath(t *testing.T) {
+	isolateHome(t)
+	literal := filepath.Join(filepath.Clean(t.TempDir()), "uv[cache]")
+	require.NoError(t, os.MkdirAll(literal, 0o700))
+
+	p := newUVProvider(t, config.Provider{Paths: []string{literal}})
+	assert.Equal(t, []string{literal}, p.Paths())
+}
+
+func TestUVProvider_DryRunEmptyCacheReportsZero(t *testing.T) {
+	dir := t.TempDir()
+	installFakeTool(t, "uv", fakeToolSpec{})
+	p := newUVProvider(t, config.Provider{Paths: []string{dir}})
+
+	res, err := p.Clean(context.Background(), CleanOptions{DryRun: true})
+	require.NoError(t, err)
+	assert.Contains(t, res.Output, "cache 0 B")
 }

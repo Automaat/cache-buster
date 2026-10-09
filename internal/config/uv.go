@@ -5,29 +5,28 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"slices"
 	"strings"
 )
 
 const uvProvider = "uv"
 
 // ResolveUVCacheDir picks the directory bilgie sizes and hands to uv. The
-// result is a literal path: callers must not glob-expand it again. An
-// explicit path wins. The per-OS default follows uv's own order: UV_CACHE_DIR,
-// then $XDG_CACHE_HOME/uv (not on Windows), then the OS default.
+// result is a literal path and so is the input: only a leading ~ is expanded,
+// never a glob, so glob characters in a directory name cannot match a sibling.
+// An explicit path wins. The per-OS default follows uv's own order:
+// UV_CACHE_DIR, then $XDG_CACHE_HOME/uv (not on Windows), then the OS default.
 func ResolveUVCacheDir(paths []string) (string, error) {
-	if slices.ContainsFunc(paths, func(p string) bool { return strings.TrimSpace(p) == "" }) {
-		return "", fmt.Errorf("paths must not contain an empty entry")
+	if len(paths) != 1 || strings.TrimSpace(paths[0]) == "" {
+		return "", fmt.Errorf("paths must name exactly one uv cache directory, got %d", countNonBlank(paths))
 	}
-	expanded, err := ExpandPaths(paths)
+	dir, err := ExpandTilde(paths[0])
 	if err != nil {
 		return "", fmt.Errorf("expand paths: %w", err)
 	}
-	if len(expanded) != 1 {
-		return "", fmt.Errorf("paths must name exactly one uv cache directory, got %d", len(expanded))
-	}
-	dir := expanded[0]
 	if !isDefaultUVDir(dir) {
+		if looksLikeGlob(dir) && !pathIsDir(dir) {
+			return "", fmt.Errorf("paths is a literal directory, not a glob pattern, and %q does not exist", dir)
+		}
 		return dir, nil
 	}
 	if env := os.Getenv("UV_CACHE_DIR"); env != "" {
@@ -41,6 +40,25 @@ func ResolveUVCacheDir(paths []string) (string, error) {
 		return filepath.Join(xdg, uvProvider), nil
 	}
 	return dir, nil
+}
+
+func countNonBlank(paths []string) int {
+	n := 0
+	for _, p := range paths {
+		if strings.TrimSpace(p) != "" {
+			n++
+		}
+	}
+	return n
+}
+
+func looksLikeGlob(path string) bool {
+	return strings.ContainsAny(path, "*?")
+}
+
+func pathIsDir(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && info.IsDir()
 }
 
 func isDefaultUVDir(dir string) bool {

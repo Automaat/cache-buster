@@ -81,11 +81,31 @@ func CoveredPaths(cfg *config.Config) []string {
 		if !cfg.Applies(name) || pc.Type == config.TypeProjectArtifacts || (!pc.Enabled && pc.Type != config.TypeDirPattern) {
 			continue
 		}
+		if name == "uv" {
+			out = append(out, uvCoveredPaths(pc.Paths)...)
+			continue
+		}
 		paths, err := config.ExpandPaths(pc.Paths)
 		if err != nil {
 			paths = literalPrefixes(pc.Paths)
 		}
 		out = append(out, paths...)
+	}
+	return out
+}
+
+// uvCoveredPaths is the literal directory uv is pointed at. A config that
+// does not resolve still covers its own spelled paths, so they are not
+// reported as unmanaged.
+func uvCoveredPaths(paths []string) []string {
+	if dir, err := config.ResolveUVCacheDir(paths); err == nil {
+		return []string{dir}
+	}
+	var out []string
+	for _, path := range paths {
+		if expanded, err := config.ExpandTilde(path); err == nil && expanded != "" {
+			out = append(out, expanded)
+		}
 	}
 	return out
 }

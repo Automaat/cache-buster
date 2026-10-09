@@ -13,6 +13,7 @@ import (
 
 	"github.com/kballard/go-shellquote"
 	"github.com/smykla-skalski/bilgie/internal/config"
+	"github.com/smykla-skalski/bilgie/pkg/size"
 )
 
 const (
@@ -142,7 +143,7 @@ func (p *UVProvider) Clean(ctx context.Context, opts CleanOptions) (CleanResult,
 	if opts.DryRun {
 		cacheSize := "size unknown"
 		if current, sizeErr := p.CurrentSize(ctx); sizeErr == nil {
-			cacheSize = sizeText(current)
+			cacheSize = size.FormatSize(current)
 		}
 		return CleanResult{
 			Output: fmt.Sprintf("would run: %s (cache %s, uv has no dry-run)", display, cacheSize),

@@ -177,27 +177,28 @@ func resolveProviders(cfg *config.Config, args []string, allFlag, smart bool) ([
 		}
 	}
 
-	if missing := missingCacheErrors(cfg, invalid); len(missing) > 0 {
-		return nil, fmt.Errorf("%s", strings.Join(missing, "\n"))
-	}
-
 	if len(invalid) > 0 {
-		available := cfg.EnabledProviders()
-		return nil, fmt.Errorf("unknown providers: %s\nAvailable: %s",
-			strings.Join(invalid, ", "), strings.Join(available, ", "))
+		missing, unknown := splitMissingCache(cfg, invalid)
+		lines := missing
+		if len(unknown) > 0 {
+			lines = append(lines, fmt.Sprintf("unknown providers: %s\nAvailable: %s",
+				strings.Join(unknown, ", "), strings.Join(cfg.EnabledProviders(), ", ")))
+		}
+		return nil, fmt.Errorf("%s", strings.Join(lines, "\n"))
 	}
 
 	return args, nil
 }
 
-// missingCacheErrors names the requested providers that are enabled but
-// hidden because none of their paths exist, so the user sees which path was
-// checked instead of an "unknown provider".
-func missingCacheErrors(cfg *config.Config, requested []string) []string {
-	var out []string
+// splitMissingCache separates the requested providers that are enabled but
+// hidden because their cache directory does not exist, which get a line that
+// names the path checked, from names that are not providers at all.
+func splitMissingCache(cfg *config.Config, requested []string) (missing, unknown []string) {
+	enabled := cfg.AllEnabledProviders()
 	for _, name := range requested {
-		if !slices.Contains(cfg.AllEnabledProviders(), name) {
-			return nil
+		if !slices.Contains(enabled, name) {
+			unknown = append(unknown, name)
+			continue
 		}
 		pc, _ := cfg.GetProvider(name)
 		checked := strings.Join(pc.Paths, ", ")
@@ -206,9 +207,9 @@ func missingCacheErrors(cfg *config.Config, requested []string) []string {
 				checked = dir
 			}
 		}
-		out = append(out, fmt.Sprintf("provider %s: no cache directory found (checked: %s)", name, checked))
+		missing = append(missing, fmt.Sprintf("provider %s: no cache directory found (checked: %s)", name, checked))
 	}
-	return out
+	return missing, unknown
 }
 
 // unavailableProvider is a provider that could not be loaded or is not installed.

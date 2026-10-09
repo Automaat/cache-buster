@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -47,4 +48,37 @@ func TestProviderPathsExist_UVEnvDirIsLiteral(t *testing.T) {
 func TestProviderPathsExist_UVBadPathsStayVisible(t *testing.T) {
 	assert.True(t, ProviderPathsExist("uv", Provider{Paths: []string{}}), "a load error must name the provider")
 	assert.True(t, ProviderPathsExist("uv", Provider{Paths: []string{""}}))
+}
+
+func TestResolveUVCacheDir_DefaultFromBracketedXDGOnLinux(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("XDG_CACHE_HOME builds the default path on Linux only")
+	}
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("UV_CACHE_DIR", "")
+	xdg := filepath.Join(filepath.Clean(t.TempDir()), "cache[1]")
+	t.Setenv("XDG_CACHE_HOME", xdg)
+
+	dir, err := ResolveUVCacheDir(DefaultProviders()["uv"].Paths)
+
+	require.NoError(t, err)
+	assert.Equal(t, filepath.Join(xdg, "uv"), dir)
+}
+
+func TestResolveUVCacheDir_PatternSpelledPathIsRejectedOnlyWhenAbsent(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("UV_CACHE_DIR", "")
+	t.Setenv("XDG_CACHE_HOME", "")
+	absent := filepath.Join(t.TempDir(), "uv*")
+
+	_, err := ResolveUVCacheDir([]string{absent})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "literal directory, not a glob pattern")
+
+	_, err = ResolveUVCacheDir([]string{filepath.Join(t.TempDir(), "a"), filepath.Join(t.TempDir(), "b")})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "exactly one uv cache directory")
 }
