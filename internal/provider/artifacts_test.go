@@ -408,7 +408,7 @@ func TestProjectArtifacts_OpenFilesSkipped(t *testing.T) {
 	assert.DirExists(t, h.path("busy", "target"))
 	assert.NoDirExists(t, h.path("free", "target"))
 	assert.Contains(t, res.Output, "has open files")
-	assert.Len(t, probed, 2)
+	assert.Len(t, probed, 3, "both in the pass, and again right before the one removal")
 }
 
 func TestProjectArtifacts_OpenCheckErrorFailsClosed(t *testing.T) {
@@ -1109,15 +1109,36 @@ func TestFindGit(t *testing.T) {
 	plain := filepath.Join(root, "plain", "x")
 	require.NoError(t, os.MkdirAll(plain, 0o750))
 
-	gotRoot, gotGit, err := findGit(nested, root)
+	gotRoot, gotGit, err := findGit(nested, root, []string{root})
 	require.NoError(t, err)
 	assert.Equal(t, repo, gotRoot)
 	assert.Equal(t, filepath.Join(repo, ".git"), gotGit)
 
-	gotRoot, gotGit, err = findGit(plain, filepath.Join(root, "plain"))
+	gotRoot, gotGit, err = findGit(plain, root, []string{root})
 	require.NoError(t, err)
 	assert.Empty(t, gotRoot)
 	assert.Empty(t, gotGit)
+}
+
+func TestFindGit_WalksAboveTheScanRootButStopsAtHome(t *testing.T) {
+	home := t.TempDir()
+	dotfiles := filepath.Join(home, ".git")
+	require.NoError(t, os.MkdirAll(dotfiles, 0o750))
+	repo := filepath.Join(home, "code", "repo")
+	require.NoError(t, os.MkdirAll(filepath.Join(repo, ".git"), 0o750))
+	project := filepath.Join(repo, "packages", "app")
+	require.NoError(t, os.MkdirAll(project, 0o750))
+	loose := filepath.Join(home, "loose", "app")
+	require.NoError(t, os.MkdirAll(loose, 0o750))
+
+	gotRoot, gotGit, err := findGit(project, filepath.Join(repo, "packages"), []string{home})
+	require.NoError(t, err)
+	assert.Equal(t, repo, gotRoot, "a scan root inside a repo must still find the repo")
+	assert.Equal(t, filepath.Join(repo, ".git"), gotGit)
+
+	gotRoot, _, err = findGit(loose, filepath.Dir(loose), []string{home})
+	require.NoError(t, err)
+	assert.Empty(t, gotRoot, "a repository in home does not own the projects below it")
 }
 
 func TestPathWithin(t *testing.T) {

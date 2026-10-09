@@ -32,6 +32,11 @@ func TestParseDuration(t *testing.T) {
 		{"60S", 60 * time.Second, false},
 		{"100", 100 * time.Second, false}, // No unit defaults to seconds
 
+		// Milliseconds
+		{"500ms", 500 * time.Millisecond, false},
+		{"50MS", 50 * time.Millisecond, false},
+		{"5m", 5 * time.Minute, false},
+
 		// Empty string returns default
 		{"", DefaultMaxAge, false},
 		{"  ", DefaultMaxAge, false},

@@ -136,6 +136,9 @@ func TestDiagnose_Findings(t *testing.T) {
 		{"protected conflict", func(in *Input) {
 			in.Conflicts = []auto.Conflict{{Provider: "go", Reason: "protected path /home/u/Downloads/go"}}
 		}, "config", "go: protected path /home/u/Downloads/go; auto never cleans it", "providers.go.enabled: false", Warn},
+		{"protection check cancelled", func(in *Input) {
+			in.Conflicts = []auto.Conflict{{Provider: "go", Reason: "protection check cancelled before this provider was verified", Incomplete: true}}
+		}, "config", "protection check incomplete: protection check cancelled before this provider was verified", "run doctor again", Warn},
 		{"notifier missing linux", func(in *Input) { in.NotifierErr = errors.New("not found") },
 			"notifier", "notify-send not found", "libnotify", Warn},
 		{"notifier missing windows", func(in *Input) {

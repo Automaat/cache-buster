@@ -2,11 +2,15 @@ package auto
 
 import (
 	"context"
+	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"runtime"
 	"slices"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/smykla-skalski/bilgie/internal/config"
 	"github.com/smykla-skalski/bilgie/internal/provider"
@@ -169,6 +173,8 @@ func checkProtected(ctx context.Context, path, home string, extra []string, scan
 		return verdict{kind: verdictProtected, detail: "git checkout at " + res.detail}
 	case markerTooLarge:
 		return verdict{kind: verdictUnverified, detail: "too large to verify: " + path}
+	case markerTimedOut:
+		return verdict{kind: verdictUnverified, detail: "scan timed out, cannot verify: " + path}
 	case markerUnreadable:
 		return verdict{kind: verdictUnverified, detail: res.detail}
 	case markerCancelled:
@@ -207,28 +213,64 @@ func within(path, root string) bool {
 	return root == "" || path == root || strings.HasPrefix(path, root+string(filepath.Separator))
 }
 
+// ancestorListCap bounds the names read from one ancestor when looking for a
+// differently cased marker. Past it the ancestor counts as holding none: the
+// exact .git Lstat already settled the common case.
+var ancestorListCap = 100000
+
+// ancestorMemoTTL is how long a marker answer for an ancestor is reused, so
+// many providers under one parent list it once per run.
+const ancestorMemoTTL = time.Minute
+
+type ancestorAnswer struct {
+	at    time.Time
+	found bool
+}
+
+var ancestorMemo sync.Map
+
+var openAncestor = func(path string) (dirReader, error) { return os.Open(path) }
+
 // hasGitMarker reports whether dir holds a .git entry in any letter case.
-// An exact Lstat settles the common hit cheaply; the name listing catches a
-// differently cased marker on a case-sensitive volume. An unreadable dir
-// without an exact marker is not a checkout root.
+// An exact Lstat settles the common hit cheaply; a capped name listing
+// catches a differently cased marker on a case-sensitive volume. An
+// unreadable dir without an exact marker is not a checkout root. Answers are
+// memoized per directory for ancestorMemoTTL.
 func hasGitMarker(dir string) bool {
-	if _, err := os.Lstat(filepath.Join(dir, ".git")); err == nil {
-		return true
+	if v, ok := ancestorMemo.Load(dir); ok {
+		if a, ok := v.(ancestorAnswer); ok && time.Since(a.at) < ancestorMemoTTL {
+			return a.found
+		}
 	}
-	f, err := os.Open(dir)
+	found, settled := probeGitMarker(dir)
+	if settled {
+		ancestorMemo.Store(dir, ancestorAnswer{at: time.Now(), found: found})
+	}
+	return found
+}
+
+// probeGitMarker answers for dir; settled is false when the listing failed,
+// so the answer is not worth remembering.
+func probeGitMarker(dir string) (found, settled bool) {
+	if _, err := os.Lstat(filepath.Join(dir, ".git")); err == nil {
+		return true, true
+	}
+	f, err := openAncestor(dir)
 	if err != nil {
-		return false
+		return false, false
 	}
 	defer func() { _ = f.Close() }()
+	read := 0
 	for {
 		batch, readErr := f.ReadDir(listBatch)
 		for _, e := range batch {
 			if provider.IsGitMarkerName(e.Name()) {
-				return true
+				return true, true
 			}
 		}
-		if readErr != nil {
-			return false
+		read += len(batch)
+		if read >= ancestorListCap || readErr != nil {
+			return false, readErr == nil || errors.Is(readErr, io.EOF)
 		}
 	}
 }

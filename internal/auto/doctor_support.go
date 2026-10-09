@@ -136,6 +136,9 @@ func NotifierProgram(goos string) string {
 type Conflict struct {
 	Provider string
 	Reason   string
+	// Incomplete marks a finding that is not a conflict: the check was
+	// cancelled at Provider, so it and every later provider were not verified.
+	Incomplete bool
 }
 
 // ProtectionConflicts lists the enabled providers whose paths are protected,
@@ -166,8 +169,21 @@ func ProtectionConflicts(
 		if _, aware := p.(provider.ProtectionAware); aware {
 			continue
 		}
-		reason, ctxErr := protectedReason(ctx, p, pc.Type == config.TypeDirPattern, home, protected)
+		var (
+			reason string
+			ctxErr error
+		)
+		if g, guarded := p.(provider.PathGuarded); guarded {
+			reason, ctxErr = guardPaths(ctx, p, g, home, protected)
+		} else {
+			reason, ctxErr = protectedReason(ctx, p, pc.Type == config.TypeDirPattern, home, protected)
+		}
 		if ctxErr != nil {
+			out = append(out, Conflict{
+				Provider:   name,
+				Reason:     "protection check cancelled before this provider and the ones after it were verified",
+				Incomplete: true,
+			})
 			break
 		}
 		if reason != "" {

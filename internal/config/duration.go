@@ -8,13 +8,13 @@ import (
 	"time"
 )
 
-var durationRegex = regexp.MustCompile(`(?i)^(\d+)\s*([dhms]?)$`)
+var durationRegex = regexp.MustCompile(`(?i)^(\d+)\s*(ms|[dhms]?)$`)
 
 // DefaultMaxAge is the default maximum age for cache files (30 days).
 const DefaultMaxAge = 30 * 24 * time.Hour
 
 // ParseDuration parses duration strings like "30d", "24h", "60m", "3600s".
-// Supports: d (days), h (hours), m (minutes), s (seconds).
+// Supports: d (days), h (hours), m (minutes), s (seconds), ms (milliseconds).
 // If empty string, returns DefaultMaxAge.
 func ParseDuration(s string) (time.Duration, error) {
 	s = strings.TrimSpace(s)
@@ -36,6 +36,8 @@ func ParseDuration(s string) (time.Duration, error) {
 	var multiplier time.Duration
 
 	switch unit {
+	case "ms":
+		multiplier = time.Millisecond
 	case "", "s":
 		multiplier = time.Second
 	case "m":
