@@ -67,15 +67,15 @@ func NewProjectArtifactsProvider(name string, cfg config.Provider) (*ProjectArti
 		return nil, err
 	}
 
-	minIdle, err := durationOr(cfg.MinIdle, defaultArtifactMinIdle, "min_idle")
+	minIdle, err := durationOr(cfg.MinIdle, defaultArtifactMinIdle, "min_idle", config.ParseDuration)
 	if err != nil {
 		return nil, err
 	}
-	budget, err := durationOr(cfg.ScanBudget, defaultArtifactBudget, "scan_budget")
+	budget, err := durationOr(cfg.ScanBudget, defaultArtifactBudget, "scan_budget", config.ParseBudget)
 	if err != nil {
 		return nil, err
 	}
-	passBudget, err := durationOr(cfg.PassBudget, defaultArtifactPassBudget, "pass_budget")
+	passBudget, err := durationOr(cfg.PassBudget, defaultArtifactPassBudget, "pass_budget", config.ParseBudget)
 	if err != nil {
 		return nil, err
 	}
@@ -115,11 +115,11 @@ func NewProjectArtifactsProvider(name string, cfg config.Provider) (*ProjectArti
 	return p, nil
 }
 
-func durationOr(value string, def time.Duration, field string) (time.Duration, error) {
+func durationOr(value string, def time.Duration, field string, parse func(string) (time.Duration, error)) (time.Duration, error) {
 	if value == "" {
 		return def, nil
 	}
-	d, err := config.ParseDuration(value)
+	d, err := parse(value)
 	if err != nil {
 		return 0, fmt.Errorf("parse %s: %w", field, err)
 	}

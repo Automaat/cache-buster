@@ -207,7 +207,7 @@ func (a Auto) bytes(name, value string) (int64, error) {
 }
 
 func (a Auto) span(name, value string) (time.Duration, error) {
-	d, err := ParseDuration(value)
+	d, err := ParseBudget(value)
 	if err != nil {
 		return 0, fmt.Errorf("%s: %w", name, err)
 	}
@@ -363,6 +363,9 @@ func (c *Config) Validate() error {
 	if err := c.validateProtected(); err != nil {
 		return err
 	}
+	if err := c.ValidateAges(); err != nil {
+		return err
+	}
 	for name := range c.Providers {
 		p := c.Providers[name]
 		if strings.Contains(name, ".") {
@@ -395,7 +398,7 @@ func (c *Config) Validate() error {
 			if p.CleanCmd == "" {
 				return fmt.Errorf("provider %q: clean_timeout requires clean_cmd", name)
 			}
-			d, err := ParseDuration(p.CleanTimeout)
+			d, err := ParseBudget(p.CleanTimeout)
 			if err != nil {
 				return fmt.Errorf("provider %q: clean_timeout: %w", name, err)
 			}
@@ -436,7 +439,11 @@ func (p Provider) validateProjectArtifacts() error {
 		if value == "" {
 			continue
 		}
-		d, err := ParseDuration(value)
+		parse := ParseBudget
+		if field == "min_idle" {
+			parse = ParseDuration
+		}
+		d, err := parse(value)
 		if err != nil {
 			return fmt.Errorf("%s: %w", field, err)
 		}

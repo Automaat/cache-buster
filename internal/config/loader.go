@@ -144,6 +144,10 @@ func (l *Loader) Load() (*Config, error) {
 		cfg.Providers[name] = merged
 	}
 
+	if err := cfg.ValidateAges(); err != nil {
+		return nil, err
+	}
+
 	return cfg, nil
 }
 

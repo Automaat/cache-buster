@@ -529,15 +529,15 @@ providers:
 | `enabled` | Include in status/clean operations |
 | `paths` | Directories to scan (supports `~` expansion) |
 | `max_size` | Size limit (e.g., `10G`, `500M`) |
-| `max_age` | File age threshold for smart clean (e.g., `30d`) |
+| `max_age` | File age threshold for smart clean (e.g., `30d`); units `m`, `h`, `d`, minimum `1m` |
 | `clean_cmd` | Command for full clean (empty = file-based deletion) |
-| `clean_timeout` | Max runtime of `clean_cmd` before it is cancelled and reported (default `2m`) |
+| `clean_timeout` | Max runtime of `clean_cmd` before it is cancelled and reported (default `2m`; units `ms`, `s`, `m`, `h`, `d`) |
 | `type` | `dir-pattern` removes whole stale directories matching a glob in `paths`; `project-artifacts` removes build artifacts of idle projects found below the roots in `paths` |
-| `min_idle` | `dir-pattern`: minimum idle time, from the newest mtime in the tree (default `2h`); `project-artifacts`: project idle time (default `60d`) |
+| `min_idle` | `dir-pattern`: minimum idle time, from the newest mtime in the tree (default `2h`); `project-artifacts`: project idle time (default `60d`); units `m`, `h`, `d`, minimum `1m` |
 | `skip_if_open` | `dir-pattern`, `project-artifacts`: skip directories with open files via `lsof +D` (default `true`) |
 | `skip_if_git_worktree` | `dir-pattern`: skip directories containing a `.git` entry (default `true`) |
 | `max_depth` | `project-artifacts`: directory levels searched below each root (default `4`, from 1 to 16; a negative value is an error) |
-| `pass_budget` | `project-artifacts`: time one clean pass may spend before the remaining candidates are skipped (default `30s`) |
+| `pass_budget` | `project-artifacts`: time one clean pass may spend before the remaining candidates are skipped (default `30s`; units `ms`, `s`, `m`, `h`, `d`) |
 | `scan_budget` | `project-artifacts`: time allowed for finding projects per pass (default `10s`; units `ms`, `s`, `m`, `h`, `d`) |
 | `rust`, `node`, `python` | `project-artifacts`: per-kind switches (default `true`, `true`, `false`) |
 | `skip_if_dirty` | `project-artifacts`: skip projects with uncommitted changes (default `true`) |
@@ -660,6 +660,13 @@ executable followed by its arguments, or it stays busy. Shell separators glued t
 `cargo run -- clean cargo`, is counted. A hung
 `clean_cmd` is killed with its whole process group, so it must not need a
 terminal.
+
+Age thresholds (`max_age`, `min_idle`) must be at least `1m`. A value such as
+`30s` or `30ms` is almost always a unit typo (`30d`, `30m`) and would make smart
+clean delete nearly everything, so the config is rejected when it loads, for every
+command, with a message like `provider "go-build": max_age 30s is under the 1m
+minimum; did you mean 30d?`. `ms` is accepted only for time bounds
+(`scan_budget`, `pass_budget`, `clean_timeout`). Bare numbers are seconds.
 
 `clean --json` needs `--force` or `--dry-run` because it cannot prompt.
 

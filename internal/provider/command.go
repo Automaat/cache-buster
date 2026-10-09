@@ -105,7 +105,7 @@ func parseCleanTimeout(raw string) (time.Duration, error) {
 	if strings.TrimSpace(raw) == "" {
 		return 0, fmt.Errorf("clean_timeout must not be blank")
 	}
-	timeout, err := config.ParseDuration(raw)
+	timeout, err := config.ParseBudget(raw)
 	if err != nil {
 		return 0, fmt.Errorf("parse clean_timeout: %w", err)
 	}

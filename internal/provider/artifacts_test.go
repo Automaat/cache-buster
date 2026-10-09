@@ -1334,3 +1334,15 @@ func TestProjectArtifacts_MaxDepthAboveLimitIsRejected(t *testing.T) {
 	})
 	require.ErrorContains(t, err, "max_depth")
 }
+
+func TestNewProjectArtifactsProvider_AcceptsMillisecondBudgets(t *testing.T) {
+	_, err := NewProjectArtifactsProvider("project-artifacts", config.Provider{
+		Paths: []string{t.TempDir()}, MaxSize: "1G", ScanBudget: "500ms", PassBudget: "750ms",
+	})
+	require.NoError(t, err)
+
+	_, err = NewProjectArtifactsProvider("project-artifacts", config.Provider{
+		Paths: []string{t.TempDir()}, MaxSize: "1G", MinIdle: "10ms",
+	})
+	require.Error(t, err)
+}
