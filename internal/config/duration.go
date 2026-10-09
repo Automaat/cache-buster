@@ -14,9 +14,20 @@ var durationRegex = regexp.MustCompile(`(?i)^(\d+)\s*(ms|[dhms]?)$`)
 const DefaultMaxAge = 30 * 24 * time.Hour
 
 // ParseDuration parses duration strings like "30d", "24h", "60m", "3600s".
-// Supports: d (days), h (hours), m (minutes), s (seconds), ms (milliseconds).
+// Supports: d (days), h (hours), m (minutes), s (seconds).
+// Milliseconds are rejected; use ParseBudget where a short bound is legitimate.
 // If empty string, returns DefaultMaxAge.
 func ParseDuration(s string) (time.Duration, error) {
+	return parseDuration(s, false)
+}
+
+// ParseBudget is ParseDuration that also accepts ms. Use it only for time
+// bounds (scan_budget, pass_budget, clean_timeout), never for age thresholds.
+func ParseBudget(s string) (time.Duration, error) {
+	return parseDuration(s, true)
+}
+
+func parseDuration(s string, allowMillis bool) (time.Duration, error) {
 	s = strings.TrimSpace(s)
 	if s == "" {
 		return DefaultMaxAge, nil
@@ -37,6 +48,9 @@ func ParseDuration(s string) (time.Duration, error) {
 
 	switch unit {
 	case "ms":
+		if !allowMillis {
+			return 0, fmt.Errorf("milliseconds are not allowed here: %q", s)
+		}
 		multiplier = time.Millisecond
 	case "", "s":
 		multiplier = time.Second
