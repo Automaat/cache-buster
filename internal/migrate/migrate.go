@@ -96,11 +96,18 @@ func Dir(oldDir, newDir string) (bool, error) {
 // skipOrWarn settles a legacy path next to an existing newDir: silent unless
 // it is a directory (or a link to one) that still holds data.
 func skipOrWarn(oldDir, newDir string) error {
-	info, err := os.Stat(oldDir)
-	if isDir := err == nil && info.IsDir(); !isDir {
+	if !isDir(oldDir) {
 		return nil
 	}
 	return newDirExists(oldDir, newDir)
+}
+
+func isDir(path string) bool {
+	info, err := os.Stat(path)
+	if err != nil {
+		return false
+	}
+	return info.IsDir()
 }
 
 // newDirExists is nil for an empty oldDir, which holds nothing to lose, and
@@ -119,21 +126,25 @@ func newDirExists(oldDir, newDir string) error {
 		ErrNewDirExists, newDir, oldDir)
 }
 
-// moveLink recreates the symlink oldDir at newDir with an absolute target,
-// so a relative link keeps resolving from its new place, then drops the old one.
+// moveLink recreates the symlink oldDir at newDir with the same target, made absolute
+// when the two dirs differ in parent, then drops the old one.
 func moveLink(oldDir, newDir string) (bool, error) {
 	target, err := os.Readlink(oldDir)
 	if err != nil {
 		return false, err
 	}
-	if !filepath.IsAbs(target) {
-		target = filepath.Join(filepath.Dir(oldDir), target)
+	if !filepath.IsAbs(target) && filepath.Dir(oldDir) != filepath.Dir(newDir) {
+		parent, err := filepath.EvalSymlinks(filepath.Dir(oldDir))
+		if err != nil {
+			return false, err
+		}
+		target = filepath.Join(parent, target)
 	}
 	if err := os.MkdirAll(filepath.Dir(newDir), 0o750); err != nil {
 		return false, err
 	}
 	if err := os.Symlink(target, newDir); err != nil {
-		if errors.Is(err, os.ErrExist) && !pathExists(oldDir) {
+		if errors.Is(err, os.ErrExist) {
 			return false, nil
 		}
 		return false, tolerateLostRace(err, oldDir)

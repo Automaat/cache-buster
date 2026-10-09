@@ -144,7 +144,11 @@ func TestDir_SymlinkedLegacyDirMovesTheLink(t *testing.T) {
 	assert.Equal(t, "managed", readFile(t, filepath.Join(newDir, "config.yaml")))
 	got, err := os.Readlink(newDir)
 	require.NoError(t, err)
-	assert.Equal(t, target, got)
+	want, err := filepath.EvalSymlinks(target)
+	require.NoError(t, err)
+	gotResolved, err := filepath.EvalSymlinks(got)
+	require.NoError(t, err)
+	assert.Equal(t, want, gotResolved, "different parents get an absolute target")
 	assert.Equal(t, "managed", readFile(t, filepath.Join(target, "config.yaml")), "target untouched")
 }
 
@@ -313,4 +317,21 @@ func TestDir_StrayLegacyFileNextToANewDirIsSilent(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.False(t, moved)
+}
+
+func TestDir_RelativeLinkInASymlinkedParentStillResolves(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlinks need a privilege on Windows")
+	}
+	root := t.TempDir()
+	writeFile(t, filepath.Join(root, "dot", "shared", "legacy", "config.yaml"), "managed")
+	require.NoError(t, os.Symlink(filepath.Join(root, "dot"), filepath.Join(root, "cfg")))
+	oldDir := filepath.Join(root, "cfg", "old")
+	require.NoError(t, os.Symlink(filepath.Join("shared", "legacy"), oldDir))
+
+	moved, err := Dir(oldDir, filepath.Join(root, "cfg", "new"))
+
+	require.NoError(t, err)
+	assert.True(t, moved)
+	assert.Equal(t, "managed", readFile(t, filepath.Join(root, "cfg", "new", "config.yaml")))
 }
