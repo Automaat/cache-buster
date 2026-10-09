@@ -721,3 +721,29 @@ func TestPendingConfig_BOMBeforeCommentsIsStillEmpty(t *testing.T) {
 
 	assert.NotNil(t, PendingConfig(home))
 }
+
+func TestPendingConfig_LegacyDirLinkedToTheNewOneIsNotPending(t *testing.T) {
+	for name, content := range map[string]string{"empty": "", "comments": "# c\n", "settings": "auto: {}\n"} {
+		t.Run(name, func(t *testing.T) {
+			home := t.TempDir()
+			dirs := Dirs(home)
+			writeFile(t, filepath.Join(dirs[0][1], "config.yaml"), content)
+			linkTo(t, dirs[0][1], dirs[0][0])
+
+			assert.Nil(t, PendingConfig(home))
+			assert.Empty(t, Legacy(home, &bytes.Buffer{}))
+			assert.Equal(t, content, readFile(t, filepath.Join(dirs[0][1], "config.yaml")), "the config is untouched")
+			assert.NoFileExists(t, filepath.Join(dirs[0][1], "config.yaml.bak"))
+		})
+	}
+}
+
+func TestPendingConfig_HardLinkedConfigIsNotPending(t *testing.T) {
+	home := t.TempDir()
+	dirs := Dirs(home)
+	writeFile(t, filepath.Join(dirs[0][1], "config.yaml"), "")
+	require.NoError(t, os.MkdirAll(dirs[0][0], 0o750))
+	require.NoError(t, os.Link(filepath.Join(dirs[0][1], "config.yaml"), filepath.Join(dirs[0][0], "config.yaml")))
+
+	assert.Nil(t, PendingConfig(home))
+}

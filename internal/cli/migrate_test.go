@@ -234,3 +234,29 @@ func TestBeforeCommand_RefusalSilencesCobraUsage(t *testing.T) {
 
 	assert.True(t, c.SilenceUsage)
 }
+
+func TestBeforeCommand_LegacyDirLinkedToTheNewOneRunsOnTheUsersConfig(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlinks need a privilege on Windows")
+	}
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	newCfg := filepath.Join(home, ".config", "bilgie")
+	require.NoError(t, os.MkdirAll(newCfg, 0o750))
+	require.NoError(t, os.WriteFile(filepath.Join(newCfg, "config.yaml"), nil, 0o600))
+	require.NoError(t, os.Symlink(newCfg, filepath.Join(home, ".config", "cache-buster")))
+	cmds := guardTree("clean", "auto", "install-agent", "interactive", "tick")
+
+	for name := range cmds {
+		if name == "" {
+			continue
+		}
+		var out bytes.Buffer
+		pick(t, cmds, name).SetErr(&out)
+		require.NoError(t, BeforeCommand(pick(t, cmds, name)), name)
+		assert.NotContains(t, out.String(), "mv ", name)
+	}
+	assert.FileExists(t, filepath.Join(newCfg, "config.yaml"))
+	assert.NoFileExists(t, filepath.Join(newCfg, "config.yaml.bak"))
+}

@@ -29,13 +29,28 @@ func PendingConfig(home string) *Pending {
 	if !isDir(pair[0]) {
 		return nil
 	}
-	if _, err := os.Stat(filepath.Join(pair[0], configFile)); errors.Is(err, os.ErrNotExist) {
+	if sameFile(pair[0], pair[1]) {
+		return nil
+	}
+	oldCfg := filepath.Join(pair[0], configFile)
+	if _, err := os.Stat(oldCfg); errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if sameFile(oldCfg, filepath.Join(pair[1], configFile)) {
 		return nil
 	}
 	if hasContent(filepath.Join(pair[1], configFile)) {
 		return nil
 	}
 	return &Pending{Old: pair[0], New: pair[1]}
+}
+
+// sameFile is true when both paths resolve to one file or directory: a legacy
+// dir linked to the new one (home-manager, stow) has nothing left to migrate.
+func sameFile(a, b string) bool {
+	infoA, errA := os.Stat(a)
+	infoB, errB := os.Stat(b)
+	return errA == nil && errB == nil && os.SameFile(infoA, infoB)
 }
 
 // maxProbe bounds how much of a config is read to look for content.
