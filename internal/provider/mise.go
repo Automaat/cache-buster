@@ -330,7 +330,7 @@ func (p *MiseProvider) listPrunable(ctx context.Context) (list []prunable, skipR
 // listing collects the versions one dry-run reports, in output order.
 type listing struct {
 	items map[string]*prunable
-	order []string
+	order []*prunable
 }
 
 func (l *listing) get(label string) *prunable {
@@ -339,14 +339,14 @@ func (l *listing) get(label string) *prunable {
 	}
 	v := &prunable{label: label}
 	l.items[label] = v
-	l.order = append(l.order, label)
+	l.order = append(l.order, v)
 	return v
 }
 
 func (p *MiseProvider) finish(ctx context.Context, st *listing) []prunable {
 	out := make([]prunable, 0, len(st.order))
-	for _, label := range st.order {
-		v := *st.items[label]
+	for _, item := range st.order {
+		v := *item
 		for _, dir := range append([]string{v.path}, v.extra...) {
 			if dir == "" {
 				continue
