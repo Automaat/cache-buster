@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/signal"
 	"slices"
@@ -26,7 +27,8 @@ var CleanCmd = &cobra.Command{
 
 By default, runs full clean using native tool commands (e.g., 'go clean -cache').
 Use --smart for LRU-based cleaning that removes old files until cache reaches max_size.`,
-	RunE: runClean,
+	RunE:         runClean,
+	SilenceUsage: true,
 }
 
 func init() {
@@ -141,6 +143,18 @@ func runCleanWithContext(newCtx func() (context.Context, context.CancelFunc), lo
 // volume prune, so it must be requested by name.
 const volumesProvider = "docker-volumes"
 
+// archivesProvider is skipped by --all: Xcode archives hold signed builds and
+// App Store dSYMs that cannot be regenerated, so it must be requested by name.
+const archivesProvider = "xcode-archives"
+
+// allProviders drops what --all must not run: archives always, volumes in
+// smart mode.
+func allProviders(names []string, smart bool) []string {
+	return slices.DeleteFunc(names, func(n string) bool {
+		return n == archivesProvider || (smart && n == volumesProvider)
+	})
+}
+
 func resolveProviders(cfg *config.Config, args []string, allFlag, smart bool) ([]string, error) {
 	if len(args) == 0 && !allFlag {
 		available := cfg.EnabledProviders()
@@ -148,11 +162,7 @@ func resolveProviders(cfg *config.Config, args []string, allFlag, smart bool) ([
 	}
 
 	if allFlag {
-		names := cfg.EnabledProviders()
-		if !smart {
-			return names, nil
-		}
-		return slices.DeleteFunc(names, func(n string) bool { return n == volumesProvider }), nil
+		return allProviders(cfg.EnabledProviders(), smart), nil
 	}
 
 	enabled := make(map[string]bool)
@@ -371,13 +381,44 @@ func printDone(result provider.CleanResult, concise bool) {
 	defer report.WriteWarnings(os.Stdout, result.Warnings)
 	if !concise {
 		fmt.Printf("done (freed %s)\n", size.FormatSize(result.BytesCleaned))
-		if out := strings.TrimSpace(result.Output); out != "" {
+		out := strings.TrimSpace(result.Output)
+		if out != "" {
 			fmt.Println(out)
 		}
+		writeUnlisted(os.Stdout, result.Entries, out)
 		return
 	}
-	fmt.Printf("done (freed %s%s)\n", size.FormatSize(result.BytesCleaned), entryCount(result))
+	fmt.Printf("done (freed %s%s%s)\n", size.FormatSize(result.BytesCleaned), entryCount(result), skippedCount(result))
 	report.WriteTop(os.Stdout, report.Summarize(statusCleaned, result.BytesCleaned, result.Entries, 0))
+}
+
+// skippedCount is the ", N skipped" suffix of a finished provider line.
+func skippedCount(result provider.CleanResult) string {
+	if result.SkippedEntries == 0 {
+		return ""
+	}
+	return fmt.Sprintf(", %d skipped", result.SkippedEntries)
+}
+
+// writeUnlisted prints the removed entries a provider's own output does not
+// name, so verbose never shows less than the concise largest-entries list.
+func writeUnlisted(w io.Writer, entries []provider.Entry, output string) {
+	const maxUnlisted = 200
+	shown, hidden := 0, 0
+	for _, e := range entries {
+		if strings.Contains(output, e.Path) {
+			continue
+		}
+		if shown == maxUnlisted {
+			hidden++
+			continue
+		}
+		fmt.Fprintf(w, "removed: %s (%s)\n", e.Path, size.FormatSize(e.Size))
+		shown++
+	}
+	if hidden > 0 {
+		fmt.Fprintf(w, "... and %d more removed entries\n", hidden)
+	}
 }
 
 func summaryOf(status string, result provider.CleanResult) *report.Summary {

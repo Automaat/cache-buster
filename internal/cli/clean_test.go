@@ -214,6 +214,17 @@ func TestResolveProviders_All(t *testing.T) {
 	assert.NotContains(t, names, "prov3")
 }
 
+func TestAllProviders_LeavesOutArchivesAndSmartVolumes(t *testing.T) {
+	names := func() []string { return []string{"docker-volumes", "go-mod", "xcode-archives"} }
+
+	assert.Equal(t, []string{"docker-volumes", "go-mod"}, allProviders(names(), false))
+	assert.Equal(t, []string{"go-mod"}, allProviders(names(), true))
+}
+
+func TestCleanCmd_SilencesUsageOnFailure(t *testing.T) {
+	assert.True(t, CleanCmd.SilenceUsage)
+}
+
 func TestResolveProviders_Specific(t *testing.T) {
 	dir := t.TempDir()
 	cfg := &config.Config{

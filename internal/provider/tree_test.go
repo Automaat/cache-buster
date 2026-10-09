@@ -181,12 +181,12 @@ func TestEvictTree_RemovesWholeTreeAndLeavesNoTrash(t *testing.T) {
 	assert.Empty(t, left)
 }
 
-func TestEvictTree_VanishedTreeCountsAsGone(t *testing.T) {
+func TestEvictTree_VanishedTreeReportsGone(t *testing.T) {
 	parent := t.TempDir()
 
 	err := evictTree(filepath.Join(parent, "absent"))
 
-	require.NoError(t, err)
+	require.ErrorIs(t, err, errTreeGone)
 	left, readErr := os.ReadDir(parent)
 	require.NoError(t, readErr)
 	assert.Empty(t, left)
@@ -724,4 +724,167 @@ func TestTreeProvider_StopsOnceRecovered(t *testing.T) {
 	assert.Len(t, res.Entries, 1)
 	assert.NoDirExists(t, filepath.Join(root, "_npx", "a"))
 	assert.DirExists(t, filepath.Join(root, "_npx", "b"))
+}
+
+func TestTreeProvider_VanishedTreeIsNotCountedAsFreed(t *testing.T) {
+	root := t.TempDir()
+	for i, name := range []string{"a", "b", "c"} {
+		makePackage(t, filepath.Join(root, "_npx", name), 4, time.Duration(90-10*i)*day)
+	}
+	p := newTree(t, "npm", config.Provider{Paths: []string{root}, MaxSize: "1", MaxAge: "30d"})
+	gone := filepath.Join(root, "_npx", "a")
+	p.evict = func(dir string) error {
+		if dir == gone {
+			require.NoError(t, os.RemoveAll(dir))
+		}
+		return evictTree(dir)
+	}
+
+	res, err := p.Clean(context.Background(), CleanOptions{Mode: CleanModeSmart})
+	require.NoError(t, err)
+
+	require.Len(t, res.Entries, 1)
+	assert.Equal(t, filepath.Join(root, "_npx", "b"), res.Entries[0].Path)
+	assert.Equal(t, res.Entries[0].Size, res.BytesCleaned)
+	assert.Equal(t, int64(5), res.FilesDeleted)
+	assert.Contains(t, res.Output, "skip: "+gone+" (already removed)")
+	assert.Equal(t, 1, res.SkippedEntries)
+}
+
+func TestFoldPath_CollapsesRepeatedSlashes(t *testing.T) {
+	assert.Equal(t, foldPath("/a/b/c"), foldPath("/a//b///c"))
+	assert.Equal(t, foldPath("C:/a/b"), foldPath(`C:\a\\b`))
+}
+
+func TestTreeProvider_DoubleSlashSpellingHoldsTree(t *testing.T) {
+	root := t.TempDir()
+	inUse := filepath.Join(root, "_npx", "inuse")
+	makePackage(t, inUse, 5, 90*day)
+	makePackage(t, filepath.Join(root, "_npx", "newest"), 5, 70*day)
+	p := newTree(t, "npm", config.Provider{Paths: []string{root}, MaxSize: "1", MaxAge: "30d"})
+	spelled := strings.Replace(filepath.ToSlash(inUse), "/_npx/", "//_npx///", 1)
+	p.procLines = func(context.Context) ([]string, error) {
+		return []string{"node " + spelled + "/node_modules/.bin/tool"}, nil
+	}
+
+	res, err := p.Clean(context.Background(), CleanOptions{Mode: CleanModeSmart})
+	require.NoError(t, err)
+
+	assert.DirExists(t, inUse)
+	assert.Contains(t, res.Output, "skip: "+inUse+" (in use by a running process)")
+}
+
+func TestTreeProvider_UnreadableSubdirectoryHoldsTree(t *testing.T) {
+	if runtime.GOOS == "windows" || os.Geteuid() == 0 {
+		t.Skip("needs POSIX permissions and a non-root user")
+	}
+	root := t.TempDir()
+	locked := filepath.Join(root, "_npx", "locked")
+	makePackage(t, locked, 5, 90*day)
+	makePackage(t, filepath.Join(root, "_npx", "other"), 5, 80*day)
+	makePackage(t, filepath.Join(root, "_npx", "newest"), 5, 70*day)
+	hidden := filepath.Join(locked, "node_modules", "pkg", "lib")
+	require.NoError(t, os.Chmod(hidden, 0o000))
+	t.Cleanup(func() { _ = os.Chmod(hidden, 0o700) })
+	p := newTree(t, "npm", config.Provider{Paths: []string{root}, MaxSize: "1", MaxAge: "30d"})
+
+	res, err := p.Clean(context.Background(), CleanOptions{Mode: CleanModeSmart})
+	require.NoError(t, err)
+
+	assert.DirExists(t, locked)
+	assert.NoDirExists(t, filepath.Join(root, "_npx", "other"))
+	assert.Contains(t, res.Output, "skip: "+locked+" (1 unreadable entries)")
+}
+
+func TestTreeProvider_OverLimitWithNothingEvictableSaysSo(t *testing.T) {
+	root := t.TempDir()
+	makePackage(t, filepath.Join(root, "_npx", "fresh"), 4, time.Minute)
+	makePackage(t, filepath.Join(root, "_npx", "newest"), 4, 50*day)
+	p := newTree(t, "npm", config.Provider{Paths: []string{root}, MaxSize: "1", MaxAge: "30d"})
+	p.procLines = func(context.Context) ([]string, error) {
+		return []string{"node " + filepath.Join(root, "_npx", "newest")}, nil
+	}
+
+	res, err := p.Clean(context.Background(), CleanOptions{Mode: CleanModeSmart})
+	require.NoError(t, err)
+
+	assert.True(t, strings.HasPrefix(res.Output, "over limit"), res.Output)
+	assert.Contains(t, res.Output, "nothing is evictable")
+	assert.NotContains(t, res.Output, "already under limit")
+	assert.Equal(t, "over limit but nothing is evictable", res.SkipReason)
+	assert.Equal(t, 2, res.SkippedEntries)
+}
+
+func TestTreeProvider_UnreadableNoteComesBeforeSkipLines(t *testing.T) {
+	root := t.TempDir()
+	makePackage(t, filepath.Join(root, "_npx", "fresh"), 4, time.Minute)
+	p := newTree(t, "npm", config.Provider{Paths: []string{root}, MaxSize: "1G", MaxAge: "30d"})
+	units := []treeUnit{{path: "x", hold: "modified 1m ago", isTree: true}}
+
+	out := p.noopOutput(units, 3)
+
+	assert.Equal(t, "already under limit (3 unreadable)\nskip: x (modified 1m ago)", out)
+}
+
+func TestTreeProvider_SizeCountsOnlyWhatItMayDelete(t *testing.T) {
+	root := t.TempDir()
+	makePackage(t, filepath.Join(root, "_npx", "a"), 4, 90*day)
+	writeAged(t, filepath.Join(root, "_cacache", "content-v2", "x"), 700, day)
+	writeAged(t, filepath.Join(root, "_logs", "debug.log"), 5000, day)
+	p := newTree(t, "npm", config.Provider{Paths: []string{root}, MaxSize: "1G", MaxAge: "30d"})
+
+	got, err := p.CurrentSize(context.Background())
+	require.NoError(t, err)
+
+	assert.Equal(t, int64(500+700), got)
+}
+
+func TestTreeProvider_YarnSkipsWhileYarnRuns(t *testing.T) {
+	for _, cmdline := range []string{"node /usr/lib/yarn/lib/cli.js yarn install", "/opt/yarn/bin/yarn.js add x", "yarnpkg install"} {
+		root := t.TempDir()
+		dir := filepath.Join(root, "v6", "npm-pkg-1")
+		makePackage(t, dir, 3, 90*day)
+		makePackage(t, filepath.Join(root, "v6", "npm-zzz-1"), 3, 80*day)
+		p := newTree(t, "yarn", config.Provider{Paths: []string{root}, MaxSize: "1", MaxAge: "30d"})
+		require.NotNil(t, p.busy)
+		p.busy.listProcesses = func(context.Context) ([]string, error) { return []string{cmdline}, nil }
+
+		res, err := p.Clean(context.Background(), CleanOptions{Mode: CleanModeSmart})
+
+		require.NoError(t, err)
+		assert.Contains(t, res.SkipReason, "yarn is running", cmdline)
+		assert.DirExists(t, dir)
+	}
+}
+
+func TestTreeProvider_FullCleanMeasuresWholePath(t *testing.T) {
+	root := t.TempDir()
+	writeAged(t, filepath.Join(root, "_logs", "debug.log"), 5000, day)
+	installFakeTool(t, fakeVerifyTool, fakeToolSpec{Default: fakeReply{Remove: []string{filepath.Join(root, "_logs")}}})
+	p := newTree(t, "npm", config.Provider{Paths: []string{root}, MaxSize: "1", MaxAge: "30d", CleanCmd: fakeVerifyTool})
+
+	res, err := p.Clean(context.Background(), CleanOptions{Mode: CleanModeFull})
+	require.NoError(t, err)
+
+	assert.Equal(t, int64(5000), res.BytesCleaned)
+}
+
+func TestTreeProvider_DotDotSpellingHoldsTree(t *testing.T) {
+	root := t.TempDir()
+	makePackage(t, filepath.Join(root, "_npx", "h2"), 5, 90*day)
+	inUse := filepath.Join(root, "_npx", "h3")
+	makePackage(t, inUse, 5, 80*day)
+	makePackage(t, filepath.Join(root, "_npx", "newest"), 5, 70*day)
+	p := newTree(t, "npm", config.Provider{Paths: []string{root}, MaxSize: "1", MaxAge: "30d"})
+	line := "node " + filepath.ToSlash(filepath.Join(root, "_npx", "h2")) + "/../h3/x.js"
+	p.procLines = func(context.Context) ([]string, error) { return []string{line}, nil }
+
+	_, err := p.Clean(context.Background(), CleanOptions{Mode: CleanModeSmart})
+	require.NoError(t, err)
+
+	assert.DirExists(t, inUse)
+}
+
+func TestFoldPath_KeepsPrefixGluedToPath(t *testing.T) {
+	assert.Contains(t, foldPath("tool --x=/a/../../home/u/cache"), "/home/u/cache")
 }

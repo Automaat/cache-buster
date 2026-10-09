@@ -143,7 +143,7 @@ func (p *TreeProvider) Clean(ctx context.Context, opts CleanOptions) (CleanResul
 		if opts.DryRun {
 			return CleanResult{Output: "would run: " + p.cleanCmd}, nil
 		}
-		return runMeasuredCleanTimeout(ctx, p.name, p.cmdArgs, p.CurrentSize, p.timeout)
+		return runMeasuredCleanTimeout(ctx, p.name, p.cmdArgs, p.BaseProvider.CurrentSize, p.timeout)
 	}
 	return p.trim(ctx, opts)
 }
@@ -157,7 +157,11 @@ func (p *TreeProvider) trim(ctx context.Context, opts CleanOptions) (CleanResult
 
 	plan := p.plan(units, opts.Mode == CleanModeSmart)
 	if len(plan) == 0 {
-		return CleanResult{Output: noopOutput(units, warnings), SkippedEntries: countHeld(units)}, nil
+		res := CleanResult{Output: p.noopOutput(units, warnings), SkippedEntries: countHeld(units)}
+		if strings.HasPrefix(res.Output, overLimitPrefix) {
+			res.SkipReason = "over limit but nothing is evictable"
+		}
+		return res, nil
 	}
 	return p.execute(ctx, plan, units, warnings, opts)
 }
@@ -172,18 +176,45 @@ func countHeld(units []treeUnit) int {
 	return n
 }
 
-func noopOutput(units []treeUnit, warnings int) string {
+const overLimitPrefix = "over limit"
+
+// noopOutput explains an empty plan. A cache still over max_size had nothing
+// to evict: every candidate is held or the newest of its pattern.
+func (p *TreeProvider) noopOutput(units []treeUnit, warnings int) string {
+	var total int64
+	for i := range units {
+		total += units[i].size
+	}
 	var out strings.Builder
-	out.WriteString("already under limit")
+	if total > p.maxSize {
+		fmt.Fprintf(&out, overLimitPrefix+" (%s > %s) but nothing is evictable", size.FormatSize(total), size.FormatSize(p.maxSize))
+	} else {
+		out.WriteString("already under limit")
+	}
+	if warnings > 0 {
+		fmt.Fprintf(&out, " (%d unreadable)", warnings)
+	}
 	for i := range units {
 		if units[i].hold != "" {
 			fmt.Fprintf(&out, "\nskip: %s (%s)", units[i].path, units[i].hold)
 		}
 	}
-	if warnings > 0 {
-		fmt.Fprintf(&out, " (%d unreadable)", warnings)
-	}
 	return out.String()
+}
+
+// CurrentSize implements Provider. It counts the files and trees the provider
+// manages (held or newest ones included), so untouchable bulk such as indexes
+// and logs cannot keep it over max_size.
+func (p *TreeProvider) CurrentSize(ctx context.Context) (int64, error) {
+	units, _, err := p.collect(ctx)
+	if err != nil {
+		return 0, err
+	}
+	var total int64
+	for i := range units {
+		total += units[i].size
+	}
+	return total, nil
 }
 
 func (p *TreeProvider) collect(ctx context.Context) (units []treeUnit, warnings int, err error) {
@@ -214,16 +245,17 @@ func (p *TreeProvider) collect(ctx context.Context) (units []treeUnit, warnings 
 
 		found, trash, groups := p.findTrees(root)
 		for _, dir := range found {
-			u, ok, measureErr := measureEntry(ctx, dir, groups[dir])
+			u, unreadable, ok, measureErr := measureEntry(ctx, dir, groups[dir])
 			if measureErr != nil {
 				return nil, 0, measureErr
 			}
+			warnings += unreadable
 			if ok {
 				add(u)
 			}
 		}
 		for _, dir := range trash {
-			u, ok, measureErr := measureEntry(ctx, dir, -1)
+			u, _, ok, measureErr := measureEntry(ctx, dir, -1)
 			if measureErr != nil {
 				return nil, 0, measureErr
 			}
@@ -259,22 +291,24 @@ func (p *TreeProvider) findTrees(root string) (found, trash []string, groups map
 
 // measureEntry sizes dir and dates it by its newest file, because a directory
 // mtime misses writes below it. A symlink or a non-directory is not a tree.
-func measureEntry(ctx context.Context, dir string, group int) (treeUnit, bool, error) {
+// A tree with unreadable parts is held: its size and date cover only the
+// readable part, so it cannot be proven idle.
+func measureEntry(ctx context.Context, dir string, group int) (u treeUnit, unreadable int, ok bool, err error) {
 	info, err := os.Lstat(dir)
 	if errors.Is(err, fs.ErrNotExist) {
-		return treeUnit{}, false, nil
+		return treeUnit{}, 0, false, nil
 	}
 	if err != nil {
-		return treeUnit{}, false, err
+		return treeUnit{}, 0, false, err
 	}
 	if !info.IsDir() {
-		return treeUnit{}, false, nil
+		return treeUnit{}, 0, false, nil
 	}
 	listing, err := cache.ListFilesContext(ctx, []string{dir})
 	if err != nil {
-		return treeUnit{}, false, err
+		return treeUnit{}, 0, false, err
 	}
-	u := treeUnit{path: dir, modTime: info.ModTime(), group: group, isTree: true}
+	u = treeUnit{path: dir, modTime: info.ModTime(), group: group, isTree: true}
 	for _, f := range listing.Files {
 		u.size += f.Size
 		u.files++
@@ -282,7 +316,10 @@ func measureEntry(ctx context.Context, dir string, group int) (treeUnit, bool, e
 			u.modTime = f.ModTime
 		}
 	}
-	return u, true, nil
+	if n := len(listing.Warnings); n > 0 {
+		u.hold = fmt.Sprintf("%d unreadable entries", n)
+	}
+	return u, len(listing.Warnings), true, nil
 }
 
 // markHeld flags trees that must stay: modified within the idle window, or
@@ -297,7 +334,7 @@ func (p *TreeProvider) markHeld(ctx context.Context, units []treeUnit) {
 	)
 	for i := range units {
 		u := &units[i]
-		if !u.isTree || u.garbage {
+		if !u.isTree || u.garbage || u.hold != "" {
 			continue
 		}
 		if u.modTime.After(idleSince) {
@@ -419,7 +456,11 @@ func (p *TreeProvider) execute(
 			age := p.now().Sub(u.modTime).Truncate(time.Hour)
 			fmt.Fprintf(&out, "would delete: %s (%s, age: %s)\n", u.path, size.FormatSize(u.size), age)
 		case u.isTree:
-			if err := p.evict(u.path); err != nil {
+			if err := p.evict(u.path); errors.Is(err, errTreeGone) {
+				fmt.Fprintf(&out, "skip: %s (already removed)\n", u.path)
+				res.SkippedEntries++
+				continue
+			} else if err != nil {
 				fmt.Fprintf(&out, "error removing %s: %v\n", u.path, err)
 				failed++
 				continue
@@ -554,6 +595,10 @@ func moduleEntries(root string) (matches, junk []string) {
 	return matches, junk
 }
 
+// errTreeGone reports that a tree vanished before eviction, so it freed
+// nothing for this run and must not be counted.
+var errTreeGone = errors.New("tree already removed")
+
 // evictTree moves dir aside in one rename, then deletes it. The original
 // path is either intact or gone, never half removed; a failed delete leaves
 // only a trash directory that the next run removes.
@@ -561,7 +606,7 @@ func evictTree(dir string) error {
 	trash := filepath.Join(filepath.Dir(dir), fmt.Sprintf("%s%d-%d", treeTrashPrefix, os.Getpid(), time.Now().UnixNano()))
 	if err := os.Rename(dir, trash); err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
-			return nil
+			return errTreeGone
 		}
 		return fmt.Errorf("move aside: %w", err)
 	}
@@ -591,10 +636,17 @@ func removeTree(dir string) error {
 }
 
 // foldPath makes a path comparable with a process command line: slashes
-// are unified and, on the case-insensitive Windows and macOS file systems,
+// are unified, repeated ones and dot-dot elements resolved, and, on the case-insensitive Windows and macOS file systems,
 // so is the case.
 func foldPath(s string) string {
 	s = strings.ReplaceAll(s, `\`, "/")
+	parts := strings.Split(s, " ")
+	for i, part := range parts {
+		if at := strings.Index(part, "/"); at >= 0 {
+			parts[i] = part[:at] + path.Clean(part[at:])
+		}
+	}
+	s = strings.Join(parts, " ")
 	if runtime.GOOS == "windows" || runtime.GOOS == "darwin" {
 		s = strings.ToLower(s)
 	}

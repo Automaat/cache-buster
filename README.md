@@ -290,7 +290,7 @@ measured with the same kind of bounded scan (10 second budget, Ctrl-C stops it, 
 
 ```bash
 bilgie clean go-build npm  # Specific providers
-bilgie clean --all         # All enabled
+bilgie clean --all         # All enabled (not xcode-archives; name it to clean it)
 bilgie clean --dry-run     # Preview only
 bilgie clean --force       # Skip confirmation
 bilgie clean --smart       # LRU-based trimming
@@ -589,7 +589,10 @@ tree. Independent files (`_cacache`, `.crate` archives) are trimmed
 by age, then oldest first. Trees go whole, oldest first by newest file mtime, and only while
 over `max_size`; `max_age` does not apply to them because mtime records install time, not use.
 `max_size` limits only what the provider may delete; untouched parts such as
-`registry/index` still show in the size `status` reports but never count toward eviction.
+`registry/index` or npm logs count neither toward the size `status` and `auto` compare to the
+limit nor toward eviction. When the cache is over `max_size` but every candidate is kept, the
+output says nothing is evictable. A tree with an unreadable part is kept: its size and age
+are known only in part.
 
 A tree is kept when it is the newest of its pattern, was modified in the last 2 hours or is named
 on the command line of a running process. A tree is first renamed aside and then deleted, so it is
@@ -641,6 +644,7 @@ failure. If the check itself fails, the provider is skipped too.
 | `cargo` | a `cargo` or `rustc` process runs |
 | `gradle` | a `gradle` or `gradlew` process, or a Gradle daemon, runs |
 | `homebrew` | a `brew` process runs |
+| `yarn` | a `yarn` process runs (`yarn`, `yarn.js`, `yarnpkg`; any OS) |
 | `uv` | `<path>/.lock` is flock-held, or a `uv` process runs |
 | `mise` | a `mise` process runs, or a process command line names a file below `<path>/installs/` |
 
@@ -650,7 +654,9 @@ bilgie process and its wrapper ancestors are not counted: a wrapper is
 recognized by parsing its command string with shell quoting rules (quotes,
 backslash escapes, repeated spaces, nested `sh -c`, `env VAR=x`, `sudo`) and
 finding bilgie's own executable and arguments in it. A string that does not
-parse stays busy. An ancestor that is the tool itself, such as
+parse falls back to its whitespace-separated words and must still show bilgie's
+executable followed by its arguments, or it stays busy. Shell separators glued to a word
+(`echo hi;bilgie clean cargo`) are split. An ancestor that is the tool itself, such as
 `cargo run -- clean cargo`, is counted. A hung
 `clean_cmd` is killed with its whole process group, so it must not need a
 terminal.
