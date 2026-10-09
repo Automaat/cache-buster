@@ -618,7 +618,7 @@ the next install fail with `failed to read directory .../archive-v0/<id>`.
   then `$XDG_CACHE_HOME/uv` (macOS and Linux; a relative value is ignored; Windows ignores
   `XDG_CACHE_HOME`), then `~/.cache/uv`
   (macOS/Linux) or `%LOCALAPPDATA%\uv\cache` (Windows). A `paths` entry that is not the default
-  always wins over the environment. bilgie hands the chosen directory to uv as `UV_CACHE_DIR` and
+  always wins over the environment; an entry spelled exactly like the default counts as the default. bilgie hands the chosen directory to uv as `UV_CACHE_DIR` and
   clears `UV_NO_CACHE`, so uv cleans exactly the directory bilgie measured.
 - `paths` must name exactly one directory. A path that is, lies inside or contains a protected
   root is skipped.

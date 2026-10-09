@@ -191,12 +191,12 @@ func (p *UVProvider) Clean(ctx context.Context, opts CleanOptions) (CleanResult,
 	}
 
 	if opts.DryRun {
-		current, sizeErr := p.CurrentSize(ctx)
-		if sizeErr != nil {
-			current = 0
+		cacheSize := "size unknown"
+		if current, sizeErr := p.CurrentSize(ctx); sizeErr == nil {
+			cacheSize = sizeText(current)
 		}
 		return CleanResult{
-			Output: fmt.Sprintf("would run: %s (cache %s, uv has no dry-run)", display, sizeText(current)),
+			Output: fmt.Sprintf("would run: %s (cache %s, uv has no dry-run)", display, cacheSize),
 		}, nil
 	}
 
