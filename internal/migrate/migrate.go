@@ -67,10 +67,7 @@ func Dir(oldDir, newDir string) (bool, error) {
 	}
 	_, err = os.Lstat(newDir)
 	if err == nil {
-		if statErr != nil || !info.IsDir() {
-			return false, nil
-		}
-		return false, newDirExists(oldDir, newDir)
+		return false, skipOrWarn(oldDir, newDir)
 	}
 	if !errors.Is(err, os.ErrNotExist) {
 		return false, err
@@ -94,6 +91,16 @@ func Dir(oldDir, newDir string) (bool, error) {
 		return false, tolerateLostRace(err, oldDir)
 	}
 	return true, nil
+}
+
+// skipOrWarn settles a legacy path next to an existing newDir: silent unless
+// it is a directory (or a link to one) that still holds data.
+func skipOrWarn(oldDir, newDir string) error {
+	info, err := os.Stat(oldDir)
+	if isDir := err == nil && info.IsDir(); !isDir {
+		return nil
+	}
+	return newDirExists(oldDir, newDir)
 }
 
 // newDirExists is nil for an empty oldDir, which holds nothing to lose, and
