@@ -607,7 +607,12 @@ func TestDefaultProvidersFor_MacOSIgnoresXDGDataHome(t *testing.T) {
 	p := macPlatform
 	p.XDGDataHome = "/Users/u/xdg-data"
 
-	assert.Equal(t, []string{"~/.local/share/mise"}, DefaultProvidersFor(p)["mise"].Paths)
+	assert.Equal(t, []string{"~/.local/share/mise", "~/Library/Caches/mise"}, DefaultProvidersFor(p)["mise"].Paths)
+}
+
+func TestDefaultProvidersFor_MisePaths(t *testing.T) {
+	assert.Equal(t, []string{"~/.local/share/mise", "~/.cache/mise"}, DefaultProvidersFor(linPlatform)["mise"].Paths)
+	assert.Equal(t, []string{"~/AppData/Local/mise"}, DefaultProvidersFor(winPlatform)["mise"].Paths)
 }
 
 // sailGlobs spells the expected sail* globs below dirs with the host separator.

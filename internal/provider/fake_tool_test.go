@@ -26,6 +26,7 @@ type fakeReply struct {
 	Exit     int        `json:"exit"`
 	SleepMS  int        `json:"sleep_ms"`
 	Touch    string     `json:"touch"`
+	Remove   []string   `json:"remove"`
 	IfExists string     `json:"if_exists"`
 	Then     *fakeReply `json:"then"`
 }
@@ -72,6 +73,12 @@ func runFakeTool(raw string, args []string, stdout, stderr io.Writer) int {
 	if reply.Touch != "" {
 		if err := os.WriteFile(reply.Touch, nil, 0o600); err != nil {
 			fmt.Fprintln(stderr, "fake tool touch:", err)
+			return 2
+		}
+	}
+	for _, dir := range reply.Remove {
+		if err := os.RemoveAll(dir); err != nil {
+			fmt.Fprintln(stderr, "fake tool remove:", err)
 			return 2
 		}
 	}

@@ -113,7 +113,7 @@ func systemProviders(p Platform) map[string]Provider {
 		},
 		"mise": {
 			Enabled:  true,
-			Paths:    []string{p.data("mise")},
+			Paths:    misePaths(p),
 			MaxSize:  "8G",
 			MaxAge:   "30d",
 			CleanCmd: "mise prune",
@@ -326,4 +326,14 @@ func projectProviders() map[string]Provider {
 			Python:  &off,
 		},
 	}
+}
+
+// misePaths is mise's data directory plus its cache directory when that is a
+// different place (on Windows both are the same directory).
+func misePaths(p Platform) []string {
+	data, cache := p.data("mise"), p.cache("mise")
+	if data == cache {
+		return []string{data}
+	}
+	return []string{data, cache}
 }

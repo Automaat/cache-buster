@@ -60,7 +60,6 @@ var treeSpecs = map[string]treeSpec{
 	"yarn":              {entries: []string{"v*/*"}, imaged: []string{"node", "yarn"}},
 	"gradle":            {entries: []string{"*"}, imaged: []string{"java"}},
 	"go-mod":            {modules: true},
-	"mise":              {files: []string{"downloads"}},
 	"xcode-deriveddata": {entries: []string{"*"}},
 	"xcode-archives":    {entries: []string{"*/*"}},
 }

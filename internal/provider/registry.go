@@ -72,6 +72,10 @@ func newProvider(name string, cfg config.Provider) (Provider, error) {
 		return NewDockerVolumesProvider(name, cfg)
 	}
 
+	if name == "mise" {
+		return NewMiseProvider(name, cfg)
+	}
+
 	if spec, ok := treeSpecs[name]; ok {
 		return NewTreeProvider(name, cfg, spec)
 	}

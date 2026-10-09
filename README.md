@@ -130,7 +130,7 @@ Providers are auto-detected — only tools installed on your system appear in th
 | ios-simulator | 10G | `xcrun simctl delete unavailable` |
 | **Tools** | | |
 | homebrew | 5G | `brew cleanup -s` |
-| mise | 8G | smart: `downloads` files; installs are never trimmed; full: `mise prune` |
+| mise | 8G | `mise prune` for unused tool versions (listed first via `--dry-run`), `downloads` and cache files by age; see [mise](#mise) |
 | docker | 50G | `docker system prune -af` |
 | docker-volumes (disabled by default; ignores max_age) | 50G | `docker volume prune -f` |
 | jetbrains | 3G | file-based |
@@ -560,15 +560,15 @@ Entries must be literal paths, absolute or starting with `~/`: globs, `.`/`..` e
 `~/.local/share/opencode`, `/var/lib/docker/volumes`); removing a built-in entry from the file has no
 effect. `auto` also skips any path inside a git checkout or worktree, any path holding one within 3 levels (see
 the safety rules), and never prunes Docker volumes (Docker Desktop keeps them inside its VM image).
-`project-artifacts` is the one provider that works inside git checkouts and `worktrees` directories by design; it enforces the protected list, `Downloads` and `opencode` itself and cleans only the artifact directories.
+`project-artifacts` is the one provider that works inside git checkouts and `worktrees` directories by design; it enforces the protected list, `Downloads` and `opencode` itself and cleans only the artifact directories. `mise` also enforces the protected list itself (its `plugins/` hold git clones that `mise prune` never touches), so `auto` skips the checkout scan for it.
 
 ### Whole-unit trees
 
 Some caches hold trees that are only valid complete: an installed package under
 `~/.npm/_npx`, an extracted crate under `~/.cargo/registry/src` (cargo trusts its
 `.cargo-ok` marker), a Go module under `pkg/mod`. `npm`, `cargo`, `go-mod`, `yarn`,
-`gradle`, `mise`, `xcode-deriveddata` and `xcode-archives` never delete inside such a
-tree. Independent files (`_cacache`, `.crate` archives, mise `downloads`) are trimmed
+`gradle`, `xcode-deriveddata` and `xcode-archives` never delete inside such a
+tree. Independent files (`_cacache`, `.crate` archives) are trimmed
 by age, then oldest first. Trees go whole, oldest first by newest file mtime, and only while
 over `max_size`; `max_age` does not apply to them because mtime records install time, not use.
 `max_size` limits only what the provider may delete; untouched parts such as
@@ -578,6 +578,38 @@ A tree is kept when it is the newest of its pattern, was modified in the last 2 
 on the command line of a running process. A tree is first renamed aside and then deleted, so it is
 whole or gone; a leftover `.bilgie-trash-*` directory from a failed delete is removed on the next run.
 Dot entries are ignored. In full mode providers with a `clean_cmd` run it.
+
+### mise
+
+`mise` is a command-managed provider: mise decides what goes, bilgie never deletes inside
+`installs/`. A run (`clean`, `auto`, smart or full mode alike) does this:
+
+1. Refuses a path that is, lies inside or contains a protected root (`~/Downloads`, opencode data,
+   Docker volumes, the `protected` list). `auto` does not run the git checkout scan on mise: the
+   plugin clones under `plugins/` (`lua`, `make`, `teleport-ent`, ...) are real git checkouts, and
+   they are never touched.
+2. Skips with a reason when `mise` is running or any process command line names a file below
+   `<mise dir>/installs/`, or the process list cannot be read. The check sees only what the process
+   list shows: a binary started by bare name from `PATH` (`node server.js`), or any binary on Windows
+   (image names only), is not visible to it. `mise prune` itself keeps the version a running process
+   started from, so mise is the backstop there.
+3. Runs `mise prune --dry-run` and reads its report: `mise <tool>@<version> is prunable: ...` names the
+   version, and `mise <tool>@<version> [dryrun] remove <installs>/<dir>/<version>, <cache>/<tool>/<version>`
+   gives its directories (the installs directory name is a slug, `npm:@redocly/cli` is `npm-redocly-cli`).
+   Other known lines (`uninstall`, `done`, `pruned configuration links`) are ignored. A failing, timed
+   out or unparseable listing, or a path outside `installs/<dir>/<version>`, skips the provider and
+   deletes nothing. Sizes are measured on the listed directories.
+4. Lists each version with its size (`would prune: node@20.0.0 (1.2 GB)`); a dry-run stops here.
+   A real run calls `mise prune --yes` once, then reports `pruned:` or, when mise kept a version,
+   `kept:`.
+5. Trims `<first path>/downloads` and every further path (the cache directory, `~/Library/Caches/mise`
+   or `~/.cache/mise`) by `max_age`, then oldest first while over `max_size`.
+
+`mise prune` removes only versions that no tracked config (`~/.local/state/mise/tracked-configs`)
+references. A version used only by an untracked project directory, by `MISE_<TOOL>_VERSION` or by
+`mise exec` may be removed; mise reinstalls it on demand. The real `mise prune --yes` removes what is
+unused at that moment, which can differ from the earlier listing if a config changed in between. `clean_cmd` defaults to `mise prune` and
+must be `<mise executable> prune` optionally followed by tool names, with no flags (bilgie adds `--dry-run` and `--yes` itself); `clean_timeout` bounds each call.
 
 ### Busy tools
 
@@ -593,6 +625,7 @@ failure. If the check itself fails, the provider is skipped too.
 | `gradle` | a `gradle` or `gradlew` process, or a Gradle daemon, runs |
 | `homebrew` | a `brew` process runs |
 | `uv` | `<path>/.lock` is flock-held, or a `uv` process runs |
+| `mise` | a `mise` process runs, or a process command line names a file below `<path>/installs/` |
 
 Busy detection errs toward skipping: any process whose command line contains
 the tool name counts, including wrappers such as `sudo` or `sh -c`. The
