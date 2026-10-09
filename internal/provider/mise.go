@@ -103,6 +103,7 @@ func (p *MiseProvider) Available() bool {
 type prunable struct {
 	label string
 	path  string
+	extra []string
 	size  int64
 }
 
@@ -315,48 +316,171 @@ func (p *MiseProvider) listPrunable(ctx context.Context) (list []prunable, skipR
 		}
 		return nil, reason
 	}
-	list, bad := p.parsePrunable(ctx, stdout, false)
-	if bad == "" && len(list) == 0 {
-		list, _ = p.parsePrunable(ctx, stderr, true)
+	st := &listing{items: map[string]*prunable{}}
+	bad := p.parseStream(st, stdout, false)
+	if bad == "" {
+		bad = p.parseStream(st, stderr, true)
 	}
 	if bad != "" {
 		return nil, fmt.Sprintf("cannot parse %s --dry-run output: %q", p.cleanCmd, bad)
 	}
-	return list, ""
+	return p.finish(ctx, st), ""
 }
 
-// parsePrunable reads the dry-run listing: `rm -rf <installs>/<tool>/<version>`
-// lines, or `tool@version` lines. It returns the first unreadable line,
-// unless lenient, which skips lines it cannot read (stderr carries warnings).
-func (p *MiseProvider) parsePrunable(ctx context.Context, stdout string, lenient bool) (list []prunable, badLine string) {
-	var (
-		out  []prunable
-		seen = map[string]bool{}
-	)
-	for raw := range strings.SplitSeq(stdout, "\n") {
-		line := strings.TrimSpace(ansiEscape.ReplaceAllString(raw, ""))
-		if line == "" {
-			continue
-		}
-		v, ok := p.parseLine(line)
-		if !ok {
-			if lenient {
+// listing collects the versions one dry-run reports, in output order.
+type listing struct {
+	items map[string]*prunable
+	order []string
+}
+
+func (l *listing) get(label string) *prunable {
+	if v, ok := l.items[label]; ok {
+		return v
+	}
+	v := &prunable{label: label}
+	l.items[label] = v
+	l.order = append(l.order, label)
+	return v
+}
+
+func (p *MiseProvider) finish(ctx context.Context, st *listing) []prunable {
+	out := make([]prunable, 0, len(st.order))
+	for _, label := range st.order {
+		v := *st.items[label]
+		for _, dir := range append([]string{v.path}, v.extra...) {
+			if dir == "" {
 				continue
 			}
-			return nil, line
-		}
-		if seen[v.label] {
-			continue
-		}
-		seen[v.label] = true
-		if v.path != "" {
-			if res, err := cache.CalculateSizeContext(ctx, []string{v.path}); err == nil {
-				v.size = res.Size
+			if res, err := cache.CalculateSizeContext(ctx, []string{dir}); err == nil {
+				v.size += res.Size
 			}
 		}
 		out = append(out, v)
 	}
-	return out, ""
+	return out
+}
+
+// parseStream feeds every line of one output stream into st and returns the
+// first line it cannot accept. A lenient stream (stderr, which carries
+// warnings) ignores lines of unknown shape, but a line that looks like a
+// dry-run line and does not parse is always an error.
+func (p *MiseProvider) parseStream(st *listing, text string, lenient bool) string {
+	for raw := range strings.SplitSeq(text, "\n") {
+		line := strings.TrimSpace(ansiEscape.ReplaceAllString(raw, ""))
+		if line == "" {
+			continue
+		}
+		known, ok := p.parseOutputLine(st, line)
+		switch {
+		case ok:
+		case known || !lenient:
+			return line
+		}
+	}
+	return ""
+}
+
+// parseOutputLine reads one line of mise's dry-run report, for example:
+//
+//	mise kubectl@1.37.0 is prunable: kubectl is required at 1.34.3 by ...
+//	mise kubectl@1.37.0 [dryrun]   remove ~/.local/share/mise/installs/kubectl/1.37.0, ~/Library/Caches/mise/kubectl/1.37.0
+//
+// known says the line has the shape of a dry-run line, ok that it parsed.
+func (p *MiseProvider) parseOutputLine(st *listing, line string) (known, ok bool) {
+	s := strings.TrimPrefix(line, "mise ")
+	if strings.HasPrefix(s, "pruned configuration links") {
+		return true, true
+	}
+	if idx := strings.Index(s, " is prunable:"); idx > 0 {
+		label := s[:idx]
+		if !validLabel(label) {
+			return true, false
+		}
+		st.get(label)
+		return true, true
+	}
+	if idx := strings.Index(s, " [dryrun]"); idx > 0 {
+		label := s[:idx]
+		rest := strings.TrimSpace(s[idx+len(" [dryrun]"):])
+		if !validLabel(label) || st.items[label] == nil {
+			return true, false
+		}
+		switch {
+		case rest == "uninstall", strings.HasPrefix(rest, "✓"):
+			return true, true
+		case strings.HasPrefix(rest, "remove "):
+			return true, p.parseRemove(st.items[label], strings.TrimPrefix(rest, "remove "))
+		}
+		return true, false
+	}
+	if v, legacy := p.parseLine(line); legacy {
+		cur := st.get(v.label)
+		if cur.path == "" {
+			cur.path = v.path
+		}
+		return false, true
+	}
+	return false, false
+}
+
+// validLabel accepts tool@version where the tool may hold ':', '@' and '/'
+// (npm:@redocly/cli@2.46.1); the version follows the last '@'.
+func validLabel(label string) bool {
+	at := strings.LastIndex(label, "@")
+	if at <= 0 || at == len(label)-1 || strings.ContainsAny(label, " \t") {
+		return false
+	}
+	version := label[at+1:]
+	return version != "." && version != ".." && !strings.ContainsAny(version, `/\`)
+}
+
+// parseRemove reads the comma-separated paths of a remove line. Exactly one
+// must be the install directory <mise dir>/installs/<dir>/<version>; the
+// others must be cache directories <...>/mise/<tool>/<version>. Anything
+// else fails.
+func (p *MiseProvider) parseRemove(v *prunable, list string) bool {
+	version := v.label[strings.LastIndex(v.label, "@")+1:]
+	for raw := range strings.SplitSeq(list, ", ") {
+		target := strings.TrimSpace(raw)
+		if strings.HasPrefix(target, "~/") && p.home != "" {
+			target = filepath.Join(p.home, target[2:])
+		}
+		target = filepath.Clean(filepath.FromSlash(filepath.ToSlash(target)))
+		if !filepath.IsAbs(target) || filepath.Base(target) != version {
+			return false
+		}
+		if inst, ok := p.installPath(target); ok {
+			if v.path != "" && v.path != inst {
+				return false
+			}
+			v.path = inst
+			continue
+		}
+		if filepath.Base(filepath.Dir(filepath.Dir(target))) != "mise" {
+			return false
+		}
+		v.extra = append(v.extra, target)
+	}
+	return v.path != ""
+}
+
+// installPath reports whether target is <installs>/<dir>/<version> below a
+// configured mise directory.
+func (p *MiseProvider) installPath(target string) (string, bool) {
+	for _, root := range p.installRoots() {
+		if !pathWithin(target, root) {
+			continue
+		}
+		rel, err := filepath.Rel(root, target)
+		if err != nil {
+			continue
+		}
+		parts := strings.Split(filepath.ToSlash(rel), "/")
+		if len(parts) == 2 && !slices.Contains(parts, "..") && !slices.Contains(parts, ".") {
+			return target, true
+		}
+	}
+	return "", false
 }
 
 func (p *MiseProvider) parseLine(line string) (prunable, bool) {

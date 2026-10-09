@@ -524,3 +524,121 @@ func TestMise_StderrListingAmongWarningsIsRead(t *testing.T) {
 	require.Len(t, res.Entries, 1)
 	assert.Equal(t, "node@20.0.0", res.Entries[0].Detail)
 }
+
+var realSampleInstalls = map[string]string{
+	"claude-code": "2.1.283", "kubectl": "1.37.0", "lefthook": "2.1.15",
+	"npm-redocly-cli": "2.46.1", "pi": "0.87.1", "pnpm": "10.34.5",
+	"protoc": "36.0", "ruff": "0.16.7",
+}
+
+func realSampleFixture(t *testing.T) (home, root string) {
+	t.Helper()
+	home = t.TempDir()
+	root = filepath.Join(home, ".local", "share", "mise")
+	for tool, version := range realSampleInstalls {
+		writeAged(t, filepath.Join(root, "installs", tool, version, "bin", tool), 1000, time.Hour)
+		if tool != "npm-redocly-cli" {
+			writeAged(t, filepath.Join(home, "Library", "Caches", "mise", tool, version, "meta"), 100, time.Hour)
+		}
+	}
+	return home, root
+}
+
+func readRealSample(t *testing.T) string {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join("testdata", "mise-prune-dryrun.txt"))
+	require.NoError(t, err)
+	return string(raw)
+}
+
+func TestMise_RealDryRunFormatEndToEnd(t *testing.T) {
+	for name, reply := range map[string]func(string) fakeReply{
+		"stdout": func(s string) fakeReply { return fakeReply{Stdout: s} },
+		"stderr": func(s string) fakeReply { return fakeReply{Stderr: s} },
+	} {
+		t.Run(name, func(t *testing.T) {
+			home, root := realSampleFixture(t)
+			marker := filepath.Join(t.TempDir(), "yes")
+			installFakeTool(t, "mise", fakeToolSpec{Replies: map[string]fakeReply{
+				"prune --dry-run": reply(readRealSample(t)),
+				"prune --yes":     {Touch: marker},
+			}})
+			p := newMise(t, root, config.Provider{})
+			p.home = home
+
+			res, err := p.Clean(context.Background(), CleanOptions{Mode: CleanModeSmart, DryRun: true})
+
+			require.NoError(t, err)
+			assert.Empty(t, res.SkipReason)
+			require.Len(t, res.Entries, 8)
+			assert.Contains(t, res.Output, "would prune: npm:@redocly/cli@2.46.1 (")
+			assert.Contains(t, res.Output, "would prune: kubectl@1.37.0 (")
+			assert.NotContains(t, res.Output, "size unknown")
+			assert.Equal(t, int64(8*1000+7*100), res.BytesCleaned)
+			for tool, version := range realSampleInstalls {
+				assert.DirExists(t, filepath.Join(root, "installs", tool, version))
+			}
+			assert.NoFileExists(t, marker)
+		})
+	}
+}
+
+func TestMise_RealFormatRealRunAccountsEachVersion(t *testing.T) {
+	home, root := realSampleFixture(t)
+	marker := filepath.Join(t.TempDir(), "yes")
+	var gone []string
+	for tool, version := range realSampleInstalls {
+		if tool != "pnpm" {
+			gone = append(gone, filepath.Join(root, "installs", tool, version))
+		}
+	}
+	installFakeTool(t, "mise", fakeToolSpec{Replies: map[string]fakeReply{
+		"prune --dry-run": {Stdout: readRealSample(t)},
+		"prune --yes": {
+			Remove: gone, Touch: marker,
+			IfExists: marker, Then: &fakeReply{Stderr: "twice", Exit: 9},
+		},
+	}})
+	p := newMise(t, root, config.Provider{})
+	p.home = home
+
+	res, err := p.Clean(context.Background(), CleanOptions{Mode: CleanModeSmart})
+
+	require.NoError(t, err)
+	assert.Len(t, res.Entries, 7)
+	assert.Equal(t, 1, res.SkippedEntries)
+	assert.Contains(t, res.Output, "kept: pnpm@10.34.5")
+	assert.Contains(t, res.Output, "pruned: npm:@redocly/cli@2.46.1 (")
+}
+
+func TestMise_RealFormatUnexpectedLinesFailClosed(t *testing.T) {
+	for name, edit := range map[string]func(string) string{
+		"remove outside installs": func(s string) string {
+			return strings.Replace(s, "remove ~/.local/share/mise/installs/pi/0.87.1", "remove ~/elsewhere/pi/0.87.1", 1)
+		},
+		"remove too deep": func(s string) string {
+			return strings.Replace(s, "installs/pi/0.87.1", "installs/pi/x/0.87.1", 1)
+		},
+		"unknown dryrun action": func(s string) string {
+			return strings.Replace(s, "[dryrun]        uninstall", "[dryrun]        explode", 1)
+		},
+		"stdout prose": func(s string) string { return s + "\nsomething unexpected\n" },
+	} {
+		t.Run(name, func(t *testing.T) {
+			home, root := realSampleFixture(t)
+			marker := filepath.Join(t.TempDir(), "yes")
+			installFakeTool(t, "mise", fakeToolSpec{Replies: map[string]fakeReply{
+				"prune --dry-run": {Stdout: edit(readRealSample(t))},
+				"prune --yes":     {Touch: marker},
+			}})
+			p := newMise(t, root, config.Provider{})
+			p.home = home
+
+			res, err := p.Clean(context.Background(), CleanOptions{})
+
+			require.NoError(t, err)
+			assert.Contains(t, res.SkipReason, "cannot parse")
+			assert.NoFileExists(t, marker)
+		})
+	}
+}

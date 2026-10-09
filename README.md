@@ -561,9 +561,12 @@ Dot entries are ignored. In full mode providers with a `clean_cmd` run it.
    list shows: a binary started by bare name from `PATH` (`node server.js`), or any binary on Windows
    (image names only), is not visible to it. `mise prune` itself keeps the version a running process
    started from, so mise is the backstop there.
-3. Runs `mise prune --dry-run` and reads its `rm -rf <installs>/<tool>/<version>` (or `tool@version`)
-   lines. A failing, timed out or unparseable listing, or a path outside `installs/<tool>/<version>`,
-   skips the provider and deletes nothing.
+3. Runs `mise prune --dry-run` and reads its report: `mise <tool>@<version> is prunable: ...` names the
+   version, and `mise <tool>@<version> [dryrun] remove <installs>/<dir>/<version>, <cache>/<tool>/<version>`
+   gives its directories (the installs directory name is a slug, `npm:@redocly/cli` is `npm-redocly-cli`).
+   Other known lines (`uninstall`, `done`, `pruned configuration links`) are ignored. A failing, timed
+   out or unparseable listing, or a path outside `installs/<dir>/<version>`, skips the provider and
+   deletes nothing. Sizes are measured on the listed directories.
 4. Lists each version with its size (`would prune: node@20.0.0 (1.2 GB)`); a dry-run stops here.
    A real run calls `mise prune --yes` once, then reports `pruned:` or, when mise kept a version,
    `kept:`.
