@@ -29,7 +29,7 @@ func (e *AgeFloorError) Error() string {
 
 func (e *AgeFloorError) suggestion() string {
 	m := durationRegex.FindStringSubmatch(strings.TrimSpace(e.Value))
-	if m == nil {
+	if len(m) < 3 || strings.Trim(m[1], "0") == "" {
 		return ""
 	}
 	switch strings.ToLower(m[2]) {

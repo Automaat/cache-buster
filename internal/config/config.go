@@ -207,7 +207,7 @@ func (a Auto) bytes(name, value string) (int64, error) {
 }
 
 func (a Auto) span(name, value string) (time.Duration, error) {
-	d, err := ParseDuration(value)
+	d, err := ParseBudget(value)
 	if err != nil {
 		return 0, fmt.Errorf("%s: %w", name, err)
 	}

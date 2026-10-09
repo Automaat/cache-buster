@@ -82,3 +82,17 @@ func TestDefaultsPassAgeFloor(t *testing.T) {
 		require.NoError(t, cfg.ValidateAges(), goos)
 	}
 }
+
+func TestAgeFloorError_NoSuggestionForZero(t *testing.T) {
+	for _, v := range []string{"0", "0s", "0ms"} {
+		err := &AgeFloorError{Provider: "x", Field: "max_age", Value: v}
+		assert.NotContains(t, err.Error(), "did you mean", v)
+	}
+}
+
+func TestAuto_SpansKeepMillisecondUnit(t *testing.T) {
+	a := DefaultAuto()
+	a.NotifyCooldown = "250ms"
+	_, err := a.Limits()
+	require.NoError(t, err)
+}
