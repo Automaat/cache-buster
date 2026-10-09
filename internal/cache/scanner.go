@@ -1,6 +1,7 @@
 package cache
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -8,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -54,7 +56,7 @@ func CalculateSizeContext(ctx context.Context, paths []string) (ScanResult, erro
 	var links osshim.LinkSet
 
 	var wg sync.WaitGroup
-	for _, path := range slices.Compact(slices.Sorted(slices.Values(paths))) {
+	for _, path := range distinctRoots(paths) {
 		wg.Add(1)
 		go func(p string) {
 			defer wg.Done()
@@ -129,7 +131,7 @@ func ListFilesContext(ctx context.Context, paths []string) (ListResult, error) {
 	var firstErr atomic.Value
 
 	var wg sync.WaitGroup
-	for _, path := range paths {
+	for _, path := range distinctRoots(paths) {
 		wg.Add(1)
 		go func(p string) {
 			defer wg.Done()
@@ -184,4 +186,42 @@ func ListFilesContext(ctx context.Context, paths []string) (ListResult, error) {
 		return result, fmt.Errorf("list files: %w", err)
 	}
 	return result, nil
+}
+
+// distinctRoots drops paths that name the same place twice: equal after
+// symlinks are resolved, or inside another directory root of the list. A root
+// that is itself a symlink never absorbs others, because walking it visits
+// nothing. The result is ordered, so scans are deterministic.
+func distinctRoots(paths []string) []string {
+	type root struct{ path, key string }
+	roots := make([]root, 0, len(paths))
+	for _, p := range paths {
+		key := filepath.Clean(p)
+		if resolved, err := filepath.EvalSymlinks(p); err == nil {
+			key = resolved
+		}
+		roots = append(roots, root{p, key})
+	}
+	slices.SortFunc(roots, func(a, b root) int {
+		return cmp.Or(cmp.Compare(len(a.key), len(b.key)), strings.Compare(a.key, b.key), strings.Compare(a.path, b.path))
+	})
+
+	var kept []root
+	for _, r := range roots {
+		covered := slices.ContainsFunc(kept, func(k root) bool {
+			if r.key != k.key && !strings.HasPrefix(r.key, k.key+string(filepath.Separator)) {
+				return false
+			}
+			info, err := os.Lstat(k.path)
+			return err == nil && info.IsDir()
+		})
+		if !covered {
+			kept = append(kept, r)
+		}
+	}
+	out := make([]string, len(kept))
+	for i, k := range kept {
+		out[i] = k.path
+	}
+	return out
 }

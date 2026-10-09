@@ -312,3 +312,55 @@ func TestTrim_SizeTrimCountsSharedInodeOnce(t *testing.T) {
 	assert.Equal(t, int64(2), result.DeletedCount)
 	assert.FileExists(t, filepath.Join(dir, "new.bin"))
 }
+
+func TestTrim_OverlappingPathsListEachFileOnce(t *testing.T) {
+	dir, elsewhere := t.TempDir(), t.TempDir()
+	first := filepath.Join(dir, "sub", "a.bin")
+	createTestFile(t, first, 1000, 40*24*time.Hour)
+	linkOrSkip(t, first, filepath.Join(elsewhere, "keep.bin"))
+
+	result, err := Trim(context.Background(), []string{dir, filepath.Join(dir, "sub")}, TrimOptions{
+		MaxSize: 10000, MaxAge: 30 * 24 * time.Hour, DryRun: true,
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, int64(0), result.FreedBytes, "the outside link keeps the inode")
+	assert.Equal(t, int64(1), result.DeletedCount)
+}
+
+func TestTrim_SizeTrimLeavesInodesItCannotFree(t *testing.T) {
+	dir, elsewhere := t.TempDir(), t.TempDir()
+	big := filepath.Join(dir, "big.bin")
+	createTestFile(t, big, 8000, 20*24*time.Hour)
+	linkOrSkip(t, big, filepath.Join(elsewhere, "keep.bin"))
+	for i, name := range []string{"a", "b", "c"} {
+		createTestFile(t, filepath.Join(dir, name), 1000, time.Duration(10-i)*24*time.Hour)
+	}
+
+	result, err := Trim(context.Background(), []string{dir}, TrimOptions{
+		MaxSize: 10500, MaxAge: 90 * 24 * time.Hour,
+	})
+
+	require.NoError(t, err)
+	assert.FileExists(t, big, "removing the link frees nothing")
+	assert.Equal(t, int64(2000), result.FreedBytes)
+	assert.Equal(t, int64(2), result.DeletedCount)
+}
+
+func TestCalculateSize_OverlappingAndAliasedPathsCountOnce(t *testing.T) {
+	root := t.TempDir()
+	createTestFile(t, filepath.Join(root, "a", "x.bin"), 100, time.Hour)
+	createTestFile(t, filepath.Join(root, "a", "b", "y.bin"), 50, time.Hour)
+	alias := filepath.Join(t.TempDir(), "alias")
+	if err := os.Symlink(root, alias); err != nil {
+		t.Skipf("symlinks unsupported here: %v", err)
+	}
+
+	res, err := CalculateSize([]string{root, filepath.Join(root, "a"), filepath.Join(alias, "a", "b")})
+
+	require.NoError(t, err)
+	assert.Equal(t, int64(150), res.Size)
+	list, err := ListFiles([]string{filepath.Join(alias, "a"), filepath.Join(root, "a", "b"), root})
+	require.NoError(t, err)
+	assert.Len(t, list.Files, 2)
+}

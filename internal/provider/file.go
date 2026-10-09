@@ -103,6 +103,9 @@ func (p *FileProvider) fullClean(ctx context.Context, opts CleanOptions) (CleanR
 		if bytesDeleted >= bytesToDelete {
 			break
 		}
+		if !ledger.Freeable(f) {
+			continue
+		}
 
 		select {
 		case <-ctx.Done():

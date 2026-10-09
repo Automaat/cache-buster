@@ -39,6 +39,7 @@ type LinkLedger struct {
 	removed map[osshim.FileID]uint64
 }
 
+// NewLinkLedger counts the links of each shared inode in files.
 func NewLinkLedger(files []FileInfo) *LinkLedger {
 	l := &LinkLedger{listed: map[osshim.FileID]uint64{}, removed: map[osshim.FileID]uint64{}}
 	for _, f := range files {
@@ -47,6 +48,12 @@ func NewLinkLedger(files []FileInfo) *LinkLedger {
 		}
 	}
 	return l
+}
+
+// Freeable reports whether removing f can ever free its bytes: an unshared
+// file, or a shared inode whose every link is in the listing.
+func (l *LinkLedger) Freeable(f FileInfo) bool {
+	return !f.Shared || l.listed[f.ID] >= f.Nlink
 }
 
 // UniqueSize is the size of files with each hard-linked inode counted once.
@@ -127,8 +134,8 @@ func Trim(ctx context.Context, paths []string, opts TrimOptions) (TrimResult, er
 	if remainingSize > targetSize {
 		var remaining []FileInfo
 		for _, f := range files {
-			if f.ModTime.Before(cutoff) {
-				continue // already marked
+			if f.ModTime.Before(cutoff) || !planned.Freeable(f) {
+				continue // already marked, or removing it frees nothing
 			}
 			remaining = append(remaining, f)
 		}
