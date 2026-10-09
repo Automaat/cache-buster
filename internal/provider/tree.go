@@ -309,8 +309,8 @@ func measureEntry(ctx context.Context, dir string, group int) (u treeUnit, unrea
 		return treeUnit{}, 0, false, err
 	}
 	u = treeUnit{path: dir, modTime: info.ModTime(), group: group, isTree: true}
+	u.size = cache.UniqueSize(listing.Files)
 	for _, f := range listing.Files {
-		u.size += f.Size
 		u.files++
 		if f.ModTime.After(u.modTime) {
 			u.modTime = f.ModTime
