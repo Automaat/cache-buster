@@ -1,4 +1,4 @@
-# cache-buster - Implementation Plan
+# bilgie - Implementation Plan
 
 macOS developer cache manager with size limits.
 
@@ -6,7 +6,7 @@ macOS developer cache manager with size limits.
 
 ## Phase 1: Project Setup
 
-- [x] `go mod init github.com/marcinc/cache-buster`
+- [x] `go mod init github.com/smykla-skalski/bilgie`
 - [x] Add dependencies:
   - `github.com/spf13/cobra`
   - `github.com/spf13/viper`
@@ -14,7 +14,7 @@ macOS developer cache manager with size limits.
   - `github.com/charmbracelet/lipgloss`
 - [x] Create directory structure:
   ```
-  cmd/cache-buster/main.go
+  cmd/bilgie/main.go
   internal/cli/
   internal/config/
   internal/provider/
@@ -43,7 +43,7 @@ macOS developer cache manager with size limits.
 - [x] Implement path expansion (`~`, globs)
 - [x] Load/save YAML config via Viper
 - [x] Create default config with all providers
-- [x] Config location: `~/.config/cache-buster/config.yaml`
+- [x] Config location: `~/.config/bilgie/config.yaml`
 
 ---
 
@@ -61,7 +61,7 @@ macOS developer cache manager with size limits.
 
 ## Phase 4: Status Command
 
-- [x] Implement `cache-buster status` in `internal/cli/status.go`
+- [x] Implement `bilgie status` in `internal/cli/status.go`
 - [x] Table output with lipgloss:
   ```
   │ Provider │ Current │ Max │ Status │
@@ -112,22 +112,22 @@ macOS developer cache manager with size limits.
 
 ## Phase 7: Clean Command
 
-- [x] Implement `cache-buster clean` in `internal/cli/clean.go`
+- [x] Implement `bilgie clean` in `internal/cli/clean.go`
 - [x] Flags:
   - `--all` - non-interactive, all providers
   - `--dry-run` - preview only
   - `--force` - skip confirmation
   - `--quiet` - minimal output
-- [x] Args: specific providers (`cache-buster clean go-build npm`)
+- [x] Args: specific providers (`bilgie clean go-build npm`)
 - [x] Confirmation prompt with stdin reader
 
 ---
 
 ## Phase 8: Config Command
 
-- [x] `cache-buster config show` - display current config
-- [x] `cache-buster config init` - create default config
-- [x] `cache-buster config edit` - open in $EDITOR
+- [x] `bilgie config show` - display current config
+- [x] `bilgie config init` - create default config
+- [x] `bilgie config edit` - open in $EDITOR
 
 ---
 
@@ -151,9 +151,9 @@ macOS developer cache manager with size limits.
 
 ## Verification Checklist
 
-- [ ] `cache-buster status` matches `du -sh` output
-- [ ] `cache-buster clean --dry-run` shows expected files
-- [ ] `cache-buster clean go-build` actually frees space
+- [ ] `bilgie status` matches `du -sh` output
+- [ ] `bilgie clean --dry-run` shows expected files
+- [ ] `bilgie clean go-build` actually frees space
 - [ ] Docker skipped gracefully when not running
 - [ ] Config changes take effect
 

@@ -1175,7 +1175,9 @@ func TestRunGit_ReportsDirtyAndCleanTrees(t *testing.T) {
 	if err != nil {
 		t.Skip("git not installed")
 	}
-	t.Setenv("HOME", t.TempDir())
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
 	repo := t.TempDir()
 	require.NoError(t, exec.Command(gitPath, "init", "-q", repo).Run())

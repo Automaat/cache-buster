@@ -274,6 +274,66 @@ providers:
 	}
 }
 
+func TestLoader_UserProviderNamedLikeAnotherOSBuiltinStillApplies(t *testing.T) {
+	path := savedConfig(t, `version: "1"
+providers:
+  homebrew:
+    enabled: true
+    max_size: 1G
+    paths:
+      - /data/brew-cache
+  gh:
+    enabled: true
+    max_size: 1G
+    clean_cmd: my-gh-cleaner
+  lima:
+    enabled: true
+    max_size: 1G
+`)
+	loader := NewLoader()
+	loader.SetConfigPath(path)
+	loader.SetPlatform(linPlatform)
+	loader.pathsExist = func([]string) bool { return false }
+
+	cfg, err := loader.Load()
+	require.NoError(t, err)
+
+	assert.True(t, cfg.Applies("homebrew"), "own paths make it a custom provider, not the Mac built-in")
+	assert.Equal(t, []string{"/data/brew-cache"}, cfg.Providers["homebrew"].Paths)
+	assert.True(t, cfg.Applies("gh"), "gh is a built-in here; the override merges")
+	assert.True(t, cfg.Applies("lima"))
+
+	win := NewLoader()
+	win.SetConfigPath(path)
+	win.SetPlatform(winPlatform)
+	win.pathsExist = func([]string) bool { return false }
+	wcfg, err := win.Load()
+	require.NoError(t, err)
+	assert.True(t, wcfg.Applies("homebrew"))
+	assert.True(t, wcfg.Applies("gh"), "own clean_cmd makes it custom on Windows")
+	assert.False(t, wcfg.Applies("lima"), "a synced copy of the built-in stays out")
+}
+
+func TestLoader_SyncedCopyOfAMultiOSBuiltinStaysOutElsewhere(t *testing.T) {
+	path := savedConfig(t, `version: "1"
+providers:
+  lima:
+    enabled: true
+    max_size: 1G
+    paths:
+      - ~/.cache/lima
+`)
+	loader := NewLoader()
+	loader.SetConfigPath(path)
+	loader.SetPlatform(winPlatform)
+	loader.pathsExist = func([]string) bool { return false }
+
+	cfg, err := loader.Load()
+	require.NoError(t, err)
+
+	assert.False(t, cfg.Applies("lima"), "the Linux copy of a Mac and Linux built-in is not custom on Windows")
+}
+
 func TestLoader_CustomPathsSurviveOnEveryOS(t *testing.T) {
 	path := savedConfig(t, `version: "1"
 providers:
@@ -453,12 +513,24 @@ func TestTempGlob_EscapesMetacharactersInTempDir(t *testing.T) {
 }
 
 func TestDefaultProvidersFor_NoPathContainsAProtectedEntry(t *testing.T) {
-	for _, p := range []Platform{macPlatform, linPlatform, winPlatform} {
-		for name, prov := range DefaultProvidersFor(p) {
-			for _, path := range prov.Paths {
-				for _, protected := range DefaultProtected() {
-					assert.False(t, strings.HasPrefix(protected+"/", strings.TrimRight(path, "/")+"/"),
-						"%s on %s: %q would be skipped as containing protected %q", name, p.OS, path, protected)
+	xdg := func(p Platform) Platform {
+		p.XDGCacheHome, p.XDGDataHome = filepath.Join(p.Home, ".cache"), filepath.Join(p.Home, ".local", "share")
+		return p
+	}
+	outside := func(p Platform) Platform {
+		p.XDGCacheHome, p.XDGDataHome = "/mnt/cache", "/mnt/data"
+		return p
+	}
+	for _, base := range []Platform{macPlatform, linPlatform, winPlatform} {
+		for _, p := range []Platform{base, xdg(base), outside(base)} {
+			for name, prov := range DefaultProvidersFor(p) {
+				for _, path := range prov.Paths {
+					for _, protected := range DefaultProtected() {
+						assert.False(t, strings.HasPrefix(protected+"/", strings.TrimRight(path, "/")+"/"),
+							"%s on %s: %q would be skipped as containing protected %q", name, p.OS, path, protected)
+						assert.False(t, containsPath(expandForTest(path, p.Home), expandForTest(protected, p.Home)),
+							"%s on %s: expanded %q contains protected %q", name, p.OS, path, protected)
+					}
 				}
 			}
 		}
@@ -622,4 +694,17 @@ func sailGlobs(dirs ...string) []string {
 		out = append(out, filepath.Join(d, "sail*"))
 	}
 	return out
+}
+
+// expandForTest spells a ~/ path below home with slashes and no case.
+func expandForTest(path, home string) string {
+	path = strings.ReplaceAll(path, `\`, "/")
+	if rest, ok := strings.CutPrefix(path, "~/"); ok {
+		path = strings.ReplaceAll(home, `\`, "/") + "/" + rest
+	}
+	return strings.ToLower(strings.TrimRight(path, "/"))
+}
+
+func containsPath(path, inner string) bool {
+	return path == inner || strings.HasPrefix(inner, path+"/")
 }

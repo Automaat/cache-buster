@@ -329,6 +329,7 @@ func TestInstallAgent_PicksTheBackendOfTheOS(t *testing.T) {
 			{"systemctl", "--user", "daemon-reload"},
 			{"systemctl", "--user", "enable", auto.SystemdUnit + ".timer"},
 			{"systemctl", "--user", "restart", auto.SystemdUnit + ".timer"},
+			{"loginctl", "show-user", "501", "--property=Linger", "--value"},
 			{"crontab", "-l"},
 		}, func(home, _ string) string {
 			return filepath.Join(home, ".config", "systemd", "user", auto.SystemdUnit+".timer")

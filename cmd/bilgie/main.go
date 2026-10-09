@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"os"
 
 	"github.com/smykla-skalski/bilgie/internal/appname"
@@ -20,6 +21,7 @@ var rootCmd = &cobra.Command{
 configured level, pumps caches out below it and sweeps hard at the critical level.
 It manages developer caches on macOS, Linux and Windows with configurable size limits.`,
 	Args:              cobra.NoArgs,
+	SilenceErrors:     true,
 	PersistentPreRunE: func(cmd *cobra.Command, _ []string) error { cli.MigrateLegacy(cmd.ErrOrStderr()); return nil },
 	RunE:              runRoot,
 }
@@ -42,9 +44,16 @@ func init() {
 	rootCmd.AddCommand(cli.UninstallAgentCmd)
 }
 
-func main() {
+// execute runs the root command and prints a failure once; cobra's own
+// error line is silenced so it does not repeat.
+func execute(errOut io.Writer) int {
 	if err := rootCmd.Execute(); err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
+		fmt.Fprintln(errOut, "Error:", err)
+		return 1
 	}
+	return 0
+}
+
+func main() {
+	os.Exit(execute(os.Stderr))
 }

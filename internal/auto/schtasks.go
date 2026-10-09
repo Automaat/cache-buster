@@ -21,7 +21,7 @@ func (a Agent) TaskXMLPath() string {
 }
 
 func (a Agent) installTask(ctx context.Context) error {
-	definition, err := RenderTaskXML(a.Exe, a.Interval, a.now().Add(taskStartDelay))
+	definition, err := RenderTaskXML(a.Exe, a.logPath(), a.Interval, a.now().Add(taskStartDelay))
 	if err != nil {
 		return err
 	}
@@ -87,6 +87,14 @@ func (a Agent) uninstallTask(ctx context.Context) (bool, error) {
 	if err != nil {
 		return false, fmt.Errorf("remove task definition: %w", err)
 	}
+	if a.legacy {
+		// A skipped state-dir migration leaves the definition in the old dir.
+		oldRemoved, err := removeIfExists(filepath.Join(a.Home, ".local", "state", legacyAgentName, a.id().task+"-task.xml"))
+		if err != nil {
+			return false, fmt.Errorf("remove task definition: %w", err)
+		}
+		fileRemoved = fileRemoved || oldRemoved
+	}
 	if deleted {
 		fmt.Fprintf(a.Out, "removed task %s\n", a.id().task)
 	}
@@ -117,14 +125,18 @@ func xmlText(s string) string {
 	return esc.String()
 }
 
-// RenderTaskXML builds the Task Scheduler definition that runs `exe tick`
-// every interval from start on, at below-normal priority and only while the
+// RenderTaskXML builds the Task Scheduler definition that runs `exe tick`,
+// through cmd.exe so its output is appended to logPath, every interval from start on, at below-normal priority and only while the
 // user is logged on, so it needs no stored password.
-func RenderTaskXML(exe string, interval time.Duration, start time.Time) (string, error) {
+func RenderTaskXML(exe, logPath string, interval time.Duration, start time.Time) (string, error) {
 	repeat, err := taskDuration(interval)
 	if err != nil {
 		return "", err
 	}
+	if strings.ContainsAny(exe+logPath, "%\"\r\n") {
+		return "", fmt.Errorf("paths must not contain %%, quotes or line breaks")
+	}
+	arguments := `/d /s /c ""` + exe + `" ` + agentCommand + ` >> "` + logPath + `" 2>&1"`
 	return fmt.Sprintf(`<?xml version="1.0" encoding="UTF-16"?>
 <Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
   <RegistrationInfo>
@@ -159,12 +171,12 @@ func RenderTaskXML(exe string, interval time.Duration, start time.Time) (string,
   </Settings>
   <Actions Context="Author">
     <Exec>
-      <Command>%s</Command>
-      <Arguments>tick</Arguments>
+      <Command>cmd.exe</Command>
+      <Arguments>%s</Arguments>
     </Exec>
   </Actions>
 </Task>
-`, agentName, repeat, start.Format("2006-01-02T15:04:05"), xmlText(exe)), nil
+`, agentName, repeat, start.Format("2006-01-02T15:04:05"), xmlText(arguments)), nil
 }
 
 // EncodeTaskXML converts the definition to the UTF-16 little-endian text

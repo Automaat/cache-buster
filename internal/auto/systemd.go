@@ -8,6 +8,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -55,7 +56,7 @@ func (a Agent) installLinux(ctx context.Context) error {
 // unreadable crontab is only a warning: a user barred from cron cannot have
 // installed an entry, and must still be able to uninstall the timer.
 func (a Agent) uninstallLinux(ctx context.Context) (bool, error) {
-	systemdRemoved, systemdErr := a.uninstallSystemd(ctx)
+	systemdRemoved, systemdErr := a.uninstallSystemdEverywhere(ctx)
 	cronRemoved, cronErr := a.uninstallCron(ctx)
 	if cronErr != nil && systemdErr == nil {
 		fmt.Fprintf(a.Out, "warning: could not check the crontab: %v\n", cronErr)
@@ -65,6 +66,24 @@ func (a Agent) uninstallLinux(ctx context.Context) (bool, error) {
 		return false, err
 	}
 	return systemdRemoved || cronRemoved, nil
+}
+
+// uninstallSystemdEverywhere removes the units from the current config dir
+// and from the default ~/.config, which a install made while XDG_CONFIG_HOME
+// pointed elsewhere (or was not exported) used instead.
+func (a Agent) uninstallSystemdEverywhere(ctx context.Context) (bool, error) {
+	removed, err := a.uninstallSystemd(ctx)
+	fallback := filepath.Join(a.Home, ".config")
+	if a.ConfigDir == "" || filepath.Clean(a.ConfigDir) == filepath.Clean(fallback) {
+		return removed, err
+	}
+	other := a
+	other.ConfigDir = fallback
+	if !fileExists(other.TimerPath()) && !fileExists(other.ServicePath()) {
+		return removed, err
+	}
+	otherRemoved, otherErr := other.uninstallSystemd(ctx)
+	return removed || otherRemoved, errors.Join(err, otherErr)
 }
 
 func (a Agent) installSystemd(ctx context.Context) error {
@@ -89,14 +108,35 @@ func (a Agent) installSystemd(ctx context.Context) error {
 	timerUnit := a.id().unit + ".timer"
 	for _, args := range [][]string{{"daemon-reload"}, {"enable", timerUnit}, {"restart", timerUnit}} {
 		if out, err := a.systemctl(ctx, args...); err != nil {
-			return fmt.Errorf("systemctl %s: %w: %s", args[0], err, strings.TrimSpace(string(out)))
+			return fmt.Errorf("systemctl %s: %w: %s%s", args[0], err, strings.TrimSpace(string(out)), a.configDirHint())
 		}
 	}
 	fmt.Fprintf(a.Out, "installed %s and %s (every %s)\n", a.ServicePath(), a.TimerPath(), a.Interval)
+	a.hintLinger(ctx)
 	if _, err := a.uninstallCron(ctx); err != nil {
 		fmt.Fprintf(a.Out, "warning: could not remove an earlier crontab entry: %v\n", err)
 	}
 	return nil
+}
+
+// configDirHint explains a failed enable when the units went to an
+// XDG_CONFIG_HOME that the systemd user manager may not know about.
+func (a Agent) configDirHint() string {
+	if a.ConfigDir == "" || filepath.Clean(a.ConfigDir) == filepath.Clean(filepath.Join(a.Home, ".config")) {
+		return ""
+	}
+	return fmt.Sprintf("\nhint: the units are in %s because XDG_CONFIG_HOME is set here; "+
+		"the systemd user manager only sees it when it is set in its environment "+
+		"(for example in ~/.config/environment.d), so unset XDG_CONFIG_HOME for this command "+
+		"to install into ~/.config instead", a.unitDir())
+}
+
+// hintLinger tells the user when the timer stops with the last login session.
+func (a Agent) hintLinger(ctx context.Context) {
+	out, err := a.Exec(ctx, "loginctl", "show-user", strconv.Itoa(a.UID), "--property=Linger", "--value")
+	if err == nil && strings.TrimSpace(string(out)) == "no" {
+		fmt.Fprintln(a.Out, "note: the timer only runs while you are logged in; run `loginctl enable-linger $USER` to keep it running after logout")
+	}
 }
 
 // disableTimer stops and disables the timer. A timer that does not exist is

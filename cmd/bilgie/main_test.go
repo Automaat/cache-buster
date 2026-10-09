@@ -2,8 +2,10 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/spf13/cobra"
@@ -46,4 +48,27 @@ func TestRootCmd_MigratesLegacyDirsBeforeASubcommandRuns(t *testing.T) {
 	assert.True(t, seenNewState, "state dir must be migrated before the subcommand runs")
 	assert.False(t, seenOldState)
 	assert.Contains(t, errOut.String(), "migrated "+oldState+" to "+newState)
+}
+
+func TestExecute_PrintsAFailureOnce(t *testing.T) {
+	probe := &cobra.Command{
+		Use:  "probe-fail",
+		RunE: func(*cobra.Command, []string) error { return errors.New("boom") },
+	}
+	rootCmd.AddCommand(probe)
+	var errOut bytes.Buffer
+	rootCmd.SetErr(&errOut)
+	rootCmd.SetOut(&errOut)
+	rootCmd.SetArgs([]string{"probe-fail"})
+	t.Cleanup(func() {
+		rootCmd.RemoveCommand(probe)
+		rootCmd.SetErr(nil)
+		rootCmd.SetOut(nil)
+		rootCmd.SetArgs(nil)
+	})
+
+	code := execute(&errOut)
+
+	assert.Equal(t, 1, code)
+	assert.Equal(t, 1, strings.Count(errOut.String(), "boom"), errOut.String())
 }

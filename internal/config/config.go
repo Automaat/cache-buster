@@ -21,9 +21,13 @@ type Config struct {
 	Auto      Auto                `mapstructure:"auto" yaml:"auto"`
 	// Protected lists paths auto never deletes and status reports for a human.
 	// User entries are added to the built-in ones, never replace them.
+	// Surrounding whitespace on an entry is trimmed on load; see MergeProtected.
 	Protected []string `mapstructure:"protected" yaml:"protected,omitempty"`
 
 	goos string
+	// custom names user providers that reuse the name of a built-in that
+	// belongs to another OS but define their own paths or command.
+	custom []string
 }
 
 // Applies reports whether the named provider applies on the OS this config
@@ -34,7 +38,7 @@ func (c *Config) Applies(name string) bool {
 	if goos == "" {
 		goos = runtime.GOOS
 	}
-	return AppliesOn(name, goos)
+	return AppliesOn(name, goos) || slices.Contains(c.custom, name)
 }
 
 // DefaultProtected returns the built-in protected paths. Each is an exact
@@ -46,16 +50,31 @@ func DefaultProtected() []string {
 }
 
 // MergeProtected returns the built-in protected paths followed by the extra
-// ones, without duplicates.
+// ones. Entries are trimmed of surrounding whitespace before they are
+// validated, so " /data/x " loads as "/data/x" and a blank entry is dropped.
+// An entry that differs from an earlier one only by letter case or by the
+// /System/Volumes/Data firmlink prefix is dropped: protection already
+// compares case-insensitively and through the firmlink, so the twin adds
+// nothing and only shows up twice in status.
 func MergeProtected(extra []string) []string {
 	out := DefaultProtected()
+	seen := make(map[string]bool, len(out)+len(extra))
+	for _, p := range out {
+		seen[protectedKey(p)] = true
+	}
 	for _, p := range extra {
 		p = strings.TrimSpace(p)
-		if p != "" && !slices.Contains(out, p) {
-			out = append(out, p)
+		if p == "" || seen[protectedKey(p)] {
+			continue
 		}
+		seen[protectedKey(p)] = true
+		out = append(out, p)
 	}
 	return out
+}
+
+func protectedKey(p string) string {
+	return strings.ToLower(strings.TrimRight(stripDataAlias(strings.ReplaceAll(p, `\`, "/")), "/"))
 }
 
 // Auto configures the unattended tick and auto commands and the scheduled agent.

@@ -326,6 +326,13 @@ func TestLoader_ProtectedIsUnionWithDefaults(t *testing.T) {
 		{"absent", "version: \"1\"\n", DefaultProtected(), nil},
 		{"empty list keeps defaults", "version: \"1\"\nprotected: []\n", DefaultProtected(), nil},
 		{"user entries added", "version: \"1\"\nprotected:\n  - ~/keep\n  - ~/Downloads\n", append(DefaultProtected(), "~/keep"), nil},
+		{"surrounding whitespace trimmed", "version: \"1\"\nprotected:\n  - \" /data/x\"\n  - \"/data/y \"\n",
+			append(DefaultProtected(), "/data/x", "/data/y"), nil},
+		{"blank entry dropped", "version: \"1\"\nprotected:\n  - \"\"\n  - \"  \"\n", DefaultProtected(), nil},
+		{"case twin collapsed", "version: \"1\"\nprotected:\n  - /data/x\n  - /Data/X\n  - ~/downloads\n",
+			append(DefaultProtected(), "/data/x"), nil},
+		{"firmlink twin collapsed", "version: \"1\"\nprotected:\n  - /data/x\n  - /System/Volumes/Data/data/x\n",
+			append(DefaultProtected(), "/data/x"), nil},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

@@ -90,8 +90,12 @@ func (l *Loader) Load() (*Config, error) {
 		defaultP, hasDefault := cfg.Providers[name]
 		if !hasDefault {
 			// New provider not in defaults: use as-is; do not auto-enable when `enabled` is omitted.
-			if len(userP.Paths) == 0 {
-				userP.Paths = l.otherOSDefaultPaths(name)
+			foreign := l.otherOSDefaults(name)
+			if len(userP.Paths) == 0 && len(foreign) > 0 {
+				userP.Paths = foreign[0].Paths
+			}
+			if len(foreign) > 0 && !slices.ContainsFunc(foreign, func(b Provider) bool { return !customizesBuiltin(userP, b) }) {
+				cfg.custom = append(cfg.custom, name)
 			}
 			cfg.Providers[name] = userP
 			continue
@@ -351,10 +355,11 @@ func (l *Loader) portableProviders(providers map[string]Provider) map[string]Pro
 	return out
 }
 
-// otherOSDefaultPaths returns the built-in paths of a provider that exists
-// only on another OS. A config saved there omits them, so they are restored
-// to keep the entry valid here.
-func (l *Loader) otherOSDefaultPaths(name string) []string {
+// otherOSDefaults returns the built-in provider of that name on each other
+// OS that has one. A config saved there lists it with its paths omitted; they
+// are restored from the first to keep the entry valid here.
+func (l *Loader) otherOSDefaults(name string) []Provider {
+	var out []Provider
 	for _, goos := range []string{OSDarwin, OSLinux, OSWindows} {
 		if goos == l.platform.OS {
 			continue
@@ -362,8 +367,23 @@ func (l *Loader) otherOSDefaultPaths(name string) []string {
 		p := l.platform
 		p.OS = goos
 		if def, ok := DefaultProvidersFor(p)[name]; ok {
-			return def.Paths
+			out = append(out, def)
 		}
 	}
-	return nil
+	return out
+}
+
+// customizesBuiltin reports whether a user provider that shares its name
+// with a built-in of another OS differs from that built-in, so it is the user's own definition rather than the
+// copy a synced config carries. A copy keeps the built-in's paths and clean
+// command; any other path or command makes it custom, so it runs here
+// instead of being dropped as an entry for a different OS.
+func customizesBuiltin(user, builtin Provider) bool {
+	if user.Type != "" && user.Type != builtin.Type {
+		return true
+	}
+	if user.CleanCmd != "" && user.CleanCmd != builtin.CleanCmd {
+		return true
+	}
+	return !slices.Equal(user.Paths, builtin.Paths)
 }

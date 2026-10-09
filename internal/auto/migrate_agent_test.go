@@ -137,7 +137,8 @@ func TestInstallTask_WritesTwoMinuteRepetitionRunningTick(t *testing.T) {
 	require.NoError(t, err)
 	decoded := decodeUTF16(t, data)
 	assert.Contains(t, decoded, "<Interval>PT2M</Interval>")
-	assert.Contains(t, decoded, "<Arguments>tick</Arguments>")
+	assert.Contains(t, decoded, "<Command>cmd.exe</Command>")
+	assert.Contains(t, decoded, " tick &gt;&gt; ")
 	assert.Contains(t, strings.Join(s.commands(), "\n"), "schtasks /Create /TN "+TaskName+" /XML "+a.TaskXMLPath()+" /F")
 }
 
