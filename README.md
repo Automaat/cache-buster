@@ -46,8 +46,10 @@ Extract it and put `bilgie` (`bilgie.exe` on Windows) on your `PATH`.
 
 The first run of any `bilgie` command moves `~/.config/cache-buster` to `~/.config/bilgie` and
 `~/.local/state/cache-buster` to `~/.local/state/bilgie` (config, run history and the first-run marker),
-and prints one line per move. A new directory that already exists is never overwritten, and a legacy
-directory that cannot be read is skipped with a warning. `install-agent` and `uninstall-agent` also remove
+and prints one line per move. A legacy directory that is a symlink to a directory (home-manager, stow)
+is recreated at the new path with the same target. A new directory that already exists is never
+overwritten: while the legacy directory still holds anything, every command warns that you must move
+what you need by hand and remove it. A legacy directory that cannot be read is skipped with a warning. `install-agent` and `uninstall-agent` also remove
 an agent installed under the old names (launchd label `dev.mskalski.cache-buster`, the `cache-buster`
 systemd unit, crontab tag and Task Scheduler task). Run `bilgie install-agent` once after upgrading; the first
 run after it is a dry-run again.
@@ -403,12 +405,17 @@ moving it. The first run after install is a dry-run on every OS.
 | macOS | launchd agent, loaded with `launchctl bootstrap` (an existing agent is booted out first) | `~/Library/LaunchAgents/dev.mskalski.bilgie.plist` (runs `tick`, `StartInterval` from `auto.tick_interval`, `RunAtLoad`, low priority, a `PATH` with Homebrew, mise, Go, Cargo and Docker) | `~/Library/Logs/bilgie/auto.log` |
 | Linux | systemd user timer | `$XDG_CONFIG_HOME/systemd/user` (default `~/.config/systemd/user`) `bilgie.service` and `bilgie.timer` (runs `tick`; first run a minute after enabling, then `auto.tick_interval` after each run; existing units are rewritten and the timer restarted), enabled with `systemctl --user enable` | `~/.local/state/bilgie/auto.log` |
 | Linux without a systemd user manager | cron | one crontab line tagged `# bilgie` running `tick`; other entries are kept and an earlier line is replaced | `~/.local/state/bilgie/auto.log` |
-| Windows | Task Scheduler task `bilgie`, created with `schtasks /Create /XML` | `~/.local/state/bilgie/bilgie-task.xml` (runs `tick`, repeats every `auto.tick_interval`, below-normal priority, runs only while you are logged on) | none |
+| Windows | Task Scheduler task `bilgie`, created with `schtasks /Create /XML` | `~/.local/state/bilgie/bilgie-task.xml` (runs `tick` through `cmd.exe` so output is appended to the log, repeats every `auto.tick_interval`, below-normal priority, runs only while you are logged on; a console window can flash on each run) | `~/.local/state/bilgie/auto.log` |
 
 Cron fires on fixed minute and hour marks, so the cron fallback only accepts an `auto.tick_interval`
 that divides an hour or a day evenly (1m, 2m, 5m, 10m, 15m, 20m, 30m, 1h) and refuses any other. Installing the systemd timer removes an earlier cron entry and the cron fallback removes earlier systemd units.
 The systemd user timer runs only while your user manager is up; on a headless box run
-`loginctl enable-linger $USER` so it survives logout, otherwise install falls back to cron.
+`loginctl enable-linger $USER` so it survives logout, otherwise install falls back to cron. Install
+prints a note when the timer is installed but linger is off, and when it fell back to cron.
+`uninstall-agent` also removes units installed under the other of `$XDG_CONFIG_HOME` and `~/.config`.
+If `systemctl enable` fails while `XDG_CONFIG_HOME` is set only in your shell, the error says so; unset it for
+the command to install into `~/.config`. `StartInterval` is a 32-bit number of seconds, so launchd rejects a
+`tick_interval` above about 68 years with `interval too long for launchd`.
 `uninstall-agent` removes the job, its definition
 files and the first-run marker, and succeeds when nothing is installed; on Linux it clears both
 the systemd units and the crontab line.
@@ -556,7 +563,9 @@ protected:
   - ~/Documents/important
 ```
 
-Entries must be literal paths, absolute or starting with `~/`: globs, `.`/`..` elements, home, its parents and top-level directories are rejected. They are added to the built-in list (`~/Downloads`,
+Surrounding whitespace on an entry is trimmed and a blank entry is dropped; an entry that differs from an earlier
+one only by letter case or by the `/System/Volumes/Data` firmlink prefix is dropped as a duplicate (protection
+compares both ways already). Entries must be literal paths, absolute or starting with `~/`: globs, `.`/`..` elements, home, its parents and top-level directories are rejected. They are added to the built-in list (`~/Downloads`,
 `~/.local/share/opencode`, `/var/lib/docker/volumes`); removing a built-in entry from the file has no
 effect. `auto` also skips any path inside a git checkout or worktree, any path holding one within 3 levels (see
 the safety rules), and never prunes Docker volumes (Docker Desktop keeps them inside its VM image).

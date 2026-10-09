@@ -77,7 +77,8 @@ func TestDir_NeverOverwritesAnExistingNewDir(t *testing.T) {
 
 	moved, err := Dir(oldDir, newDir)
 
-	require.NoError(t, err)
+	require.ErrorIs(t, err, ErrNewDirExists)
+	assert.ErrorContains(t, err, "by hand")
 	assert.False(t, moved)
 	assert.Equal(t, "new\n", readFile(t, filepath.Join(newDir, "config.yaml")))
 	assert.Equal(t, "old\n", readFile(t, filepath.Join(oldDir, "config.yaml")))
@@ -92,9 +93,90 @@ func TestDir_EmptyExistingNewDirBlocksTheMove(t *testing.T) {
 
 	moved, err := Dir(oldDir, newDir)
 
-	require.NoError(t, err)
+	require.ErrorIs(t, err, ErrNewDirExists)
 	assert.False(t, moved)
 	assert.FileExists(t, filepath.Join(oldDir, "config.yaml"))
+}
+
+func TestDir_EmptyOldDirNextToANewOneIsSilent(t *testing.T) {
+	root := t.TempDir()
+	oldDir := filepath.Join(root, "old")
+	newDir := filepath.Join(root, "new")
+	require.NoError(t, os.Mkdir(oldDir, 0o750))
+	require.NoError(t, os.Mkdir(newDir, 0o750))
+
+	moved, err := Dir(oldDir, newDir)
+
+	require.NoError(t, err)
+	assert.False(t, moved)
+}
+
+func TestLegacy_WarnsEveryRunWhileBothDirsHoldData(t *testing.T) {
+	home := t.TempDir()
+	dirs := Dirs(home)
+	writeFile(t, filepath.Join(dirs[1][0], "runs.jsonl"), "old")
+	writeFile(t, filepath.Join(dirs[1][1], "runs.jsonl"), "new")
+
+	for range 2 {
+		var out bytes.Buffer
+		Legacy(home, &out)
+		assert.Contains(t, out.String(), "warning: not migrating "+dirs[1][0])
+		assert.Contains(t, out.String(), "move what you still need")
+	}
+}
+
+func TestDir_SymlinkedLegacyDirMovesTheLink(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlinks need a privilege on Windows")
+	}
+	root := t.TempDir()
+	target := filepath.Join(root, "store", "cfg")
+	writeFile(t, filepath.Join(target, "config.yaml"), "managed")
+	oldDir := filepath.Join(root, "old")
+	newDir := filepath.Join(root, "dot", "new")
+	require.NoError(t, os.Symlink(filepath.Join("store", "cfg"), oldDir))
+
+	moved, err := Dir(oldDir, newDir)
+
+	require.NoError(t, err)
+	assert.True(t, moved)
+	assert.NoFileExists(t, oldDir)
+	assert.Equal(t, "managed", readFile(t, filepath.Join(newDir, "config.yaml")))
+	got, err := os.Readlink(newDir)
+	require.NoError(t, err)
+	assert.Equal(t, target, got)
+	assert.Equal(t, "managed", readFile(t, filepath.Join(target, "config.yaml")), "target untouched")
+}
+
+func TestDir_DanglingSymlinkIsSkippedWithAnError(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlinks need a privilege on Windows")
+	}
+	root := t.TempDir()
+	oldDir := filepath.Join(root, "old")
+	require.NoError(t, os.Symlink(filepath.Join(root, "gone"), oldDir))
+
+	moved, err := Dir(oldDir, filepath.Join(root, "new"))
+
+	require.Error(t, err)
+	assert.False(t, moved)
+	assert.NoDirExists(t, filepath.Join(root, "new"))
+}
+
+func TestDir_OldDirDeletedMidMigrationIsSilentWithoutANewDir(t *testing.T) {
+	root := t.TempDir()
+	oldDir := filepath.Join(root, "old")
+	writeFile(t, filepath.Join(oldDir, "f"), "1")
+	t.Cleanup(func() { rename = os.Rename })
+	rename = func(string, string) error {
+		require.NoError(t, os.RemoveAll(oldDir))
+		return &os.LinkError{Op: "rename", Old: oldDir, Err: os.ErrNotExist}
+	}
+
+	moved, err := Dir(oldDir, filepath.Join(root, "new"))
+
+	require.NoError(t, err)
+	assert.False(t, moved)
 }
 
 func TestDir_OldPathThatIsAFileIsSkippedWithAnError(t *testing.T) {
@@ -180,16 +262,16 @@ func TestTolerateLostRace(t *testing.T) {
 	newDir := filepath.Join(root, "new")
 	notExist := &os.PathError{Op: "open", Path: oldDir, Err: os.ErrNotExist}
 
-	require.Error(t, tolerateLostRace(notExist, oldDir, newDir), "old and new both missing")
+	require.NoError(t, tolerateLostRace(notExist, oldDir), "old deleted mid-migration, new absent")
 
 	require.NoError(t, os.Mkdir(newDir, 0o750))
-	require.NoError(t, tolerateLostRace(notExist, oldDir, newDir), "old moved, new present")
+	require.NoError(t, tolerateLostRace(notExist, oldDir), "old moved, new present")
 
 	require.NoError(t, os.Mkdir(oldDir, 0o750))
-	require.Error(t, tolerateLostRace(notExist, oldDir, newDir), "old still present")
+	require.Error(t, tolerateLostRace(notExist, oldDir), "old still present")
 
 	require.NoError(t, os.Remove(oldDir))
-	assert.Error(t, tolerateLostRace(os.ErrPermission, oldDir, newDir), "other errors pass through")
+	assert.Error(t, tolerateLostRace(os.ErrPermission, oldDir), "other errors pass through")
 }
 
 func TestDir_CreatesMissingParentOfTheNewDir(t *testing.T) {

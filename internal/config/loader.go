@@ -90,8 +90,12 @@ func (l *Loader) Load() (*Config, error) {
 		defaultP, hasDefault := cfg.Providers[name]
 		if !hasDefault {
 			// New provider not in defaults: use as-is; do not auto-enable when `enabled` is omitted.
+			foreign, isForeign := l.otherOSDefault(name)
 			if len(userP.Paths) == 0 {
-				userP.Paths = l.otherOSDefaultPaths(name)
+				userP.Paths = foreign.Paths
+			}
+			if isForeign && customizesBuiltin(userP, foreign) {
+				cfg.custom = append(cfg.custom, name)
 			}
 			cfg.Providers[name] = userP
 			continue
@@ -351,10 +355,10 @@ func (l *Loader) portableProviders(providers map[string]Provider) map[string]Pro
 	return out
 }
 
-// otherOSDefaultPaths returns the built-in paths of a provider that exists
-// only on another OS. A config saved there omits them, so they are restored
+// otherOSDefault returns the built-in provider of that name on another OS.
+// A config saved there lists it with its paths omitted; they are restored
 // to keep the entry valid here.
-func (l *Loader) otherOSDefaultPaths(name string) []string {
+func (l *Loader) otherOSDefault(name string) (Provider, bool) {
 	for _, goos := range []string{OSDarwin, OSLinux, OSWindows} {
 		if goos == l.platform.OS {
 			continue
@@ -362,8 +366,23 @@ func (l *Loader) otherOSDefaultPaths(name string) []string {
 		p := l.platform
 		p.OS = goos
 		if def, ok := DefaultProvidersFor(p)[name]; ok {
-			return def.Paths
+			return def, true
 		}
 	}
-	return nil
+	return Provider{}, false
+}
+
+// customizesBuiltin reports whether a user provider that shares its name
+// with a built-in of another OS is the user's own definition rather than the
+// copy a synced config carries. A copy keeps the built-in's paths and clean
+// command; any other path or command makes it custom, so it runs here
+// instead of being dropped as an entry for a different OS.
+func customizesBuiltin(user, builtin Provider) bool {
+	if user.Type != "" && user.Type != builtin.Type {
+		return true
+	}
+	if user.CleanCmd != "" && user.CleanCmd != builtin.CleanCmd {
+		return true
+	}
+	return !slices.Equal(user.Paths, builtin.Paths)
 }

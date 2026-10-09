@@ -35,13 +35,21 @@
       "customType": "regex",
       "description": "GoReleaser version used by goreleaser-action",
       "managerFilePatterns": [
-        "/^\\.github/workflows/release\\.ya?ml$/"
+        "/^\\.github/workflows/(release|goreleaser)\\.ya?ml$/"
       ],
       "matchStrings": [
         "version: (?<currentValue>v[0-9][^\\s]*)"
       ],
       "depNameTemplate": "goreleaser/goreleaser",
       "datasourceTemplate": "github-releases"
+    }
+  ],
+  "packageRules": [
+    {
+      "description": "Bump the go.mod toolchain and the mise go pin together",
+      "matchManagers": ["gomod", "mise"],
+      "matchDepNames": ["go", "golang"],
+      "groupName": "go toolchain"
     }
   ]
 }

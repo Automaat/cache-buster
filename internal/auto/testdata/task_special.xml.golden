@@ -32,8 +32,8 @@
   </Settings>
   <Actions Context="Author">
     <Exec>
-      <Command>C:\Program Files\a&amp;b\bilgie.exe</Command>
-      <Arguments>tick</Arguments>
+      <Command>cmd.exe</Command>
+      <Arguments>/d /s /c &#34;&#34;C:\Program Files\a&amp;b\bilgie.exe&#34; tick &gt;&gt; &#34;C:\Users\me\.local\state\bilgie\auto.log&#34; 2&gt;&amp;1&#34;</Arguments>
     </Exec>
   </Actions>
 </Task>

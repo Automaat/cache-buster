@@ -6,6 +6,7 @@ import (
 	"encoding/xml"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"os/exec"
 	"path"
@@ -15,6 +16,9 @@ import (
 )
 
 const bootstrapAttempts = 5
+
+// ErrIntervalTooLong reports an interval launchd's 32-bit StartInterval cannot hold.
+var ErrIntervalTooLong = errors.New("interval too long for launchd")
 
 // serviceNotFoundExit is the launchctl exit status for an unknown service.
 const serviceNotFoundExit = 113
@@ -119,7 +123,18 @@ func (a Agent) uninstallLaunchd(ctx context.Context) (bool, error) {
 	if removed {
 		fmt.Fprintf(a.Out, "removed %s\n", a.PlistPath())
 	}
+	if a.legacy {
+		a.removeLegacyLogs()
+	}
 	return removed, nil
+}
+
+// removeLegacyLogs drops the log dir of the pre-rename agent: its auto.log
+// and then the dir, only if nothing else is in it.
+func (a Agent) removeLegacyLogs() {
+	dir := filepath.Join(a.Home, "Library", "Logs", legacyAgentName)
+	_, _ = removeIfExists(filepath.Join(dir, "auto.log"))
+	_ = os.Remove(dir)
 }
 
 // agentPath is the PATH launchd gives the job. launchd carries none of the
@@ -152,6 +167,10 @@ func RenderPlist(exe, home, logPath string, interval time.Duration) ([]byte, err
 	seconds := int64(interval / time.Second)
 	if seconds < 1 {
 		return nil, fmt.Errorf("interval must be at least one second, got %s", interval)
+	}
+	if seconds > math.MaxInt32 {
+		return nil, fmt.Errorf("%w: %s is %d seconds, launchd StartInterval holds at most %d",
+			ErrIntervalTooLong, interval, seconds, math.MaxInt32)
 	}
 
 	entries := []struct{ key, value string }{

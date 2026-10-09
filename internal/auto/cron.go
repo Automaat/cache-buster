@@ -56,7 +56,9 @@ func (a Agent) currentCrontab(ctx context.Context) (string, error) {
 	if err == nil {
 		return string(out), nil
 	}
-	if strings.Contains(strings.ToLower(string(out)), "no crontab") {
+	lower := strings.ToLower(string(out))
+	// BusyBox crontab reports a missing file instead of "no crontab for user".
+	if strings.Contains(lower, "no crontab") || strings.Contains(lower, "no such file or directory") {
 		return "", nil
 	}
 	return "", fmt.Errorf("crontab -l: %w: %s", err, strings.TrimSpace(string(out)))
@@ -116,6 +118,7 @@ func (a Agent) installCron(ctx context.Context) error {
 	}
 	a.removeSystemdUnits()
 	fmt.Fprintf(a.Out, "installed a crontab entry (every %s, systemd user manager not available)\n", a.Interval)
+	fmt.Fprintf(a.Out, "to use a systemd timer instead, run `loginctl enable-linger $USER`, log in again and re-run install-agent\n")
 	return nil
 }
 

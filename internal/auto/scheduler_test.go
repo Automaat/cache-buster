@@ -18,6 +18,7 @@ import (
 const (
 	posixExe   = "/usr/local/bin/bilgie"
 	windowsExe = `C:\Users\me\bin\bilgie.exe`
+	windowsLog = `C:\Users\me\.local\state\bilgie\auto.log`
 )
 
 func TestBackendNamesShareOneStem(t *testing.T) {
@@ -162,9 +163,9 @@ func TestRenderCronLine_RejectsIntervalsCronCannotRepeatEvenly(t *testing.T) {
 func TestRenderTaskXML_Golden(t *testing.T) {
 	start := time.Date(2026, 10, 8, 12, 1, 0, 0, time.UTC)
 
-	plain, err := RenderTaskXML(windowsExe, 45*time.Minute, start)
+	plain, err := RenderTaskXML(windowsExe, windowsLog, 45*time.Minute, start)
 	require.NoError(t, err)
-	special, err := RenderTaskXML(`C:\Program Files\a&b\bilgie.exe`, 90*time.Minute, start)
+	special, err := RenderTaskXML(`C:\Program Files\a&b\bilgie.exe`, windowsLog, 90*time.Minute, start)
 	require.NoError(t, err)
 
 	assertGolden(t, "task.xml", plain)
@@ -172,7 +173,7 @@ func TestRenderTaskXML_Golden(t *testing.T) {
 }
 
 func TestRenderTaskXML_RejectsSubMinuteInterval(t *testing.T) {
-	_, err := RenderTaskXML(windowsExe, 30*time.Second, time.Now())
+	_, err := RenderTaskXML(windowsExe, windowsLog, 30*time.Second, time.Now())
 	require.Error(t, err)
 }
 
@@ -220,6 +221,7 @@ func TestSystemdInstall_WritesUnitsAndEnablesTimer(t *testing.T) {
 		"systemctl --user daemon-reload",
 		"systemctl --user enable bilgie.timer",
 		"systemctl --user restart bilgie.timer",
+		"loginctl show-user 501 --property=Linger --value",
 		"crontab -l",
 	}, s.commands())
 	assert.Equal(t, filepath.Join(a.Home, ".config", "systemd", "user", "bilgie.timer"), a.TimerPath())
@@ -580,7 +582,7 @@ func TestTaskInstall_WritesDefinitionAndCreatesTask(t *testing.T) {
 
 func mustTaskXML(t *testing.T, a Agent) string {
 	t.Helper()
-	xmlText, err := RenderTaskXML(a.Exe, a.Interval, a.now().Add(time.Minute))
+	xmlText, err := RenderTaskXML(a.Exe, a.logPath(), a.Interval, a.now().Add(time.Minute))
 	require.NoError(t, err)
 	return xmlText
 }
