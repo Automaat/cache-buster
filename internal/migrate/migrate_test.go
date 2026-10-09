@@ -548,3 +548,31 @@ func TestPendingStep_QuotesPathsLiterally(t *testing.T) {
 
 	assert.Equal(t, `mv '/h/$HOME/it'\''s/old' '/h/`+"`x`"+`/new'`, p.Step())
 }
+
+func TestPendingConfig_EmptyNewConfigDoesNotHideTheLegacyOne(t *testing.T) {
+	home := t.TempDir()
+	dirs := Dirs(home)
+	writeFile(t, filepath.Join(dirs[0][0], "config.yaml"), "real: 1")
+	writeFile(t, filepath.Join(dirs[0][1], "config.yaml"), "")
+
+	assert.NotNil(t, PendingConfig(home))
+}
+
+func TestShouldReport_FutureDatedLockIsStale(t *testing.T) {
+	home := t.TempDir()
+	lock := markerPath(home) + ".lock"
+	writeFile(t, lock, "")
+	future := time.Now().Add(2 * time.Hour)
+	require.NoError(t, os.Chtimes(lock, future, future))
+
+	assert.True(t, ShouldReport(home, "k", "sig"))
+}
+
+func TestResolved_LeavesNoTraceWhenNothingWasReported(t *testing.T) {
+	home := t.TempDir()
+
+	Resolved(home, "k")
+	Legacy(home, &bytes.Buffer{})
+
+	assert.NoDirExists(t, filepath.Join(home, ".cache"))
+}

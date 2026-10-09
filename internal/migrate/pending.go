@@ -19,7 +19,7 @@ type Pending struct {
 
 // PendingConfig reports a legacy config file that has not reached the current
 // config dir. It fails closed: a legacy file that cannot even be stat'ed
-// counts as present, a current one that cannot be stat'ed as missing.
+// counts as present, a current one that cannot be stat'ed, or is empty, as missing.
 func PendingConfig(home string) *Pending {
 	pair := Dirs(home)[0]
 	if !isDir(pair[0]) {
@@ -28,7 +28,8 @@ func PendingConfig(home string) *Pending {
 	if _, err := os.Stat(filepath.Join(pair[0], configFile)); errors.Is(err, os.ErrNotExist) {
 		return nil
 	}
-	if _, err := os.Lstat(filepath.Join(pair[1], configFile)); err == nil {
+	newCfg := filepath.Join(pair[1], configFile)
+	if _, err := os.Lstat(newCfg); err == nil && !emptyFile(newCfg) {
 		return nil
 	}
 	return &Pending{Old: pair[0], New: pair[1]}

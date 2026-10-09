@@ -95,7 +95,7 @@ func lockMarker(home string) (unlock func(), ok bool) {
 			return func() {}, true
 		}
 		info, statErr := os.Stat(path)
-		if statErr != nil || now().Sub(info.ModTime()) < lockStale {
+		if statErr != nil || (now().Sub(info.ModTime()) >= 0 && now().Sub(info.ModTime()) < lockStale) {
 			return nil, false
 		}
 		_ = os.Remove(path)
@@ -105,6 +105,9 @@ func lockMarker(home string) (unlock func(), ok bool) {
 
 // Resolved forgets key once its failure is gone, so a later one is reported at once.
 func Resolved(home, key string) {
+	if _, ok := readMarker(home)[key]; !ok {
+		return
+	}
 	unlock, ok := lockMarker(home)
 	if !ok {
 		return
