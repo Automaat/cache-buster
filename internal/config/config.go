@@ -105,6 +105,9 @@ type Auto struct {
 	Forecast string `mapstructure:"forecast" yaml:"forecast"`
 	// NotifyCooldown is the minimum gap between notifications of one tier (default 3h).
 	NotifyCooldown string `mapstructure:"notify_cooldown" yaml:"notify_cooldown"`
+	// SwapWarn is the swap in use above which doctor warns and the agent
+	// notifies, at most once per notify_cooldown (default 8G, 0 disables).
+	SwapWarn string `mapstructure:"swap_warn" yaml:"swap_warn"`
 }
 
 // Auto defaults.
@@ -121,6 +124,7 @@ const (
 	DefaultAutoCriticalCooldown = "2m"
 	DefaultAutoForecast         = "15m"
 	DefaultAutoNotifyCooldown   = "3h"
+	DefaultAutoSwapWarn         = "8G"
 )
 
 // MinAutoInterval is the shortest accepted agent interval.
@@ -141,6 +145,7 @@ func DefaultAuto() Auto {
 		CriticalCooldown: DefaultAutoCriticalCooldown,
 		Forecast:         DefaultAutoForecast,
 		NotifyCooldown:   DefaultAutoNotifyCooldown,
+		SwapWarn:         DefaultAutoSwapWarn,
 	}
 }
 
@@ -156,6 +161,7 @@ func (a Auto) Resolved() Auto {
 		{&a.MinFreeCap, d.MinFreeCap}, {&a.CriticalFree, d.CriticalFree}, {&a.EmergencyFree, d.EmergencyFree},
 		{&a.Hysteresis, d.Hysteresis}, {&a.LowCooldown, d.LowCooldown},
 		{&a.CriticalCooldown, d.CriticalCooldown}, {&a.Forecast, d.Forecast}, {&a.NotifyCooldown, d.NotifyCooldown},
+		{&a.SwapWarn, d.SwapWarn},
 	} {
 		if strings.TrimSpace(*f.field) == "" {
 			*f.field = f.def
@@ -228,6 +234,7 @@ type Limits struct {
 	CriticalCooldown time.Duration
 	Forecast         time.Duration
 	NotifyCooldown   time.Duration
+	SwapWarn         int64
 }
 
 // Limits parses and checks every setting.
@@ -245,7 +252,7 @@ func (a Auto) Limits() (Limits, error) {
 	}{
 		{&l.MinFree, "min_free", a.MinFree}, {&l.MinFreeCap, "min_free_cap", a.MinFreeCap},
 		{&l.CriticalFree, "critical_free", a.CriticalFree}, {&l.EmergencyFree, "emergency_free", a.EmergencyFree},
-		{&l.Hysteresis, "hysteresis", a.Hysteresis},
+		{&l.Hysteresis, "hysteresis", a.Hysteresis}, {&l.SwapWarn, "swap_warn", a.SwapWarn},
 	} {
 		if *f.out, err = a.bytes(f.name, f.value); err != nil {
 			errs = append(errs, err)

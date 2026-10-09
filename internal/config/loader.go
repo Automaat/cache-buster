@@ -213,6 +213,7 @@ func (l *Loader) mergeAuto(cfg, userCfg *Config) {
 		{"critical_cooldown", &cfg.Auto.CriticalCooldown, userCfg.Auto.CriticalCooldown},
 		{"forecast", &cfg.Auto.Forecast, userCfg.Auto.Forecast},
 		{"notify_cooldown", &cfg.Auto.NotifyCooldown, userCfg.Auto.NotifyCooldown},
+		{"swap_warn", &cfg.Auto.SwapWarn, userCfg.Auto.SwapWarn},
 	} {
 		if l.v.IsSet("auto." + f.key) {
 			*f.dst = f.user

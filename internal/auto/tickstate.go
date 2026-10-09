@@ -37,6 +37,11 @@ type TickState struct {
 	Samples []Sample  `json:"samples"`
 	Free    int64     `json:"free_bytes"`
 	Total   int64     `json:"total_bytes"`
+	// SwapUsed is the swap in use at this tick; SwapNotified is when the
+	// last swap notification went out. The tick owns both, so they stay out
+	// of pass.json, which the pass holder writes under the run lock.
+	SwapUsed     int64     `json:"swap_used_bytes,omitempty"`
+	SwapNotified time.Time `json:"swap_notified,omitzero"`
 }
 
 // NotifyRecord remembers the last notification of one tier.

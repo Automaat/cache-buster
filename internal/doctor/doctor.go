@@ -13,6 +13,7 @@ import (
 
 	"github.com/smykla-skalski/bilgie/internal/auto"
 	"github.com/smykla-skalski/bilgie/internal/config"
+	"github.com/smykla-skalski/bilgie/internal/osshim"
 	"github.com/smykla-skalski/bilgie/internal/provider"
 	"github.com/smykla-skalski/bilgie/pkg/size"
 )
@@ -65,6 +66,7 @@ type Finding struct {
 	Area    string
 	Message string
 	Hint    string
+	Details []string
 	Level   Level
 }
 
@@ -89,6 +91,14 @@ type Input struct {
 	FreeErr error
 
 	FirstRunPending bool
+
+	// MemRead is set when memory was sampled; MemErr says why it could not be.
+	// Families and FamiliesErr are only filled while swap is above the threshold.
+	Mem         osshim.Memory
+	MemRead     bool
+	MemErr      error
+	Families    []auto.Family
+	FamiliesErr error
 
 	Tick auto.TickState
 	Pass auto.PassState
@@ -135,6 +145,7 @@ func Diagnose(in Input) Report {
 	findings = append(findings, cadenceFindings(in)...)
 	findings = append(findings, lastRunFindings(in)...)
 	findings = append(findings, freeSpaceFindings(in)...)
+	findings = append(findings, memoryFindings(in)...)
 	findings = append(findings, configFindings(in)...)
 	findings = append(findings, notifierFinding(in))
 	return Report{Findings: findings}
@@ -445,6 +456,50 @@ func freeSpaceFindings(in Input) []Finding {
 	return out
 }
 
+func memoryFindings(in Input) []Finding {
+	if in.MemErr != nil {
+		return []Finding{{Area: "memory", Level: Note, Message: "cannot read swap and memory: " + in.MemErr.Error()}}
+	}
+	if !in.MemRead {
+		return nil
+	}
+	m := in.Mem
+	var warn int64
+	if in.Cfg != nil {
+		if limits, err := in.Cfg.Auto.Limits(); err == nil {
+			warn = limits.SwapWarn
+		}
+	}
+
+	msg := fmt.Sprintf("swap %s of %s used", size.FormatSize(auto.SwapUsedBytes(m)), size.FormatSize(auto.ClampBytes(m.SwapTotal)))
+	switch {
+	case m.FreePercent >= 0:
+		msg += fmt.Sprintf(", memory free %d%%", m.FreePercent)
+	case m.MemTotal > 0:
+		msg += fmt.Sprintf(", %s of %s RAM available", size.FormatSize(auto.ClampBytes(m.MemAvailable)), size.FormatSize(auto.ClampBytes(m.MemTotal)))
+	}
+	f := Finding{Area: "memory", Message: msg}
+	if !auto.SwapHigh(m, warn) {
+		return []Finding{f}
+	}
+
+	f.Level = Warn
+	f.Message += fmt.Sprintf(" (warning above %s)", size.FormatSize(warn))
+	f.Hint = "quit or restart the largest memory users; bilgie only reports and never kills processes. Swap grows on the same disk as free space"
+	switch {
+	case in.FamiliesErr != nil:
+		f.Details = []string{"cannot list processes: " + in.FamiliesErr.Error()}
+	case len(in.Families) == 0:
+		f.Details = []string{"no process family with many copies or orphans found; check Activity Monitor or top for the largest memory users"}
+	default:
+		f.Details = append(f.Details, "largest process families:")
+		for _, fam := range in.Families {
+			f.Details = append(f.Details, "  "+fam.String())
+		}
+	}
+	return []Finding{f}
+}
+
 func percent(fs auto.FreeSpace) float64 {
 	if fs.Total <= 0 {
 		return 0
@@ -660,6 +715,11 @@ func notifierHint(goos, program string) string {
 func (r Report) Write(w io.Writer) {
 	for _, f := range r.Findings {
 		fmt.Fprintf(w, "[%-4s] %s: %s\n", f.Level, f.Area, f.Message)
+		if f.Level >= Warn {
+			for _, d := range f.Details {
+				fmt.Fprintf(w, "       %s\n", d)
+			}
+		}
 		if f.Hint != "" && f.Level >= Warn {
 			fmt.Fprintf(w, "       what to do: %s\n", f.Hint)
 		}

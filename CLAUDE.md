@@ -12,10 +12,10 @@ internal/
   auto/               - Free-space tiers, tick decision (cooldowns, hysteresis, forecast), auto run, per-OS scheduler (launchd, systemd/cron, schtasks), notifiers, first-run marker
   cli/                - Cobra command implementations (status, clean, config, tick, auto, history, doctor, install-agent)
   report/             - Concise per-provider summaries (text and JSON summary objects) for clean and auto
-  doctor/             - Pure health checks behind `bilgie doctor` (agent, last run, free-space trend, config, notifier)
+  doctor/             - Pure health checks behind `bilgie doctor` (agent, last run, free-space trend, swap and memory, config, notifier)
   config/             - Config loading, defaults, validation
   migrate/            - First-run move of ~/.config and ~/.local/state dirs from the legacy name
-  osshim/             - Per-OS shims (lock, process list, kill tree, open files, free space)
+  osshim/             - Per-OS shims (lock, process list, kill tree, open files, free space, memory and swap)
   provider/           - Provider interface + implementations (command, file, docker)
 pkg/size/             - Human-readable size parsing/formatting
 ```

@@ -68,6 +68,9 @@ func TestAuto_Validate(t *testing.T) {
 		{"bad critical cooldown", Auto{CriticalCooldown: "later"}, "critical_cooldown"},
 		{"bad forecast", Auto{Forecast: "soon"}, "forecast"},
 		{"bad notify cooldown", Auto{NotifyCooldown: "later"}, "notify_cooldown"},
+		{"bad swap warn", Auto{SwapWarn: "lots"}, "swap_warn"},
+		{"negative swap warn", Auto{SwapWarn: "-1G"}, "swap_warn"},
+		{"swap warn zero disables", Auto{SwapWarn: "0"}, ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -126,6 +129,7 @@ func TestAuto_DefaultsMatchTheDocumentedValues(t *testing.T) {
 	assert.Equal(t, int64(10)<<30, l.CriticalFree)
 	assert.Equal(t, int64(5)<<30, l.EmergencyFree)
 	assert.Equal(t, int64(2)<<30, l.Hysteresis)
+	assert.Equal(t, int64(8)<<30, l.SwapWarn)
 	assert.InDelta(t, 5.0, l.MinFreePct, 0)
 }
 
@@ -150,4 +154,24 @@ func TestAuto_NewFieldsOverrideOneByOne(t *testing.T) {
 
 func TestAuto_ZeroValueResolvesEveryField(t *testing.T) {
 	assert.Equal(t, DefaultAuto().Resolved(), Auto{MinFreePct: DefaultAutoMinFreePct}.Resolved())
+}
+
+func TestAuto_SwapWarnOverride(t *testing.T) {
+	cfg, err := loaderWith(t, "auto:\n  swap_warn: 2G\n").Load()
+	require.NoError(t, err)
+	assert.Equal(t, "2G", cfg.Auto.SwapWarn)
+
+	l, err := cfg.Auto.Limits()
+	require.NoError(t, err)
+	assert.Equal(t, int64(2)<<30, l.SwapWarn)
+	assert.Equal(t, "30G", cfg.Auto.MinFree)
+}
+
+func TestAuto_SwapWarnZeroDisables(t *testing.T) {
+	cfg, err := loaderWith(t, "auto:\n  swap_warn: 0\n").Load()
+	require.NoError(t, err)
+
+	l, err := cfg.Auto.Limits()
+	require.NoError(t, err)
+	assert.Zero(t, l.SwapWarn)
 }

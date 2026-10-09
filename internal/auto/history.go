@@ -34,17 +34,18 @@ type ProviderRecord struct {
 
 // RunRecord is one line of the run log.
 type RunRecord struct {
-	Time       time.Time        `json:"time"`
-	Tier       string           `json:"tier"`
-	Error      string           `json:"error,omitempty"`
-	Providers  []ProviderRecord `json:"providers"`
-	FreeBefore int64            `json:"free_before_bytes"`
-	FreeAfter  int64            `json:"free_after_bytes"`
-	TotalBytes int64            `json:"total_bytes"`
-	FreedBytes int64            `json:"freed_bytes"`
-	DryRun     bool             `json:"dry_run"`
-	Recovered  bool             `json:"recovered"`
-	Notified   bool             `json:"notified"`
+	Time        time.Time        `json:"time"`
+	Tier        string           `json:"tier"`
+	Error       string           `json:"error,omitempty"`
+	Providers   []ProviderRecord `json:"providers"`
+	FreeBefore  int64            `json:"free_before_bytes"`
+	FreeAfter   int64            `json:"free_after_bytes"`
+	TotalBytes  int64            `json:"total_bytes"`
+	FreedBytes  int64            `json:"freed_bytes"`
+	DryRun      bool             `json:"dry_run"`
+	Recovered   bool             `json:"recovered"`
+	Notified    bool             `json:"notified"`
+	SwapUsedMiB int32            `json:"swap_used_mib,omitempty"`
 }
 
 // NewRunRecord summarizes a report. runErr is the error that ended the run

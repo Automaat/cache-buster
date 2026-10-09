@@ -2,7 +2,9 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"time"
 
 	"github.com/smykla-skalski/bilgie/internal/auto"
 	"github.com/smykla-skalski/bilgie/internal/config"
@@ -93,6 +95,8 @@ func runTickWithLoader(ctx context.Context, loader *config.Loader, env autoEnv, 
 	if d.Run {
 		state.Action = auto.ActionPass
 	}
+	state.SwapNotified = tick.SwapNotified
+	env.checkSwap(ctx, &state, limits, now, dryRun)
 	if !dryRun {
 		env.saveTick(state)
 	}
@@ -171,5 +175,36 @@ func (e autoEnv) saveTick(state auto.TickState) {
 func (e autoEnv) explainf(format string, args ...any) {
 	if e.verbose {
 		fmt.Fprintf(e.out, format+"\n", args...)
+	}
+}
+
+// checkSwap records swap in the tick and sends one notification per
+// cooldown while it stays above auto.swap_warn. A swap that cannot be read
+// is skipped: it must never stop the free-space check. A dry-run only reads.
+func (e autoEnv) checkSwap(ctx context.Context, state *auto.TickState, limits config.Limits, now time.Time, dryRun bool) {
+	if e.memory == nil {
+		return
+	}
+	mem, err := e.memory(ctx)
+	if err != nil {
+		e.explainf("tick: swap not read: %v", err)
+		return
+	}
+	state.SwapUsed = auto.SwapUsedBytes(mem)
+	if dryRun {
+		return
+	}
+	notifyCtx, cancel := context.WithTimeout(ctx, auto.NotifyTimeout)
+	defer cancel()
+	sent, err := auto.NotifySwap(notifyCtx, e.notify, mem, limits, state.SwapNotified, now)
+	switch {
+	case errors.Is(err, auto.ErrNotifierUnavailable):
+		fmt.Fprintf(e.out, "notification skipped: %v\n", err)
+		state.SwapNotified = now.UTC()
+	case err != nil:
+		fmt.Fprintf(e.out, "warning: %v\n", err)
+	}
+	if sent {
+		state.SwapNotified = now.UTC()
 	}
 }
